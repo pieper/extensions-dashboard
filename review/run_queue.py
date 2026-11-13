@@ -30,6 +30,7 @@ def main():
             stopped = "time"
             break
         status = key_status()
+        print(f"key usage so far ${status['usage'] or 0:.3f}, limit remaining {status['remaining']}", file=sys.stderr)
         if status["remaining"] is not None and status["remaining"] < budget["reserve_usd"]:
             print(f"Stopping: ${status['remaining']:.2f} left on the OpenRouter key", file=sys.stderr)
             stopped = "budget"

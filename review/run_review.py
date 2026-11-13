@@ -187,6 +187,12 @@ def main():
                         log(f"   cross-examination failed: {e}")
             apply_positions(comparison, positions)
 
+    if len(reviews) < 2:
+        shutil.rmtree(outdir, ignore_errors=True)  # nothing worth publishing; the planner will queue it again
+        errors = "; ".join(f"{r['id']}: {r.get('error', '')[:120]}" for r in meta_reviewers if not r.get("ok"))
+        log(f"   fewer than two reviewers finished ({errors})")
+        sys.exit(3 if budget_hit else 4)
+
     meta = {"extension": item["extension"], "scm_url": item["scm_url"], "revision": item.get("revision"), "commit": commit,
             "panel": args.panel, "pr": item.get("pr"), "source": item.get("source", "catalog"), "owner": item.get("owner"),
             "started": started, "finished": now(), "reviewers": meta_reviewers,

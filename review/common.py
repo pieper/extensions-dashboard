@@ -97,7 +97,7 @@ def chat(model, messages, tools=None, tool_choice=None, max_tokens=12000, temper
             r = http_json(OPENROUTER + "/chat/completions", body, headers=openrouter_headers(), timeout=600)
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")[:500]
-            if e.code == 402:
+            if e.code == 402 or (e.code == 403 and any(w in detail.lower() for w in ("budget", "limit", "credit"))):
                 raise BudgetExhausted(detail)
             if e.code in (408, 429, 500, 502, 503, 504) and attempt < 4:
                 time.sleep(10 * (attempt + 1))

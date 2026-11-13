@@ -108,7 +108,7 @@ def main():
 
     def done(ext, panel, commit=None, within_hours=None):
         for r in index.get(ext, []):
-            if r.get("panel") != panel:
+            if r.get("panel") != panel or not r.get("complete"):
                 continue
             if commit and r.get("commit") == commit:
                 return True
@@ -185,7 +185,7 @@ def main():
                 if cost + est["triage"] <= min(run_cap, daily_allowance):
                     cat = cat if cat is not None else {c["extension"]: c for c in catalog()}
                     core = read_list(os.path.join(HERE, "core_owners.txt")) | read_list(os.path.join(ROOT, "dashboard", "maintainers.txt"))
-                    todo = [c for c in cat.values() if not index.get(c["extension"]) and (c["extension"], "triage") not in failed_recently
+                    todo = [c for c in cat.values() if not any(r.get("complete") for r in index.get(c["extension"], [])) and (c["extension"], "triage") not in failed_recently
                             and not any(q["item"]["extension"] == c["extension"] for q in queue)]
                     todo.sort(key=lambda c: (c["owner"].lower() in core, -(dt.datetime.fromisoformat(c["added"]).timestamp() if c.get("added") else 0)))
                     for c in todo:

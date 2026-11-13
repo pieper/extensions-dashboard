@@ -225,6 +225,9 @@ def main():
             except (ValueError, TypeError, KeyError) as e:
                 print(f"skipping {ext}/{d}: bad meta.json ({e})", file=sys.stderr)
                 continue
+            if sum(r["ok"] for r in meta["reviewers"]) < 2:
+                print(f"skipping {ext}/{d}: fewer than two reviewers finished", file=sys.stderr)
+                continue
             ids = {r["id"] for r in meta["reviewers"]}
             reviews = {}
             for rid in ids:
