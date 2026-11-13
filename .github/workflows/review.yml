@@ -1,0 +1,118 @@
+name: AI reviews
+
+# Multi-model reviews of Slicer extensions through OpenRouter.
+#
+# SECURITY
+# - Extension source is downloaded as an archive and only read by the models through list/read/search
+#   tools. Nothing from an extension is executed, installed or imported.
+# - The OpenRouter key is available only to the "review" job, which has read-only repository access.
+# - The "publish" job can write to this repository and open issues, but never sees the key or the
+#   extension source; it re-validates the review job's output as untrusted data before committing it.
+# - Triggers are schedule and manual dispatch only, so nobody outside the repository can start a run.
+
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+    inputs:
+      extension:
+        description: "Review this extension now (catalog or PR name); empty = normal queue"
+        type: string
+        default: ""
+      panel:
+        description: "Panel for the extension above"
+        type: choice
+        options: [auto, full, triage]
+        default: auto
+
+permissions: {}
+
+concurrency:
+  group: ai-reviews
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      count: ${{ steps.select.outputs.count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: select
+        env:
+          EXTENSION: ${{ inputs.extension }}
+          PANEL: ${{ inputs.panel || 'auto' }}
+        run: |
+          PAGES_URL="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}"
+          python3 -I review/plan.py --out queue.json --dashboard-data "$PAGES_URL/data.json" \
+            ${EXTENSION:+--extension "$EXTENSION" --panel "$PANEL"}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: queue
+          path: queue.json
+
+  review:
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: queue
+      - name: Review
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -I review/run_queue.py --queue queue.json --out out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: reviews
+          path: out
+          if-no-files-found: ignore
+
+  publish:
+    needs: review
+    if: always() && needs.review.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: reviews
+          path: incoming
+      - name: Validate and file the reviews
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PAGES_URL="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}"
+          python3 -I review/publish.py --in incoming --issues --pages-url "$PAGES_URL"
+      - name: Commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUMMARY: ${{ steps.publish.outputs.summary }}
+        run: |
+          git add reviews
+          if git diff --cached --quiet; then echo "Nothing to commit"; exit 0; fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Add AI reviews" -m "$SUMMARY"
+          git push -q
+          gh workflow run dashboard.yml

@@ -1,0 +1,71 @@
+name: Dashboard
+
+# Rebuilds the triage dashboard (GitHub Pages) from the GitHub API and the committed AI reviews.
+# Reads only; never checks out or runs extension code.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Re-check every extension source repository (ignore the cache)"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard.yml"
+
+permissions: {}
+
+concurrency:
+  group: dashboard
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Generate data
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TRIAGE_REPO: ${{ vars.TRIAGE_REPO || 'Slicer/ExtensionsIndex' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          FULL: ${{ inputs.full && '--full' || '' }}
+          DEFAULT_ME: ${{ vars.TRIAGE_DEFAULT_ME }}
+        run: |
+          PAGES_URL="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}"
+          mkdir -p _site
+          cp dashboard/site/* _site/
+          cp -r reviews _site/reviews
+          python3 -I dashboard/generate.py \
+            --repo "$TRIAGE_REPO" --out _site \
+            --previous "$PAGES_URL/data.json" \
+            --reviews reviews/index.json --self-repo "$GITHUB_REPOSITORY" \
+            --run-url "$RUN_URL" \
+            ${DEFAULT_ME:+--default-me "$DEFAULT_ME"} $FULL
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
