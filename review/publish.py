@@ -200,7 +200,8 @@ def main():
                      "models": [r["model"] for r in meta["reviewers"] if r["ok"]]}
             if args.issues and meta["panel"] == "full" and meta["complete"]:
                 try:
-                    entry["issue"] = file_issue(meta, comparison, runs, args.pages_url.rstrip("/"))
+                    # Look through every earlier run, including one of this same commit, so a re-run reuses its issue.
+                    entry["issue"] = file_issue(meta, comparison, index.get(ext, []), args.pages_url.rstrip("/"))
                 except RuntimeError as e:
                     print(f"issue for {ext}: {e}", file=sys.stderr)
             index[ext] = runs + [entry]
