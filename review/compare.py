@@ -134,31 +134,46 @@ def compare(reviews, ws):
                        "unverified": sum(it["unverified"] for it in items), "total": len(items)}}
 
 
+def _median(values, order):
+    ranked = sorted(order.index(v) for v in values)
+    return order[ranked[(len(ranked) - 1) // 2]] if ranked else None  # lower median on ties
+
+
 def apply_positions(comparison, positions):
-    """positions: {reviewer_id: [{item, position, severity, reason}]}. Settles or keeps each dispute."""
+    """positions: {reviewer_id: [{item, real, severity, rating, reason}]}. Summarizes each dispute after re-checking."""
     by_id = {d["id"]: d for d in comparison["dispute_items"]}
     for rid, plist in positions.items():
         for p in plist:
             d = by_id.get(p["item"])
             if d is not None:
                 d.setdefault("positions", {})[rid] = p
+    rating_order = [r for r in RATINGS if r != "unknown"]
     for d in comparison["dispute_items"]:
         ps = list((d.get("positions") or {}).values())
-        agree = sum(p["position"] == "agree" for p in ps)
-        disagree = sum(p["position"] == "disagree" for p in ps)
-        if ps and agree == len(ps):
-            sevs = [SEV_RANK[p["severity"]] for p in ps if p.get("severity")]
-            d["outcome"] = "confirmed by all" if not sevs or max(sevs) - min(sevs) <= 1 else "real, severity disputed"
-        elif ps and disagree == len(ps):
-            d["outcome"] = "rejected by all"
-        elif ps and disagree > len(ps) / 2:
-            d["outcome"] = "mostly rejected"
-        elif ps and agree > len(ps) / 2:
-            d["outcome"] = "mostly confirmed"
+        if not ps:
+            d["outcome"] = "not re-checked"
+            continue
+        if d.get("rating_dispute"):
+            given = [p["rating"] for p in ps if p.get("rating") in rating_order]
+            if given:
+                ranks = [rating_order.index(g) for g in given]
+                settled = max(ranks) - min(ranks) <= 1
+                d["outcome"] = (f"settled: {_median(given, rating_order)}" if settled else "still disputed") + f" ({', '.join(given)})"
+            else:
+                d["outcome"] = "still disputed"
+            continue
+        yes = [p for p in ps if p["real"] == "yes"]
+        no = [p for p in ps if p["real"] == "no"]
+        if len(yes) * 2 > len(ps):
+            sev = _median([p["severity"] or d["severity"] for p in yes], SEVERITIES)
+            d["outcome"] = f"real, {sev} ({len(yes)} of {len(ps)})"
+            d["settled_severity"] = sev
+        elif len(no) * 2 > len(ps):
+            d["outcome"] = f"not a problem ({len(no)} of {len(ps)})"
         else:
             d["outcome"] = "still disputed"
-    still = [d["id"] for d in comparison["dispute_items"] if d.get("outcome") not in ("confirmed by all", "rejected by all")]
-    comparison["counts"]["open_disputes"] = len(still)
+    comparison["counts"]["open_disputes"] = sum(d.get("outcome", "").startswith(("still", "not re-checked"))
+                                                for d in comparison["dispute_items"])
     return comparison
 
 

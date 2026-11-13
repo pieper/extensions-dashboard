@@ -58,8 +58,8 @@ def render_report(meta, reviews, comparison):
             for f in d["findings"]:
                 out += _finding_lines(meta, f)
             for rid, p in (d.get("positions") or {}).items():
-                out.append(f"- {rid} on re-check: **{p['position']}**" + (f" ({p['severity']})" if p.get("severity") else "")
-                           + f": {neutralize(p['reason'])}")
+                verdict = f"rating {p['rating']}" if p.get("rating") else f"real: {p.get('real', '?')}" + (f", {p['severity']}" if p.get("severity") else "")
+                out.append(f"- {rid} on re-check: **{verdict}**: {neutralize(p['reason'])}")
             out.append("")
 
     for title, kinds in (("Findings all reviewers agree on", ("consensus",)),

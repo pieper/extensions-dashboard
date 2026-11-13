@@ -292,24 +292,45 @@ REVIEW_SCHEMA = {
 }
 
 
+def _list(v):
+    return v if isinstance(v, list) else [v] if isinstance(v, str) and v else []
+
+
 def _s(v, n):
     return re.sub(r"\s+\Z", "", str(v if v is not None else ""))[:n]
 
 
+def _maybe_json(v):
+    """Some models send nested objects as JSON text inside tool arguments."""
+    if isinstance(v, str) and v.strip()[:1] in ("[", "{"):
+        try:
+            return json.loads(v)
+        except json.JSONDecodeError:
+            return v
+    return v
+
+
 def normalize_review(r):
     """Coerce a reviewer's submission into the expected shape, dropping anything unexpected."""
+    r = _maybe_json(r)
     if not isinstance(r, dict):
         raise ValueError("review is not an object")
+    r = {k: _maybe_json(v) for k, v in r.items()}
+    if isinstance(r.get("ratings"), list):  # [{"criterion": "safety", "rating": "ok", ...}]
+        r["ratings"] = {x.get("criterion") or x.get("name"): x for x in r["ratings"] if isinstance(x, dict)}
     out = {"purpose": _s(r.get("purpose"), 600), "summary": _s(r.get("summary"), 1500),
            "overall": r.get("overall") if r.get("overall") in OVERALL else "incomplete", "ratings": {}, "findings": [],
-           "not_checked": [_s(x, 300) for x in (r.get("not_checked") or [])[:15] if x],
-           "questions_for_author": [_s(x, 400) for x in (r.get("questions_for_author") or [])[:10] if x]}
+           "not_checked": [_s(x, 300) for x in _list(r.get("not_checked"))[:15] if x],
+           "questions_for_author": [_s(x, 400) for x in _list(r.get("questions_for_author"))[:10] if x]}
     ratings = r.get("ratings") if isinstance(r.get("ratings"), dict) else {}
     for c in CRITERIA:
-        v = ratings.get(c) if isinstance(ratings.get(c), dict) else {}
-        out["ratings"][c] = {"rating": v.get("rating") if v.get("rating") in RATINGS else "unknown",
+        v = _maybe_json(ratings.get(c))
+        v = {"rating": v} if isinstance(v, str) else v if isinstance(v, dict) else {}
+        rating = str(v.get("rating") or "").strip().lower()
+        out["ratings"][c] = {"rating": rating if rating in RATINGS else "unknown",
                              "rationale": _s(v.get("rationale"), 800)}
-    for f in (r.get("findings") or [])[:40]:
+    for f in (r.get("findings") if isinstance(r.get("findings"), list) else [])[:40]:
+        f = _maybe_json(f)
         if not isinstance(f, dict) or not f.get("title"):
             continue
 

@@ -94,9 +94,12 @@ def clean_comparison(c, ids):
         if it.get("outcome"):
             out["outcome"] = s(it["outcome"], 40)
         if isinstance(it.get("positions"), dict):
-            out["positions"] = {k: {"item": s(p.get("item"), 10), "position": p.get("position") if p.get("position") in ("agree", "disagree", "unsure") else "unsure",
-                                    "severity": p.get("severity") if p.get("severity") in SEVERITIES else None, "reason": s(p.get("reason"), 1200)}
+            out["positions"] = {k: {"item": s(p.get("item"), 10), "real": p.get("real") if p.get("real") in ("yes", "no", "unsure") else "unsure",
+                                    "severity": p.get("severity") if p.get("severity") in SEVERITIES else None,
+                                    "rating": p.get("rating") if p.get("rating") in ratings else None, "reason": s(p.get("reason"), 1200)}
                                 for k, p in it["positions"].items() if k in ids and isinstance(p, dict)}
+        if it.get("settled_severity") in SEVERITIES:
+            out["settled_severity"] = it["settled_severity"]
         return out
 
     items = [item(it) for it in (c.get("items") or [])[:200] if isinstance(it, dict)]

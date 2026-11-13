@@ -152,8 +152,9 @@ def main():
             for fut, reviewer in zip(futures, panel["reviewers"]):
                 entry = {"id": reviewer["id"], "model": reviewer["model"], "label": reviewer.get("label", reviewer["id"])}
                 try:
-                    _, (rev, usage) = fut.result()
+                    _, (rev, usage, raw) = fut.result()
                     reviews[reviewer["id"]] = rev
+                    write_json(os.path.join(outdir, "raw", f"{reviewer['id']}.json"), raw)
                     entry.update(ok=True, **usage)
                     write_json(os.path.join(outdir, f"{reviewer['id']}.json"), dict(rev, reviewer=entry))
                 except BudgetExhausted as e:
@@ -174,8 +175,9 @@ def main():
             with concurrent.futures.ThreadPoolExecutor(len(ok)) as ex:
                 for fut in [ex.submit(examine, r) for r in ok]:
                     try:
-                        reviewer, (plist, usage) = fut.result()
+                        reviewer, (plist, usage, raw) = fut.result()
                         positions[reviewer["id"]] = plist
+                        write_json(os.path.join(outdir, "raw", f"{reviewer['id']}-positions.json"), raw)
                         m = next(x for x in meta_reviewers if x["id"] == reviewer["id"])
                         m["cross_exam_cost"] = usage["cost"]
                         m["cost"] = m.get("cost", 0) + usage["cost"]

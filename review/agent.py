@@ -3,8 +3,8 @@
 import json
 import os
 
-from common import (CRITERIA, REVIEW_SCHEMA, SEVERITIES, BudgetExhausted, ModelError, Workspace, chat, clip,
-                    normalize_review, parse_json_text)
+from common import (CRITERIA, RATINGS, REVIEW_SCHEMA, SEVERITIES, BudgetExhausted, ModelError, Workspace, _maybe_json,
+                    chat, clip, normalize_review, parse_json_text)
 
 TOOLS = [
     {"type": "function", "function": {
@@ -30,10 +30,12 @@ POSITIONS = {"type": "function", "function": {
     "name": "submit_positions", "description": "Submit your position on each disputed item. Call it exactly once.",
     "parameters": {"type": "object", "properties": {"positions": {"type": "array", "items": {"type": "object", "properties": {
         "item": {"type": "string", "description": "The item id, e.g. D1."},
-        "position": {"type": "string", "enum": ["agree", "disagree", "unsure"]},
-        "severity": {"type": "string", "enum": SEVERITIES, "description": "The severity you would assign if it is real."},
+        "real": {"type": "string", "enum": ["yes", "no", "unsure"],
+                 "description": "Does the code really behave as the finding says? Judge this separately from severity."},
+        "severity": {"type": "string", "enum": SEVERITIES, "description": "If real: how serious, using the rubric's definitions."},
+        "rating": {"type": "string", "enum": RATINGS, "description": "For a disputed rating: the rating you give that criterion."},
         "reason": {"type": "string", "description": "Cite file and lines you checked."}},
-        "required": ["item", "position", "reason"]}}}, "required": ["positions"]}}}
+        "required": ["item", "real", "reason"]}}}, "required": ["positions"]}}}
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -163,9 +165,10 @@ def review(reviewer, ctx, ws, agents_md, settings, log=print):
                 {"role": "user", "content": cached(model, initial_message(ctx, ws, settings.get("pack_chars", 150000)))}]
     args, usage = run_loop(reviewer["model"], messages, ws, TOOLS + [SUBMIT], "submit_review",
                            settings.get("max_turns", 12), settings.get("max_cost_per_reviewer", 1.0), log)
-    if isinstance(args.get("review"), dict):  # some models wrap the arguments
-        args = args["review"]
-    return normalize_review(args), usage
+    raw = args
+    if isinstance(_maybe_json(args.get("review")), dict):  # some models wrap the arguments
+        args = _maybe_json(args["review"])
+    return normalize_review(args), usage, raw
 
 
 def cross_examine(reviewer, ctx, ws, agents_md, disputes, settings, log=print):
@@ -183,20 +186,25 @@ def cross_examine(reviewer, ctx, ws, agents_md, disputes, settings, log=print):
             lines.append(f"- Ratings for '{d['category']}': " + ", ".join(f"{k}: {v}" for k, v in d["rating_dispute"].items()))
         items.append("\n".join(lines))
     prompt = (f"Several reviewers assessed the extension {ctx['extension']} (commit {ctx['commit'][:12]}) and disagree on the "
-              "items below. Check each against the code with the tools, then call submit_positions. Agree only if you can "
-              "confirm the problem in the code; disagree if the code does not support it; say unsure if you cannot tell.\n\n"
+              "items below. Check each against the code with the tools, then call submit_positions. For each item answer two "
+              "separate questions: is it real (does the code really do this?), and if so how severe is it under the rubric "
+              "(a real behavior can still be minor). For a disputed rating, give your own rating of that criterion.\n\n"
               + "\n\n".join(items))
     messages = [{"role": "system", "content": cached(reviewer["model"], system_prompt(agents_md))}, {"role": "user", "content": prompt}]
     args, usage = run_loop(reviewer["model"], messages, ws, TOOLS + [POSITIONS], "submit_positions",
                            settings.get("cross_exam_turns", 6), settings.get("max_cost_per_reviewer", 1.0) / 2, log)
     out = []
-    for p in (args.get("positions") or [])[:50]:
+    plist = _maybe_json(args.get("positions"))
+    for p in (plist if isinstance(plist, list) else [])[:50]:
+        p = _maybe_json(p)
         if isinstance(p, dict) and p.get("item"):
-            out.append({"item": str(p["item"])[:10],
-                        "position": p.get("position") if p.get("position") in ("agree", "disagree", "unsure") else "unsure",
+            real = str(p.get("real") or p.get("position") or "").lower()
+            real = {"agree": "yes", "disagree": "no"}.get(real, real)
+            out.append({"item": str(p["item"])[:10], "real": real if real in ("yes", "no", "unsure") else "unsure",
                         "severity": p.get("severity") if p.get("severity") in SEVERITIES else None,
+                        "rating": p.get("rating") if p.get("rating") in RATINGS else None,
                         "reason": str(p.get("reason") or "")[:1200]})
-    return out, usage
+    return out, usage, args
 
 
 __all__ = ["review", "cross_examine", "BudgetExhausted", "ModelError", "CRITERIA"]

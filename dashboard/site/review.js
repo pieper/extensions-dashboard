@@ -37,7 +37,7 @@
       h("span", { class: "prnum", text: it.id || "" }),
       h("span", { class: "s-name" }, it.title, h("span", { class: "by", text: it.category + " · raised by " + it.raised_by.map(function (r) { return labels[r] || r; }).join(", ") })),
       h("span", { class: "pill " + sevClass(it.severity), text: it.kind === "rating dispute" ? "ratings differ" : it.severities.join(" / ") || it.severity }),
-      it.outcome ? h("span", { class: "pill " + (/confirmed/.test(it.outcome) ? "warn" : /rejected/.test(it.outcome) ? "ok" : "new"), text: it.outcome }) :
+      it.outcome ? h("span", { class: "pill " + (/^real, (blocking|major)/.test(it.outcome) ? "bad" : /^real/.test(it.outcome) ? "warn" : /^(not a problem|settled)/.test(it.outcome) ? "ok" : "new"), text: it.outcome }) :
         it.unverified ? h("span", { class: "pill bad", text: "quote not found" }) : h("span"),
       h("span")));
     var body = h("div", { class: "body" });
@@ -47,11 +47,12 @@
     (it.findings || []).forEach(function (f) { body.appendChild(finding(f)); });
     var pos = it.positions || {};
     if (Object.keys(pos).length) {
-      body.appendChild(h("h4", { text: "On re-check, each model said" }));
+      body.appendChild(h("h4", { text: "Second round: each model re-checked the code" }));
       body.appendChild(h("ul", { class: "hintlist" }, Object.keys(pos).map(function (k) {
         var p = pos[k];
-        return h("li", { class: p.position === "agree" ? "warn" : p.position === "disagree" ? "" : "info" },
-          h("b", { text: (labels[k] || k) + ": " + p.position + (p.severity ? " (" + p.severity + ")" : "") }), " " + p.reason);
+        var said = p.rating ? "rates it " + p.rating : p.real === "yes" ? "real" + (p.severity ? ", " + p.severity : "") : p.real === "no" ? "not real" : "unsure";
+        return h("li", { class: p.real === "yes" ? "warn" : p.real === "no" ? "" : "info" },
+          h("b", { text: (labels[k] || k) + ": " + said }), " " + p.reason);
       })));
     }
     det.appendChild(body);
