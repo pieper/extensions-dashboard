@@ -143,7 +143,7 @@ def main():
         queue.append({"item": item, "panel": panel})
     else:
         for p in sorted(prs, key=lambda p: -p["pr"]):
-            if done(p["extension"], "full", commit=p["commit"]) or done(p["extension"], "full", within_hours=24):
+            if done(p["extension"], "full", commit=p["commit"]) or done(p["extension"], "full", within_hours=panels["settings"].get("recheck_open_pr_hours", 72)):
                 continue
             if cost + est["full"] <= min(run_cap, month_left):
                 queue.append({"item": p, "panel": "full"})

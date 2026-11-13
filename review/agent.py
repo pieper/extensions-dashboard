@@ -150,9 +150,17 @@ def run_loop(model, messages, ws, tools, final_tool, max_turns, max_cost, log):
     raise ModelError("the model never submitted")
 
 
+def cached(model, text):
+    """Message content that Anthropic models may cache across the turns of one review (others cache implicitly)."""
+    if model.startswith("anthropic/"):
+        return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+    return text
+
+
 def review(reviewer, ctx, ws, agents_md, settings, log=print):
-    messages = [{"role": "system", "content": system_prompt(agents_md)},
-                {"role": "user", "content": initial_message(ctx, ws, settings.get("pack_chars", 150000))}]
+    model = reviewer["model"]
+    messages = [{"role": "system", "content": cached(model, system_prompt(agents_md))},
+                {"role": "user", "content": cached(model, initial_message(ctx, ws, settings.get("pack_chars", 150000)))}]
     args, usage = run_loop(reviewer["model"], messages, ws, TOOLS + [SUBMIT], "submit_review",
                            settings.get("max_turns", 12), settings.get("max_cost_per_reviewer", 1.0), log)
     if isinstance(args.get("review"), dict):  # some models wrap the arguments
@@ -178,7 +186,7 @@ def cross_examine(reviewer, ctx, ws, agents_md, disputes, settings, log=print):
               "items below. Check each against the code with the tools, then call submit_positions. Agree only if you can "
               "confirm the problem in the code; disagree if the code does not support it; say unsure if you cannot tell.\n\n"
               + "\n\n".join(items))
-    messages = [{"role": "system", "content": system_prompt(agents_md)}, {"role": "user", "content": prompt}]
+    messages = [{"role": "system", "content": cached(reviewer["model"], system_prompt(agents_md))}, {"role": "user", "content": prompt}]
     args, usage = run_loop(reviewer["model"], messages, ws, TOOLS + [POSITIONS], "submit_positions",
                            settings.get("cross_exam_turns", 6), settings.get("max_cost_per_reviewer", 1.0) / 2, log)
     out = []

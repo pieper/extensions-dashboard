@@ -85,7 +85,7 @@ def key_status():
     return {"limit": None, "usage": None, "remaining": None}
 
 
-def chat(model, messages, tools=None, tool_choice=None, max_tokens=6000, temperature=0.2):
+def chat(model, messages, tools=None, tool_choice=None, max_tokens=12000, temperature=0.2):
     body = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": temperature,
             "usage": {"include": True}}
     if tools:
