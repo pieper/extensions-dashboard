@@ -1,0 +1,99 @@
+{
+ "purpose": "BabelBrain connects 3D Slicer to a separately installed BabelBrain application for transcranial focused ultrasound simulations. It sends planned trajectories and anatomical inputs to the simulator and loads resulting maps and corrected trajectories for research users.",
+ "summary": "The extension has concrete privacy and data-loss risks in its shared sync and output-file handling. Its BSD-3-Clause license and listed module scripts were inspected, but the catalog branch and external simulator could not be independently verified. 🔴 Do not merge yet: protect patient-related sync data and prevent unintended overwrites and deletion.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected launch, sync JSON creation and cleanup, and output archiving. Default file permissions can expose patient-related metadata to other local users, and deterministic writes and shared-file deletion can destroy earlier data."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected imports, CMake, and searched for package installation and process-wide changes. The extension launches a separately installed executable but does not install Python packages or change the shared environment in the inspected source."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "Both CMake files list the module, helper files, and icon, which exist in the supplied tree; dependencies agree with the supplied catalog entry. The moving main revision, repository accessibility, and actual build cannot be independently verified with the available tools."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "The supplied LICENSE permits source and binary redistribution under BSD-3-Clause conditions. README describes the simulation engine as separately installed rather than bundled or downloaded by the extension."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Inspected the launch and output handling, coordinate checks, and mock-based tests. Coordinate mismatch warnings are presented only after the external process has already started."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README provides requirements, usage and coordinate conventions, a research-only disclaimer, and test instructions; the module includes pose, NIfTI, and mock end-to-end tests."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Sync input JSON can expose patient-related data to other local users",
+   "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+   "line_start": 198,
+   "line_end": 201,
+   "evidence": "        with os.fdopen(fd, \"w\", encoding=\"utf-8\") as f:\n            json.dump(data, f, indent=2)\n        os.chmod(tmpname, 0o644)\n        os.replace(tmpname, fname)",
+   "explanation": "The input contains anatomical and segmentation paths, trajectory names and positions. The explicit 0644 mode makes it readable to other local accounts whenever the home and sync directories are traversable, as is possible with normal directory defaults; users are not asked to consent to this disclosure.",
+   "suggestion": "Create and verify an owner-only sync directory and use owner-only file permissions, while ensuring compatibility with the separately installed simulator.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Repeated runs silently overwrite previous output archives",
+   "file": "BabelBrain/BabelBrain.py",
+   "line_start": 656,
+   "line_end": 660,
+   "evidence": "        src = os.path.join(self.syncPath, SP.OUTPUT_JSON)\n        if self.outputPath and os.path.isfile(src):\n            import shutil\n            dst = os.path.join(self.outputPath, \"+\".join(self.targetNames) + \"_\" + SP.OUTPUT_JSON)\n            shutil.copyfile(src, dst)",
+   "explanation": "Running the same named trajectories again in the same output directory overwrites the previous archived result JSON without warning. This can destroy the prior association of simulation results and corrected trajectories, including the only archived copy after the shared sync file is reset.",
+   "suggestion": "Use a unique per-run archive name or explicitly ask before replacing an existing file.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Exported T1 image can overwrite an existing user file",
+   "file": "BabelBrain/BabelBrain.py",
+   "line_start": 554,
+   "line_end": 558,
+   "evidence": "        if header is None or header[\"affine\"] is None:\n            name = SP.MakeTargetNames([volumeNode.GetName()])[0]\n            fname = os.path.join(outputPath, name + \"_T1w.nii.gz\")\n            slicer.util.exportNode(volumeNode, fname)\n            header = SP.ReadNiftiHeader(fname)",
+   "explanation": "For a modified or non-NIfTI volume, export uses a predictable filename in the chosen output directory without checking whether it already exists. A previous subject's image or another user file with that name can be overwritten just by starting a run.",
+   "suggestion": "Choose a unique export path or obtain explicit confirmation before overwriting, and check export success.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Starting a run deletes shared sync output from another session",
+   "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+   "line_start": 214,
+   "line_end": 218,
+   "evidence": "    os.makedirs(sync_path, exist_ok=True)\n    out = os.path.join(sync_path, OUTPUT_JSON)\n    if os.path.isfile(out):\n        os.remove(out)\n    return os.path.isfile(os.path.join(sync_path, INPUT_JSON))",
+   "explanation": "The default sync directory is shared with BabelBrain/Brainsight, but there is no cross-process ownership or active-session check. Starting this extension while another session is active removes its output JSON and can overwrite its unread input; the other session may lose its results or receive the wrong inputs.",
+   "suggestion": "Coordinate access across processes, refuse or explicitly resolve an active or unconsumed session, and preserve existing sync data before replacing it.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Coordinate mismatch warning appears after the simulator starts",
+   "file": "BabelBrain/BabelBrain.py",
+   "line_start": 368,
+   "line_end": 377,
+   "evidence": "        exe = SP.FindExecutable(self.executableEdit.currentPath.strip())\n        try:\n            with slicer.util.tryWithErrorDisplay(_(\"Failed to start BabelBrain.\"), waitCursor=True):\n                warnings = self.logic.launch(self.trajectorySelector.checkedNodes(),\n                                             self.t1Selector.currentNode(), m2m, outdir, [exe])\n        except Exception:\n            self.updateButtons()\n            return\n        if warnings:\n            slicer.util.warningDisplay(\"\\n\\n\".join(warnings), windowTitle=_(\"BabelBrain\"))",
+   "explanation": "The affine mismatch warning is returned by launch only after it has written the input and started BabelBrain. Users cannot decide whether to correct a potentially misplaced trajectory before the simulator receives it.",
+   "suggestion": "Validate and display actionable warnings before writing the sync input and starting the external process.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No network or shell access: could not resolve catalog branch main or independently verify that the supplied source tree corresponds to commit a3c72bfc7874d413739c4f4dea66b45d1e2ea73e, or inspect the actual PR and CI results.",
+  "Could not run Slicer, build the extension, execute tests, or verify runtime behavior across platforms.",
+  "The separately installed BabelBrain and SimNIBS source, releases, dependencies, and behavior were not available for inspection."
+ ],
+ "questions_for_author": []
+}

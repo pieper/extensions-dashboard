@@ -1,0 +1,633 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Exported T1 image can overwrite an existing user file",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "BabelBrain/BabelBrain.py",
+   "line": 554,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Exported T1 image can overwrite an existing user file",
+     "file": "BabelBrain/BabelBrain.py",
+     "line_start": 554,
+     "line_end": 558,
+     "evidence": "        if header is None or header[\"affine\"] is None:\n            name = SP.MakeTargetNames([volumeNode.GetName()])[0]\n            fname = os.path.join(outputPath, name + \"_T1w.nii.gz\")\n            slicer.util.exportNode(volumeNode, fname)\n            header = SP.ReadNiftiHeader(fname)",
+     "explanation": "For a modified or non-NIfTI volume, export uses a predictable filename in the chosen output directory without checking whether it already exists. A previous subject's image or another user file with that name can be overwritten just by starting a run.",
+     "suggestion": "Choose a unique export path or obtain explicit confirmation before overwriting, and check export success.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BabelBrain/BabelBrain.py",
+      "line": 554
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "mostly confirmed",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "position": "disagree",
+     "severity": "minor",
+     "reason": "BabelBrain.py:554-558 does write `<name>_T1w.nii.gz` without an exists check. But it goes into the output directory the user chose, and the name comes from the volume being processed. It only replaces an earlier export of the same volume, or a file the user put there on purpose. It is only reached when the volume is modified or not NIfTI, and a warning shows the path. This is an ordinary robustness gap, not a concrete path to harm."
+    },
+    "gpt": {
+     "item": "D1",
+     "position": "agree",
+     "severity": "blocking",
+     "reason": "BabelBrain/BabelBrain.py:548-558 uses the original only for an unmodified suitable NIfTI, otherwise exports to a deterministic path with no collision check: 'fname = os.path.join(outputPath, name + \"_T1w.nii.gz\")' followed by 'slicer.util.exportNode(volumeNode, fname)'. The warning is issued only after launch returns (lines 370-377), so an existing file at that path can be overwritten before the user is warned."
+    },
+    "gemini": {
+     "item": "D1",
+     "position": "agree",
+     "severity": "minor",
+     "reason": "In BabelBrain/BabelBrain.py lines 554-558, if the volume node has no NIfTI storage or was modified, it exports the volume to `os.path.join(outputPath, name + \"_T1w.nii.gz\")` using `slicer.util.exportNode(volumeNode, fname)` without checking if `fname` already exists. However, since `outputPath` is the user-selected output directory for the simulation run, this is at most a minor usability/file-management issue rather than a blocking safety issue."
+    }
+   }
+  },
+  {
+   "title": "Repeated runs silently overwrite previous output archives",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "BabelBrain/BabelBrain.py",
+   "line": 656,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Repeated runs silently overwrite previous output archives",
+     "file": "BabelBrain/BabelBrain.py",
+     "line_start": 656,
+     "line_end": 660,
+     "evidence": "        src = os.path.join(self.syncPath, SP.OUTPUT_JSON)\n        if self.outputPath and os.path.isfile(src):\n            import shutil\n            dst = os.path.join(self.outputPath, \"+\".join(self.targetNames) + \"_\" + SP.OUTPUT_JSON)\n            shutil.copyfile(src, dst)",
+     "explanation": "Running the same named trajectories again in the same output directory overwrites the previous archived result JSON without warning. This can destroy the prior association of simulation results and corrected trajectories, including the only archived copy after the shared sync file is reset.",
+     "suggestion": "Use a unique per-run archive name or explicitly ask before replacing an existing file.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BabelBrain/BabelBrain.py",
+      "line": 656
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "mostly confirmed",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "position": "disagree",
+     "severity": "minor",
+     "reason": "BabelBrain.py:654-660 copies the sync output JSON to `<outputPath>/<targets>_BabelBrainOutput.json`. A rerun with the same trajectory names replaces the earlier archive, which is a regeneration of derived results in the user's chosen output folder. It is a minor usability issue, not a safety blocker."
+    },
+    "gpt": {
+     "item": "D2",
+     "position": "agree",
+     "severity": "blocking",
+     "reason": "BabelBrain/BabelBrain.py:654-660 says 'the sync file is reset on every launch' and uses 'dst = os.path.join(self.outputPath, \"+\".join(self.targetNames) + \"_\" + SP.OUTPUT_JSON)' followed by 'shutil.copyfile(src, dst)'. A later run with the same target names and output directory overwrites the archived JSON without checking or asking. Whether another copy exists depends on the user's workflow."
+    },
+    "gemini": {
+     "item": "D2",
+     "position": "agree",
+     "severity": "info",
+     "reason": "In BabelBrain/BabelBrain.py lines 654-660, `archiveOutput()` copies `~/.BabelBrainSync/BabelBrainOutput.json` to `os.path.join(self.outputPath, \"+\".join(self.targetNames) + \"_\" + SP.OUTPUT_JSON)` via `shutil.copyfile(src, dst)`. Running a simulation with the same target names and output directory overwrites the previous archived output JSON, which matches how BabelBrain itself writes simulation outputs in the output directory. This is standard behavior for re-running with the same output directory and target names, or at most a minor/info point, not a blocking safety issue."
+    }
+   }
+  },
+  {
+   "title": "Starting a run deletes shared sync output from another session",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+   "line": 214,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Starting a run deletes shared sync output from another session",
+     "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+     "line_start": 214,
+     "line_end": 218,
+     "evidence": "    os.makedirs(sync_path, exist_ok=True)\n    out = os.path.join(sync_path, OUTPUT_JSON)\n    if os.path.isfile(out):\n        os.remove(out)\n    return os.path.isfile(os.path.join(sync_path, INPUT_JSON))",
+     "explanation": "The default sync directory is shared with BabelBrain/Brainsight, but there is no cross-process ownership or active-session check. Starting this extension while another session is active removes its output JSON and can overwrite its unread input; the other session may lose its results or receive the wrong inputs.",
+     "suggestion": "Coordinate access across processes, refuse or explicitly resolve an active or unconsumed session, and preserve existing sync data before replacing it.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+      "line": 214
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "mostly confirmed",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "position": "disagree",
+     "severity": "minor",
+     "reason": "SyncProtocol.py:208-218 removes only `~/.BabelBrainSync/BabelBrainOutput.json`, which is the extension's own protocol file. Deleting it is intentional so a stale result isn't mistaken for a new one. BabelBrain.py:616-617 logs a warning when an unread input is replaced. Two concurrent sessions would collide, but that follows from the fixed shared-path protocol. It is not data destruction of user files."
+    },
+    "gpt": {
+     "item": "D3",
+     "position": "agree",
+     "severity": "blocking",
+     "reason": "BabelBrain/BabelBrainLib/SyncProtocol.py:39-42 defines a per-home shared sync directory, and lines 214-218 contain 'if os.path.isfile(out):' followed by 'os.remove(out)'. BabelBrain/BabelBrain.py:599-600 checks only 'self.isRunning()', while lines 616-618 prepare the shared directory and replace its input. A second Slicer instance or separate Brainsight session can therefore lose an output or have unread input replaced; the exact downstream outcome depends on timing."
+    },
+    "gemini": {
+     "item": "D3",
+     "position": "agree",
+     "severity": "minor",
+     "reason": "In BabelBrain/BabelBrainLib/SyncProtocol.py lines 39-42 and 208-218, `PrepareSyncDirectory` uses the fixed path `~/.BabelBrainSync` (following the upstream BabelBrain/Brainsight protocol described in lines 4-10) and removes `BabelBrainOutput.json` before writing `BabelBrainInput.json`. While BabelBrainLogic checks `self.process` within the same Slicer instance (BabelBrain/BabelBrain.py lines 599-600), an external BabelBrain/Brainsight session sharing `~/.BabelBrainSync` could have its sync files overwritten if the user starts a second run concurrently. This is a protocol limitation worth noting as minor/info, not a blocking safety vulnerability."
+    }
+   }
+  },
+  {
+   "title": "Sync input JSON can expose patient-related data to other local users",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+   "line": 198,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Sync input JSON can expose patient-related data to other local users",
+     "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+     "line_start": 198,
+     "line_end": 201,
+     "evidence": "        with os.fdopen(fd, \"w\", encoding=\"utf-8\") as f:\n            json.dump(data, f, indent=2)\n        os.chmod(tmpname, 0o644)\n        os.replace(tmpname, fname)",
+     "explanation": "The input contains anatomical and segmentation paths, trajectory names and positions. The explicit 0644 mode makes it readable to other local accounts whenever the home and sync directories are traversable, as is possible with normal directory defaults; users are not asked to consent to this disclosure.",
+     "suggestion": "Create and verify an owner-only sync directory and use owner-only file permissions, while ensuring compatibility with the separately installed simulator.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+      "line": 198
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "mostly confirmed",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "position": "disagree",
+     "severity": "info",
+     "reason": "SyncProtocol.py:200 sets 0o644 on a JSON under the user's home directory. The file holds only file paths, trajectory names and matrices, and BabelBrain consumes and renames it. It stays on the local machine. Home directories are typically not world-traversable, and nothing is sent over a network. This is hardening at most, not a blocking concern."
+    },
+    "gpt": {
+     "item": "D4",
+     "position": "agree",
+     "severity": "blocking",
+     "reason": "BabelBrain/BabelBrainLib/SyncProtocol.py:179-188 includes '\"anatomicalPath\": os.path.abspath(anatomical_path),' and trajectory names and positions; lines 198-201 contain 'os.chmod(tmpname, 0o644)' and 'os.replace(tmpname, fname)'. On POSIX systems, other local users can read the patient-related JSON if the home and sync directories are traversable. Directory permissions and platform affect actual exposure; 0644 explicitly overrides a restrictive umask for the file."
+    },
+    "gemini": {
+     "item": "D4",
+     "position": "agree",
+     "severity": "minor",
+     "reason": "In BabelBrain/BabelBrainLib/SyncProtocol.py lines 196-201, `WriteJSONAtomic` creates a temporary file via `tempfile.mkstemp` (which defaults to 0o600) and then explicitly calls `os.chmod(tmpname, 0o644)` before replacing `fname` in `~/.BabelBrainSync`. On shared multi-user POSIX systems where the user's home directory is world-traversable, `0o644` makes `BabelBrainInput.json` (containing local file paths and target coordinates) world-readable. Removing `os.chmod(tmpname, 0o644)` or using `0o600` (and `0o700` on `.BabelBrainSync`) is a good hardening practice, though minor in severity."
+    }
+   }
+  },
+  {
+   "title": "Coordinate mismatch warning appears after the simulator starts",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "BabelBrain/BabelBrain.py",
+   "line": 368,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Coordinate mismatch warning appears after the simulator starts",
+     "file": "BabelBrain/BabelBrain.py",
+     "line_start": 368,
+     "line_end": 377,
+     "evidence": "        exe = SP.FindExecutable(self.executableEdit.currentPath.strip())\n        try:\n            with slicer.util.tryWithErrorDisplay(_(\"Failed to start BabelBrain.\"), waitCursor=True):\n                warnings = self.logic.launch(self.trajectorySelector.checkedNodes(),\n                                             self.t1Selector.currentNode(), m2m, outdir, [exe])\n        except Exception:\n            self.updateButtons()\n            return\n        if warnings:\n            slicer.util.warningDisplay(\"\\n\\n\".join(warnings), windowTitle=_(\"BabelBrain\"))",
+     "explanation": "The affine mismatch warning is returned by launch only after it has written the input and started BabelBrain. Users cannot decide whether to correct a potentially misplaced trajectory before the simulator receives it.",
+     "suggestion": "Validate and display actionable warnings before writing the sync input and starting the external process.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BabelBrain/BabelBrain.py",
+      "line": 368
+     }
+    }
+   ]
+  },
+  {
+   "title": "Log file handle remains open if module widget is cleaned up while process runs",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "BabelBrain/BabelBrain.py",
+   "line": 588,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Log file handle remains open if module widget is cleaned up while process runs",
+     "file": "BabelBrain/BabelBrain.py",
+     "line_start": 588,
+     "line_end": 588,
+     "evidence": "        if self.process is not None and self.process.poll() is None",
+     "explanation": "`BabelBrainWidget.cleanup()` stops the poll timer and removes scene observers, but does not call `self.logic._closeLog()` if `self.logic` still has an open `_logHandle` when the widget is destroyed or reloaded while BabelBrain is running. A `cleanup` helper on `BabelBrainLogic` (or closing the log handle when cleaning up) would avoid leaving the log file descriptor open.",
+     "suggestion": "Close `self.logic._closeLog()` during `BabelBrainWidget.cleanup()` or in `BabelBrainLogic.__del__`.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Exported T1 image can overwrite an existing user file",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "BabelBrain/BabelBrain.py",
+   "line": 554,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Exported T1 image can overwrite an existing user file",
+     "file": "BabelBrain/BabelBrain.py",
+     "line_start": 554,
+     "line_end": 558,
+     "evidence": "        if header is None or header[\"affine\"] is None:\n            name = SP.MakeTargetNames([volumeNode.GetName()])[0]\n            fname = os.path.join(outputPath, name + \"_T1w.nii.gz\")\n            slicer.util.exportNode(volumeNode, fname)\n            header = SP.ReadNiftiHeader(fname)",
+     "explanation": "For a modified or non-NIfTI volume, export uses a predictable filename in the chosen output directory without checking whether it already exists. A previous subject's image or another user file with that name can be overwritten just by starting a run.",
+     "suggestion": "Choose a unique export path or obtain explicit confirmation before overwriting, and check export success.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BabelBrain/BabelBrain.py",
+      "line": 554
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "mostly confirmed",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "position": "disagree",
+     "severity": "minor",
+     "reason": "BabelBrain.py:554-558 does write `<name>_T1w.nii.gz` without an exists check. But it goes into the output directory the user chose, and the name comes from the volume being processed. It only replaces an earlier export of the same volume, or a file the user put there on purpose. It is only reached when the volume is modified or not NIfTI, and a warning shows the path. This is an ordinary robustness gap, not a concrete path to harm."
+    },
+    "gpt": {
+     "item": "D1",
+     "position": "agree",
+     "severity": "blocking",
+     "reason": "BabelBrain/BabelBrain.py:548-558 uses the original only for an unmodified suitable NIfTI, otherwise exports to a deterministic path with no collision check: 'fname = os.path.join(outputPath, name + \"_T1w.nii.gz\")' followed by 'slicer.util.exportNode(volumeNode, fname)'. The warning is issued only after launch returns (lines 370-377), so an existing file at that path can be overwritten before the user is warned."
+    },
+    "gemini": {
+     "item": "D1",
+     "position": "agree",
+     "severity": "minor",
+     "reason": "In BabelBrain/BabelBrain.py lines 554-558, if the volume node has no NIfTI storage or was modified, it exports the volume to `os.path.join(outputPath, name + \"_T1w.nii.gz\")` using `slicer.util.exportNode(volumeNode, fname)` without checking if `fname` already exists. However, since `outputPath` is the user-selected output directory for the simulation run, this is at most a minor usability/file-management issue rather than a blocking safety issue."
+    }
+   }
+  },
+  {
+   "title": "Repeated runs silently overwrite previous output archives",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "BabelBrain/BabelBrain.py",
+   "line": 656,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Repeated runs silently overwrite previous output archives",
+     "file": "BabelBrain/BabelBrain.py",
+     "line_start": 656,
+     "line_end": 660,
+     "evidence": "        src = os.path.join(self.syncPath, SP.OUTPUT_JSON)\n        if self.outputPath and os.path.isfile(src):\n            import shutil\n            dst = os.path.join(self.outputPath, \"+\".join(self.targetNames) + \"_\" + SP.OUTPUT_JSON)\n            shutil.copyfile(src, dst)",
+     "explanation": "Running the same named trajectories again in the same output directory overwrites the previous archived result JSON without warning. This can destroy the prior association of simulation results and corrected trajectories, including the only archived copy after the shared sync file is reset.",
+     "suggestion": "Use a unique per-run archive name or explicitly ask before replacing an existing file.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BabelBrain/BabelBrain.py",
+      "line": 656
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "mostly confirmed",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "position": "disagree",
+     "severity": "minor",
+     "reason": "BabelBrain.py:654-660 copies the sync output JSON to `<outputPath>/<targets>_BabelBrainOutput.json`. A rerun with the same trajectory names replaces the earlier archive, which is a regeneration of derived results in the user's chosen output folder. It is a minor usability issue, not a safety blocker."
+    },
+    "gpt": {
+     "item": "D2",
+     "position": "agree",
+     "severity": "blocking",
+     "reason": "BabelBrain/BabelBrain.py:654-660 says 'the sync file is reset on every launch' and uses 'dst = os.path.join(self.outputPath, \"+\".join(self.targetNames) + \"_\" + SP.OUTPUT_JSON)' followed by 'shutil.copyfile(src, dst)'. A later run with the same target names and output directory overwrites the archived JSON without checking or asking. Whether another copy exists depends on the user's workflow."
+    },
+    "gemini": {
+     "item": "D2",
+     "position": "agree",
+     "severity": "info",
+     "reason": "In BabelBrain/BabelBrain.py lines 654-660, `archiveOutput()` copies `~/.BabelBrainSync/BabelBrainOutput.json` to `os.path.join(self.outputPath, \"+\".join(self.targetNames) + \"_\" + SP.OUTPUT_JSON)` via `shutil.copyfile(src, dst)`. Running a simulation with the same target names and output directory overwrites the previous archived output JSON, which matches how BabelBrain itself writes simulation outputs in the output directory. This is standard behavior for re-running with the same output directory and target names, or at most a minor/info point, not a blocking safety issue."
+    }
+   }
+  },
+  {
+   "title": "Starting a run deletes shared sync output from another session",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+   "line": 214,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Starting a run deletes shared sync output from another session",
+     "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+     "line_start": 214,
+     "line_end": 218,
+     "evidence": "    os.makedirs(sync_path, exist_ok=True)\n    out = os.path.join(sync_path, OUTPUT_JSON)\n    if os.path.isfile(out):\n        os.remove(out)\n    return os.path.isfile(os.path.join(sync_path, INPUT_JSON))",
+     "explanation": "The default sync directory is shared with BabelBrain/Brainsight, but there is no cross-process ownership or active-session check. Starting this extension while another session is active removes its output JSON and can overwrite its unread input; the other session may lose its results or receive the wrong inputs.",
+     "suggestion": "Coordinate access across processes, refuse or explicitly resolve an active or unconsumed session, and preserve existing sync data before replacing it.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+      "line": 214
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "mostly confirmed",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "position": "disagree",
+     "severity": "minor",
+     "reason": "SyncProtocol.py:208-218 removes only `~/.BabelBrainSync/BabelBrainOutput.json`, which is the extension's own protocol file. Deleting it is intentional so a stale result isn't mistaken for a new one. BabelBrain.py:616-617 logs a warning when an unread input is replaced. Two concurrent sessions would collide, but that follows from the fixed shared-path protocol. It is not data destruction of user files."
+    },
+    "gpt": {
+     "item": "D3",
+     "position": "agree",
+     "severity": "blocking",
+     "reason": "BabelBrain/BabelBrainLib/SyncProtocol.py:39-42 defines a per-home shared sync directory, and lines 214-218 contain 'if os.path.isfile(out):' followed by 'os.remove(out)'. BabelBrain/BabelBrain.py:599-600 checks only 'self.isRunning()', while lines 616-618 prepare the shared directory and replace its input. A second Slicer instance or separate Brainsight session can therefore lose an output or have unread input replaced; the exact downstream outcome depends on timing."
+    },
+    "gemini": {
+     "item": "D3",
+     "position": "agree",
+     "severity": "minor",
+     "reason": "In BabelBrain/BabelBrainLib/SyncProtocol.py lines 39-42 and 208-218, `PrepareSyncDirectory` uses the fixed path `~/.BabelBrainSync` (following the upstream BabelBrain/Brainsight protocol described in lines 4-10) and removes `BabelBrainOutput.json` before writing `BabelBrainInput.json`. While BabelBrainLogic checks `self.process` within the same Slicer instance (BabelBrain/BabelBrain.py lines 599-600), an external BabelBrain/Brainsight session sharing `~/.BabelBrainSync` could have its sync files overwritten if the user starts a second run concurrently. This is a protocol limitation worth noting as minor/info, not a blocking safety vulnerability."
+    }
+   }
+  },
+  {
+   "title": "Sync input JSON can expose patient-related data to other local users",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+   "line": 198,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Sync input JSON can expose patient-related data to other local users",
+     "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+     "line_start": 198,
+     "line_end": 201,
+     "evidence": "        with os.fdopen(fd, \"w\", encoding=\"utf-8\") as f:\n            json.dump(data, f, indent=2)\n        os.chmod(tmpname, 0o644)\n        os.replace(tmpname, fname)",
+     "explanation": "The input contains anatomical and segmentation paths, trajectory names and positions. The explicit 0644 mode makes it readable to other local accounts whenever the home and sync directories are traversable, as is possible with normal directory defaults; users are not asked to consent to this disclosure.",
+     "suggestion": "Create and verify an owner-only sync directory and use owner-only file permissions, while ensuring compatibility with the separately installed simulator.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BabelBrain/BabelBrainLib/SyncProtocol.py",
+      "line": 198
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "mostly confirmed",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "position": "disagree",
+     "severity": "info",
+     "reason": "SyncProtocol.py:200 sets 0o644 on a JSON under the user's home directory. The file holds only file paths, trajectory names and matrices, and BabelBrain consumes and renames it. It stays on the local machine. Home directories are typically not world-traversable, and nothing is sent over a network. This is hardening at most, not a blocking concern."
+    },
+    "gpt": {
+     "item": "D4",
+     "position": "agree",
+     "severity": "blocking",
+     "reason": "BabelBrain/BabelBrainLib/SyncProtocol.py:179-188 includes '\"anatomicalPath\": os.path.abspath(anatomical_path),' and trajectory names and positions; lines 198-201 contain 'os.chmod(tmpname, 0o644)' and 'os.replace(tmpname, fname)'. On POSIX systems, other local users can read the patient-related JSON if the home and sync directories are traversable. Directory permissions and platform affect actual exposure; 0644 explicitly overrides a restrictive umask for the file."
+    },
+    "gemini": {
+     "item": "D4",
+     "position": "agree",
+     "severity": "minor",
+     "reason": "In BabelBrain/BabelBrainLib/SyncProtocol.py lines 196-201, `WriteJSONAtomic` creates a temporary file via `tempfile.mkstemp` (which defaults to 0o600) and then explicitly calls `os.chmod(tmpname, 0o644)` before replacing `fname` in `~/.BabelBrainSync`. On shared multi-user POSIX systems where the user's home directory is world-traversable, `0o644` makes `BabelBrainInput.json` (containing local file paths and target coordinates) world-readable. Removing `os.chmod(tmpname, 0o644)` or using `0o600` (and `0o700` on `.BabelBrainSync`) is a good hardening practice, though minor in severity."
+    }
+   }
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "mostly rejected",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "position": "disagree",
+     "severity": "info",
+     "reason": "I searched BabelBrain for urllib, requests, pip_install, socket, eval, exec, pickle, shell=True and download. There were no matches. BabelBrain.py:628 launches a user-configured executable with a list of args and no shell. Network use and package installation were not found. I read the Python in BabelBrain.py:520-680 and SyncProtocol.py:1-260. I did not read the rest of the module, so the rating is ok and not blocking."
+    },
+    "gpt": {
+     "item": "D5",
+     "position": "agree",
+     "severity": "blocking",
+     "reason": "I support a blocking safety rating, not 'ok': the inspected extension has concrete unintended file-overwrite and local disclosure paths. For example, BabelBrain/BabelBrain.py:659-660 has 'dst = os.path.join(self.outputPath, \"+\".join(self.targetNames) + \"_\" + SP.OUTPUT_JSON)' and 'shutil.copyfile(src, dst)'; BabelBrain/BabelBrainLib/SyncProtocol.py:200 has 'os.chmod(tmpname, 0o644)'. I inspected the module, protocol, build files and README; the separately installed BabelBrain executable and the exact source revision were not independently verified, and no code was run."
+    },
+    "gemini": {
+     "item": "D5",
+     "position": "disagree",
+     "severity": "info",
+     "reason": "Checked all files in the repository (`BabelBrain/BabelBrain.py`, `BabelBrain/BabelBrainLib/SyncProtocol.py`, `CMakeLists.txt`). There is no malicious behavior, telemetry, network communication, unsafe deserialization, or command injection (subprocess is invoked as a list without `shell=True` in `BabelBrain/BabelBrain.py` lines 625-630). The items raised by gpt (D1-D4) are minor local file-handling/permission observations rather than blocking safety vulnerabilities, and the full source code is available and inspected so safety is not `unknown`. The appropriate safety rating is `ok` (or `minor`)."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "no concerns",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 5,
+  "single": 6,
+  "unverified": 1,
+  "total": 6,
+  "open_disputes": 5
+ }
+}
