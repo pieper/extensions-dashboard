@@ -88,6 +88,9 @@ def main():
     ap.add_argument("--dashboard-data", help="data.json of the dashboard (for open PRs)")
     ap.add_argument("--extension", help="Review this extension now (from a PR if one is open, else the catalog)")
     ap.add_argument("--panel", choices=["full", "triage", "auto"], default="auto")
+    ap.add_argument("--drain", action="store_true",
+                    help="Queue everything outstanding (PRs, then the catalog first pass, then escalations); "
+                         "only the OpenRouter key's limit stops the work")
     args = ap.parse_args()
 
     panels = load_json(os.path.join(HERE, "panels.json"))
@@ -130,6 +133,21 @@ def main():
                         "commit": src["head_sha"], "pr": p["number"], "entry": p["entry"], "hints": p.get("hints", [])[:20],
                         "source": "pr", "owner": owner_of(p["entry"]["scm_url"])})
 
+    failed_recently = set()
+    for f in load_json(os.path.join(ROOT, "reviews", "failures.json"), []) or []:
+        try:
+            if (today - dt.datetime.fromisoformat(f["when"].replace("Z", "+00:00"))).days < 3:
+                failed_recently.add((f["extension"], f.get("panel")))
+        except (KeyError, ValueError):
+            pass
+    newest = {}
+    for p in prs:  # an extension can have more than one open PR; review the newest
+        if p["extension"] not in newest or p["pr"] > newest[p["extension"]]["pr"]:
+            newest[p["extension"]] = p
+    prs = [p for p in newest.values() if (p["extension"], "full") not in failed_recently]
+    if args.drain:
+        run_cap = daily_allowance = month_left = float("inf")
+
     queue, cost = [], 0.0
     if args.extension:
         item = next((p for p in prs if p["extension"].lower() == args.extension.lower()), None)
@@ -149,26 +167,32 @@ def main():
                 queue.append({"item": p, "panel": "full"})
                 cost += est["full"]
         cat = None
-        for ext, runs in sorted(index.items()):
-            esc = [r for r in runs if r.get("panel") == "triage" and r.get("escalate")]
-            if esc and not any(r.get("panel") == "full" and r.get("commit") == esc[-1]["commit"] for r in runs):
-                if any(q["item"]["extension"] == ext for q in queue):
-                    continue
-                cat = cat if cat is not None else {c["extension"]: c for c in catalog()}
-                c = cat.get(ext)
-                if c and cost + est["full"] <= min(run_cap, daily_allowance):
-                    queue.append({"item": dict(c, commit=esc[-1]["commit"], hints=[]), "panel": "full"})
-                    cost += est["full"]
-        if cost + est["triage"] <= min(run_cap, daily_allowance):
-            cat = cat if cat is not None else {c["extension"]: c for c in catalog()}
-            core = read_list(os.path.join(HERE, "core_owners.txt")) | read_list(os.path.join(ROOT, "dashboard", "maintainers.txt"))
-            todo = [c for c in cat.values() if not index.get(c["extension"]) and not any(q["item"]["extension"] == c["extension"] for q in queue)]
-            todo.sort(key=lambda c: (c["owner"].lower() in core, -(dt.datetime.fromisoformat(c["added"]).timestamp() if c.get("added") else 0)))
-            for c in todo:
-                if cost + est["triage"] > min(run_cap, daily_allowance):
-                    break
-                queue.append({"item": c, "panel": "triage"})
-                cost += est["triage"]
+        blocks = ["triage", "escalate"] if args.drain else ["escalate", "triage"]
+        for block in blocks:
+            if block == "escalate":
+                for ext, runs in sorted(index.items()):
+                    esc = [r for r in runs if r.get("panel") == "triage" and r.get("escalate")]
+                    if (esc and (ext, "full") not in failed_recently
+                            and not any(r.get("panel") == "full" and r.get("commit") == esc[-1]["commit"] for r in runs)):
+                        if any(q["item"]["extension"] == ext for q in queue):
+                            continue
+                        cat = cat if cat is not None else {c["extension"]: c for c in catalog()}
+                        c = cat.get(ext)
+                        if c and cost + est["full"] <= min(run_cap, daily_allowance):
+                            queue.append({"item": dict(c, commit=esc[-1]["commit"], hints=[]), "panel": "full"})
+                            cost += est["full"]
+            else:
+                if cost + est["triage"] <= min(run_cap, daily_allowance):
+                    cat = cat if cat is not None else {c["extension"]: c for c in catalog()}
+                    core = read_list(os.path.join(HERE, "core_owners.txt")) | read_list(os.path.join(ROOT, "dashboard", "maintainers.txt"))
+                    todo = [c for c in cat.values() if not index.get(c["extension"]) and (c["extension"], "triage") not in failed_recently
+                            and not any(q["item"]["extension"] == c["extension"] for q in queue)]
+                    todo.sort(key=lambda c: (c["owner"].lower() in core, -(dt.datetime.fromisoformat(c["added"]).timestamp() if c.get("added") else 0)))
+                    for c in todo:
+                        if cost + est["triage"] > min(run_cap, daily_allowance):
+                            break
+                        queue.append({"item": c, "panel": "triage"})
+                        cost += est["triage"]
     write_json(args.out, queue)
     print(f"{len(queue)} item(s), estimated ${cost:.2f}: " + ", ".join(f"{q['item']['extension']} ({q['panel']})" for q in queue),
           file=sys.stderr)

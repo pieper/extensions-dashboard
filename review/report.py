@@ -1,4 +1,4 @@
-"""Human-readable Markdown for a review (report.md) and for its GitHub issue."""
+"""Human-readable Markdown for a review: report.md, its GitHub issue, and a draft comment for the maintainer."""
 
 import re
 
@@ -118,8 +118,94 @@ def render_issue(meta, comparison, report_url, dashboard_url):
     if blocking:
         out += ["", "### Agreed serious findings", ""]
         out += [f"- [ ] {neutralize(it['title'])} ({it['severity']}, {it['category']})" for it in blocking]
+    draft = render_pr_comment(meta, comparison, report_url).replace("~~~~", "~~~")
+    out += ["", f"### Draft comment (suggested action: {suggested_action(comparison)})",
+            "Edit as needed and paste it on the pull request; nothing is posted automatically.", "",
+            "~~~~markdown", draft.rstrip(), "~~~~"]
     out += ["", "### To finish this review",
             "Check the items above against the source, comment with what you found, then add one label: "
             "`verdict: ok`, `verdict: concerns` or `verdict: blocking`, and close the issue. "
             "The dashboard shows that label as the maintainer verdict for this extension."]
+    return "\n".join(out) + "\n"
+
+
+SEV_ORDER = ["info", "minor", "major", "blocking"]
+
+
+def _median_sev(sevs):
+    ranks = sorted(SEV_ORDER.index(x) for x in sevs if x in SEV_ORDER)
+    return SEV_ORDER[ranks[(len(ranks) - 1) // 2]] if ranks else "minor"
+
+
+def actionable_findings(comparison, limit=8):
+    """Findings a maintainer would pass on: those most models judged real, plus verified single-model notes.
+
+    Unsettled disputes are left out; the maintainer decides those on the review page.
+    """
+    if not comparison:
+        return []
+    n = len(comparison["reviewers"])
+    picked = []
+    for d in comparison["dispute_items"]:
+        if d.get("settled_severity") and str(d.get("outcome", "")).startswith("real"):
+            picked.append((d["settled_severity"], 0, d))
+    for it in comparison["items"]:
+        if it.get("id") or it["unverified"]:
+            continue
+        verified = any(str((f.get("verification") or {}).get("status", "")).startswith(("verified", "partly")) for f in it["findings"])
+        if not verified:
+            continue
+        if len(it["raised_by"]) * 2 > n or it["kind"] == "consensus":
+            picked.append((_median_sev(it["severities"]), 1, it))
+        elif it["severity"] in ("minor", "major") and it["kind"] == "single":
+            picked.append((it["severity"], 2, it))
+    picked = [p for p in picked if p[0] != "info"]
+    picked.sort(key=lambda p: (-SEV_ORDER.index(p[0]), p[1]))
+    return [(sev, it) for sev, _, it in picked[:limit]]
+
+
+def suggested_action(comparison):
+    found = actionable_findings(comparison)
+    if any(sev == "blocking" for sev, _ in found):
+        return "changes needed"
+    if comparison and comparison["counts"].get("open_disputes"):
+        return "decide disputes first"
+    return "merge with suggestions" if found else "merge"
+
+
+def _finding_line(meta, sev, it):
+    f = next((x for x in it["findings"] if str((x.get("verification") or {}).get("status", "")).startswith("verified")),
+             it["findings"][0] if it["findings"] else {})
+    v = f.get("verification") or {}
+    path, line = v.get("file") or f.get("file"), v.get("line") or f.get("line_start")
+    end = f.get("line_end") if f.get("line_end") and line and f.get("line_end") > line and f.get("line_end") - line < 15 else None
+    url = (meta.get("scm_url") or "").removesuffix(".git").rstrip("/")
+    if path and "github.com/" in url:
+        anchor = f"#L{line}" + (f"-L{end}" if end else "") if line else ""
+        where = f"[`{path}{f':{line}' if line else ''}{f'-{end}' if end else ''}`]({url}/blob/{meta['commit']}/{path}{anchor})"
+    else:
+        where = f"`{path}`" if path else ""
+    text = neutralize(f.get("explanation") or it["title"]).strip()
+    if f.get("suggestion"):
+        text += " " + neutralize(f["suggestion"]).strip()
+    return f"- {where}{': ' if where else ''}{text}"
+
+
+def render_pr_comment(meta, comparison, review_url):
+    """A comment the maintainer can paste on the pull request (or into an issue on the extension's repository)."""
+    models = ", ".join(r.get("label") or r["model"] for r in meta["reviewers"] if r.get("ok"))
+    found = actionable_findings(comparison)
+    blocking = [x for x in found if x[0] == "blocking"]
+    other = [x for x in found if x[0] != "blocking"]
+    out = [f"> *This review was done by AI models ({models}) through the Slicer extensions dashboard, and checked by the "
+           f"maintainer posting it. The extension source was read, not executed. Full review: {review_url}*", "",
+           f"Thanks for {meta['extension']}!"]
+    if blocking:
+        out += ["", "Please fix these before the extension can be merged:", ""]
+        out += [_finding_line(meta, sev, it) for sev, it in blocking]
+    if other:
+        out += ["", "Suggestions for a later update:" if not blocking else "Smaller suggestions:", ""]
+        out += [_finding_line(meta, sev, it) for sev, it in other]
+    if not found:
+        out += ["", "The review found nothing that needs changing."]
     return "\n".join(out) + "\n"

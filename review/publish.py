@@ -18,7 +18,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import CRITERIA, OVERALL, RATINGS, SEVERITIES, load_json, normalize_review, write_json  # noqa: E402
-from report import neutralize, render_issue, render_report  # noqa: E402
+from report import neutralize, render_issue, render_pr_comment, render_report, suggested_action  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REVIEWS = os.path.join(ROOT, "reviews")
@@ -128,8 +128,7 @@ def gh(*args, input=None):
 
 def file_issue(meta, comparison, index_runs, pages_url):
     """Open an issue for a full-panel review, or comment on the extension's open one. Returns the issue number."""
-    dirname = f"{meta['commit'][:12]}-{meta['panel']}"
-    report_url = f"{pages_url}/review.html?ext={meta['extension']}&dir={dirname}"
+    report_url = review_url(pages_url, meta)
     body = render_issue(meta, comparison, report_url, pages_url + "/")
     open_issue = None
     for r in reversed(index_runs):
@@ -150,12 +149,60 @@ def file_issue(meta, comparison, index_runs, pages_url):
     return int(url.rstrip("/").rsplit("/", 1)[1])
 
 
+def review_url(pages_url, meta):
+    return f"{pages_url.rstrip('/')}/review.html?ext={meta['extension']}&dir={meta['commit'][:12]}-{meta['panel']}"
+
+
+def write_reports(dest, meta, reviews, comparison, pages_url):
+    with open(os.path.join(dest, "report.md"), "w") as f:
+        f.write(render_report(meta, reviews, comparison))
+    if comparison:
+        with open(os.path.join(dest, "comment.md"), "w") as f:
+            f.write(render_pr_comment(meta, comparison, review_url(pages_url, meta)))
+
+
+def rebuild(pages_url):
+    """Regenerate report.md and comment.md of every stored review (after a template change)."""
+    index = load_json(os.path.join(REVIEWS, "index.json"), {}) or {}
+    for ext, runs in index.items():
+        for r in runs:
+            dest = os.path.join(REVIEWS, ext, r["dir"])
+            meta = load_json(os.path.join(dest, "meta.json"))
+            if not meta:
+                continue
+            reviews = {x["id"]: load_json(os.path.join(dest, f"{x['id']}.json")) for x in meta["reviewers"]
+                       if os.path.exists(os.path.join(dest, f"{x['id']}.json"))}
+            comparison = load_json(os.path.join(dest, "comparison.json"))
+            write_reports(dest, meta, reviews, comparison, pages_url)
+            r["action"] = suggested_action(comparison) if comparison else None
+    write_json(os.path.join(REVIEWS, "index.json"), dict(sorted(index.items())))
+
+
+def record_failures(indir):
+    """Remember reviews that failed, so the planner can skip them for a while instead of retrying every batch."""
+    raw = load_json(os.path.join(indir, "_failures.json"), []) or []
+    path = os.path.join(REVIEWS, "failures.json")
+    known = load_json(path, []) or []
+    for f in raw[:100]:
+        if isinstance(f, dict) and EXT_RE.match(str(f.get("extension", ""))):
+            known.append({"extension": f["extension"], "panel": f.get("panel") if f.get("panel") in ("full", "triage") else None,
+                          "when": s(f.get("when"), 25), "error": s(f.get("error"), 300)})
+    if raw:
+        write_json(path, known[-500:])
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--in", dest="indir", required=True)
     ap.add_argument("--issues", action="store_true", help="Open or update GitHub issues for full-panel reviews")
     ap.add_argument("--pages-url", default="")
+    ap.add_argument("--rebuild", action="store_true", help="Regenerate report.md and comment.md of all stored reviews")
     args = ap.parse_args()
+    if args.rebuild:
+        rebuild(args.pages_url)
+        return
+    if os.path.isdir(args.indir):
+        record_failures(args.indir)
     index_path = os.path.join(REVIEWS, "index.json")
     index = load_json(index_path, {}) or {}
     if args.issues:
@@ -163,7 +210,9 @@ def main():
             subprocess.run(["gh", "label", "create", name, "--color", color, "--force"], capture_output=True)
     added = []
     for ext in sorted(os.listdir(args.indir)) if os.path.isdir(args.indir) else []:
-        if not EXT_RE.match(ext) or not os.path.isdir(os.path.join(args.indir, ext)):
+        if not os.path.isdir(os.path.join(args.indir, ext)):
+            continue
+        if not EXT_RE.match(ext):
             print(f"skipping unexpected entry {ext!r}", file=sys.stderr)
             continue
         for d in sorted(os.listdir(os.path.join(args.indir, ext))):
@@ -191,13 +240,13 @@ def main():
                 write_json(os.path.join(dest, f"{rid}.json"), rev)
             if comparison:
                 write_json(os.path.join(dest, "comparison.json"), comparison)
-            with open(os.path.join(dest, "report.md"), "w") as f:
-                f.write(render_report(meta, reviews, comparison))
+            write_reports(dest, meta, reviews, comparison, args.pages_url)
             runs = [r for r in index.get(ext, []) if r.get("dir") != d]
             entry = {"dir": d, "commit": meta["commit"], "panel": meta["panel"], "pr": meta["pr"], "source": meta["source"],
                      "owner": meta["owner"], "finished": meta["finished"], "cost": meta["cost"], "counts": meta["counts"],
                      "overall": meta["overall"], "escalate": meta["escalate"], "complete": meta["complete"],
-                     "models": [r["model"] for r in meta["reviewers"] if r["ok"]]}
+                     "models": [r["model"] for r in meta["reviewers"] if r["ok"]],
+                     "action": suggested_action(comparison) if comparison else None}
             if args.issues and meta["panel"] == "full" and meta["complete"]:
                 try:
                     # Look through every earlier run, including one of this same commit, so a re-run reuses its issue.

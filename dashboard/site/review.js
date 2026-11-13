@@ -59,6 +59,32 @@
     return det;
   }
 
+  var ACTION_CLASS = { "merge": "ok", "merge with suggestions": "ok", "decide disputes first": "new", "changes needed": "bad" };
+
+  // The draft comment: editable, copied with one click, then pasted on the PR (or an issue on the extension's repository).
+  function renderDraft(text, action, summary) {
+    var sec = document.getElementById("draft-section");
+    if (!text) { U.fill(sec); return; }
+    var box = h("textarea", { class: "draft", id: "draft-text", rows: String(Math.min(24, text.split("\n").length + 2)), spellcheck: "true" });
+    box.value = text;
+    var status = h("span", { class: "by", role: "status" });
+    var copy = h("button", { class: "fbtn on", type: "button", text: "Copy comment", onclick: function () {
+      var done = function () { status.textContent = "Copied. Paste it on GitHub."; };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(box.value).then(done, function () { box.select(); status.textContent = "Select-all is done; copy with Ctrl/Cmd+C."; });
+      } else { box.select(); status.textContent = "Copy with Ctrl/Cmd+C."; }
+    } });
+    var repo = (meta.scm_url || "").replace(/\.git$/, "").replace(/\/$/, "");
+    var target = meta.pr ? a("https://github.com/Slicer/ExtensionsIndex/pull/" + meta.pr, "Open PR #" + meta.pr, "fbtn") :
+      /^https:\/\/github\.com\//.test(repo) ? a(repo + "/issues/new?title=" + encodeURIComponent("Suggestions from a Slicer extension review") +
+        (text.length < 6000 ? "&body=" + encodeURIComponent(text) : ""), "Open an issue on " + repo.replace("https://github.com/", ""), "fbtn") : null;
+    U.fill(sec,
+      h("h2", null, "Draft comment ", action ? h("span", { class: "pill " + (ACTION_CLASS[action] || "muted"), text: "suggested: " + action }) : null),
+      h("p", { class: "by", text: "Built from the findings most models judged real; unsettled disagreements are left out for you to decide. Edit here, copy, and paste it on GitHub. Nothing is posted automatically." }),
+      box,
+      h("div", { class: "fbtns" }, copy, target, summary && summary.issue ? a(summary.issue.url, "Review issue (set the verdict label)", "fbtn") : null, status));
+  }
+
   function render(comparison, reviews, summary) {
     var rids = comparison ? comparison.reviewers : Object.keys(reviews);
     meta.reviewers.forEach(function (r) { labels[r.id] = r.label || r.id; });
@@ -132,10 +158,15 @@
       var ids = m.reviewers.filter(function (r) { return r.ok; }).map(function (r) { return r.id; });
       return Promise.all([U.getJSON(base + "comparison.json").catch(function () { return null; }),
         Promise.all(ids.map(function (id) { return U.getJSON(base + encodeURIComponent(id) + ".json").catch(function () { return {}; }); })),
-        U.getJSON("data.json").catch(function () { return {}; })]).then(function (res) {
+        U.getJSON("data.json").catch(function () { return {}; }),
+        U.getText(base + "comment.md").catch(function () { return ""; }),
+        U.getJSON("reviews/index.json").catch(function () { return {}; })]).then(function (res) {
         var reviews = {};
         ids.forEach(function (id, i) { reviews[id] = res[1][i]; });
-        render(res[0], reviews, ((res[2] || {}).reviews || {})[ext]);
+        var summary = ((res[2] || {}).reviews || {})[ext];
+        var run = ((res[4] || {})[ext] || []).filter(function (r) { return r.dir === dir; })[0] || {};
+        render(res[0], reviews, summary);
+        renderDraft(res[3], run.action, summary);
       });
     }).catch(function (e) { document.getElementById("sub").textContent = "Could not load this review (" + e.message + ")."; });
   }

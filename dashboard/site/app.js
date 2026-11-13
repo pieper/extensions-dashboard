@@ -178,6 +178,7 @@
     Object.keys(l.overall || {}).forEach(function (k) { says[l.overall[k]] = (says[l.overall[k]] || 0) + 1; });
     var text = Object.keys(says).map(function (k) { return says[k] + "× " + k; }).join(", ");
     return h("div", { class: "by" }, link, " (" + (l.panel === "full" ? "full panel" : "first pass") + ", not yet checked by a maintainer): " + text,
+      l.action ? h("span", { class: "hint " + (l.action === "changes needed" ? "bad" : l.action === "decide disputes first" ? "warn" : "good"), text: "suggested: " + l.action }) : null,
       c.disputed ? h("span", { class: "hint warn", text: c.disputed + " disagreement" + (c.disputed > 1 ? "s" : "") }) : null,
       c.unverified ? h("span", { class: "hint bad", text: c.unverified + " unverified quote" + (c.unverified > 1 ? "s" : "") }) : null,
       r.issue ? [" · ", a(r.issue.url, "review issue")] : null,

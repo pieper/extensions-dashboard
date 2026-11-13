@@ -50,6 +50,12 @@
       return r.json();
     });
   }
+  function getText(url) {
+    return fetch(url, { cache: "no-cache" }).then(function (r) {
+      if (!r.ok) throw new Error(url + ": HTTP " + r.status);
+      return r.text();
+    });
+  }
   function sourceUrl(scmUrl, commit, path, line) {
     var base = (scmUrl || "").replace(/\.git$/, "").replace(/\/$/, "");
     if (!/^https:\/\/github\.com\//.test(base) || !path) return null;
@@ -74,6 +80,6 @@
   }
 
   window.TriageUtil = { h: h, fill: fill, a: a, local: local, safeUrl: safeUrl, daysSince: daysSince, fmtDays: fmtDays, fmtDate: fmtDate,
-    getJSON: getJSON, sourceUrl: sourceUrl, OVERALL_CLASS: OVERALL_CLASS, RATING_CLASS: RATING_CLASS, VERDICT: VERDICT,
+    getJSON: getJSON, getText: getText, sourceUrl: sourceUrl, OVERALL_CLASS: OVERALL_CLASS, RATING_CLASS: RATING_CLASS, VERDICT: VERDICT,
     overallText: overallText, worstOverall: worstOverall };
 })();
