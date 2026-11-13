@@ -1,0 +1,64 @@
+{
+ "purpose": "Pictologics lets Slicer users extract radiomic intensity, shape and texture features from images and segmented regions. It is intended for researchers who want to configure, review and export features with provenance.",
+ "summary": "The wrapper isolates its scientific dependencies and asks before installation, and the source includes documentation and tests. However, CSV export can silently overwrite existing companion files. External runtime wheels and their complete licensing were not available for inspection, and the catalog revision could not be independently resolved. 🔴 Do not merge yet: fix the unintended overwrite and complete the external-payload and revision review.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "I inspected the GUI export handler, CSV publication logic, job staging, worker entry point and dependency installer. CSV companion files can be replaced without explicit confirmation; the downloaded Pictologics wheel and transitive wheels were not available for safety inspection."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "I inspected the import section, dependency installer, constraints, probe and worker isolation. Installation is confirmed by the user into a private target, and pinned scientific packages are used in separate processes rather than replacing Slicer's shared packages."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "The catalog metadata and CMake runtime file lists appear consistent, including an empty extension dependency list. I could not independently resolve main to the supplied commit or build and install a factory package."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "The root LICENSE grants Apache-2.0 terms, and NOTICE identifies the separately distributed Pictologics package as Apache-2.0. The actual downloaded wheel and its transitive dependencies' licenses and notices were unavailable for verification."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "I inspected the module structure, parameter-node usage, cleanup, background worker, export and configuration-check paths. Configuration validation waits synchronously for a subprocess and can freeze the GUI."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README and the user guide describe workflows, sample data and research-only use; the repository includes substantial unit and Slicer integration tests. The release-readiness document reports testing but these results were not independently verified."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "CSV export silently overwrites existing companion files",
+   "file": "PictologicsSlicer/PictologicsLib/exports.py",
+   "line_start": 44,
+   "line_end": 48,
+   "evidence": "        destinations = [destination.parent / path.name for path in files]\n        for source, target in zip(files, destinations, strict=True):\n            if target.is_symlink() or (target.exists() and not target.is_file()):\n                raise ValueError(\"Export destination must be a regular file, not a link or directory.\")\n            if target.exists():",
+   "explanation": "The save dialog in PictologicsSlicer.py:2700-2715 only selects and confirms the main CSV. The writer at lines 3849-3870 also generates <stem>.provenance.json and <stem>_catalog.csv, and exports.py:55-58 replaces every destination. Thus exporting a new features.csv can silently destroy an unrelated existing features_catalog.csv or features.provenance.json, even when the main CSV did not exist. The temporary backups are removed after success.",
+   "suggestion": "Before writing, enumerate all destinations and explicitly confirm every existing file that will be replaced, or refuse collisions and let the user select another name.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Configuration validation blocks the Slicer GUI",
+   "file": "PictologicsSlicer/PictologicsSlicer.py",
+   "line_start": 3001,
+   "line_end": 3006,
+   "evidence": "        try:\n            output, _ = process.communicate(timeout=300)\n        except subprocess.TimeoutExpired:\n            # Never let a stuck helper process freeze Slicer.\n            process.kill()\n            process.communicate()",
+   "explanation": "The Validate handler calls this method directly on the GUI thread (lines 1825-1829). If the helper is slow or stuck, communicate blocks the event loop for up to five minutes; the timeout limits the duration but does not keep the UI responsive.",
+   "suggestion": "Run the check asynchronously or poll the process while reporting progress and supporting cancellation.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No code, tests, Slicer build, factory package or CI checks were executed.",
+  "No network tools were available to independently resolve the catalog's main branch or verify that the inspected snapshot matches the stated commit 2d217f88e4fb1a78f50ec4b61370ba362de35651.",
+  "The separately downloaded Pictologics 1.0.1 wheel, its transitive dependency artifacts, their runtime behavior and complete license notices were not accessible.",
+  "Large binary branding and screenshot files were not inspected."
+ ],
+ "questions_for_author": []
+}

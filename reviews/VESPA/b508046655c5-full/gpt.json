@@ -1,0 +1,75 @@
+{
+ "purpose": "VESPA provides 3D Slicer CLI modules for processing surface meshes using CGAL through VESPA VTK filters. It is intended for users who need operations such as mesh repair, Boolean operations, remeshing, and smoothing.",
+ "summary": "The reviewed extension source uses separate CLI executables and pinned build dependencies, but the linked VESPA dependency and catalog revision could not be independently accessed or verified. Non-blocking issues include RepairMesh reporting success for an open mesh and dropping mesh data arrays, and CLI license metadata conflicting with the documented GPLv3 binary terms. 🔴 Do not merge yet: Review incomplete; verify the catalog repository and revision, inspect the pinned VESPA dependency and its distribution terms, and assess the downloaded build dependencies.",
+ "overall": "incomplete",
+ "ratings": {
+  "safety": {
+   "rating": "unknown",
+   "rationale": "Inspected the CLI implementations and SuperBuild scripts; no data transmission was found in the extension code. The pinned VESPA library and other downloaded source packages could not be inspected, so their code and build behavior remain unverified."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected CMakeLists.txt, SuperBuild files and CLI sources; the extension uses compiled executables and does not install Python packages or modify the shared Python environment in the reviewed code."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "The catalog's empty extension dependencies and inner-build directory match CMakeLists.txt, and CLI source files are present. Repository accessibility, resolution of master to the supplied commit, dependency downloads and actual build/install output could not be verified."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "LICENSE.txt grants redistribution of SlicerVESPA, and README.md states that distributed CGAL-linked executables are GPLv3. The actual VESPA and downloaded dependency terms and binary distribution artifacts were not accessible; CLI XML also labels binaries LGPL contrary to the README."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected the mesh-repair implementation and CLI wrapper: open results can be returned as successful, and reconstructed polydata omits input data arrays. Other filters are implemented in an unavailable external library and were not tested."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md lists the seven modules and links algorithm documentation, and the XML files expose parameters. No tests or tutorial/sample data are present in the supplied repository listing; runtime usability and maintenance activity were not verified."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "RepairMesh can report success for an open output",
+   "file": "SlicerVESPA/vespaRepairMesh.cxx",
+   "line_start": 38,
+   "line_end": 46,
+   "evidence": "  if (!closed)\n  {\n    std::cerr << \"input mesh: mesh is not closed after repair.\" << std::endl;\n  }\n\n  vtkNew<vtkXMLPolyDataWriter> writer;\n  writer->SetFileName(output.c_str());\n  writer->SetInputData(repaired);\n  return writer->Write() ? 0 : 1;",
+   "explanation": "When repair cannot close an input surface, the CLI only logs a warning and returns success if the output writes, although its XML describes a closed output. A user can consequently mistake an open surface for a successfully repaired closed one.",
+   "suggestion": "Return an explicit failure for a nonclosed result, or clearly expose partial success and describe that closure is not guaranteed.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Mesh repair discards input point and cell attributes",
+   "file": "SlicerVESPA/vespaRepairMesh.h",
+   "line_start": 198,
+   "line_end": 201,
+   "evidence": "  vtkSmartPointer<vtkPolyData> repaired = vtkSmartPointer<vtkPolyData>::New();\n  repaired->SetPoints(outputPoints);\n  repaired->SetPolys(outputFaces);\n  return repaired;",
+   "explanation": "The repaired polydata contains only rebuilt geometry; input point, cell, and field data arrays are not copied. Users processing models with scalar measurements, labels, or other attributes receive a mesh without those arrays.",
+   "suggestion": "Preserve or remap attributes where feasible, and explicitly warn users about arrays that cannot be retained across topology changes.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "CLI license metadata conflicts with stated binary license",
+   "file": "SlicerVESPA/vespaRepairMesh.xml",
+   "line_start": 7,
+   "line_end": 10,
+   "evidence": "  <version>0.1</version>\n  <documentation-url>https://doc.cgal.org/latest/Polygon_mesh_processing/index.html</documentation-url>\n  <license>LGPL</license>\n  <contributor>Kitware SAS</contributor>",
+   "explanation": "The CLI identifies its license as LGPL, whereas README.md lines 65–69 says the distributed CGAL-linked CLI binaries are GPLv3. The other CLI XML files have the same LGPL label, potentially misleading users about binary redistribution obligations.",
+   "suggestion": "Align the displayed CLI license metadata with the actual executable license and include the appropriate license notices in distribution materials.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not independently resolve catalog master or verify that the supplied checkout corresponds to b508046655c5c6e3f96ecd74c9fb082825b5038a; no network access is available through the review tools.",
+  "Pinned external VESPA source c1f3bc913767c206d3a9665faea9aa24774262bb, CGAL, Boost and Eigen source archives, their full license terms, and their build-time behavior were not accessible for inspection.",
+  "No build, Slicer runtime test, automated checks, CI results, GPL binary distribution contents, or prior review baseline were available."
+ ],
+ "questions_for_author": []
+}

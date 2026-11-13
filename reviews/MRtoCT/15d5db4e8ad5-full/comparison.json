@@ -1,0 +1,499 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Selecting the input as output destroys the in-scene MR data",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "MRtoCT/MRtoCT.py",
+   "line": 289,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Selecting the input as output destroys the in-scene MR data",
+     "file": "MRtoCT/MRtoCT.py",
+     "line_start": 289,
+     "line_end": 294,
+     "evidence": "        # same voxel grid and position as the input MR\n        ijkToRas = vtk.vtkMatrix4x4()\n        inputVolume.GetIJKToRASMatrix(ijkToRas)\n        outputVolume.SetIJKToRASMatrix(ijkToRas)\n        slicer.util.updateVolumeFromArray(outputVolume, sct)\n        outputVolume.SetAndObserveTransformNodeID(inputVolume.GetTransformNodeID())",
+     "explanation": "Both selectors accept scalar volume nodes and there is no check that the output differs from the input. If a user inadvertently selects the MR as the output, a successful generation replaces its voxel data with synthetic CT; subsequently saving that node can lose the original MR data.",
+     "suggestion": "Reject identical input and output nodes, or require a clear explicit overwrite confirmation; consider protecting other existing output volumes as well.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MRtoCT/MRtoCT.py",
+      "line": 289
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "MRtoCT/MRtoCT.py:289-294 and onApply 146-150 have no check that outputVolume differs from inputVolume, so choosing the MR as output overwrites its voxels in the scene. It needs a deliberate user selection, and it only changes the in-memory node. The original file on disk is not touched unless the user saves over it. Slicer modules commonly allow in-place output. This is an ordinary usability/soundness issue and not a concrete path to harm, so it is minor and not a safety blocker. A guard or warning would be a sensible fix."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "MRtoCT/MRtoCT.py:74-75 and 85-86 give both selectors the same node type: \"self.inputSelector.nodeTypes = ['vtkMRMLScalarVolumeNode']\" and \"self.outputSelector.nodeTypes = ['vtkMRMLScalarVolumeNode']\". Lines 135-158 pass the selected nodes to process without checking that they differ. At lines 291-294 the result is written in place: \"slicer.util.updateVolumeFromArray(outputVolume, sct)\". If the same node is selected, successful inference replaces the in-scene MR voxels; saving that node over the source could make the loss persistent. The source file is not automatically overwritten by this call. This path requires usable custom or local weights at this revision: lines 226-228 reject the configured default download URL. Reject identical nodes in both the UI and logic."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In MRtoCT/MRtoCT.py lines 85-96 and 146-159, outputSelector has `noneEnabled = True` and `noneDisplay = '(Create new volume)'` by default, creating a new volume if left at None. However, if a user manually selects the same volume node in both `inputSelector` and `outputSelector`, neither `onApply()` (lines 135-163) nor `process()` (lines 265-302) checks `if inputVolume == outputVolume:`. At line 293, `slicer.util.updateVolumeFromArray(outputVolume, sct)` overwrites the in-memory MRML node's voxel array. Under the review rubric (\"Do not label ordinary bugs as safety issues merely because the extension processes medical images\" and \"Ordinary bugs are minor or concern, not safety\"), allowing an in-scene output selector to target the input node (a standard Slicer pattern unless guarded, with `(Create new volume)` as the default and without modifying files on disk unless the user later explicitly saves) is a minor soundness/usability oversight, not a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Default weights download always fails because of a leftover placeholder guard",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "consensus",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "major",
+    "minor"
+   ],
+   "file": "MRtoCT/MRtoCT.py",
+   "line": 227,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "major",
+     "title": "Default weights download always fails because of a leftover placeholder guard",
+     "file": "MRtoCT/MRtoCT.py",
+     "line_start": 226,
+     "line_end": 228,
+     "evidence": "        if 'kgiraldo09' in WEIGHTS_URL:\n            raise RuntimeError('WEIGHTS_URL is not set in MRtoCT.py (see README, step 3).')",
+     "explanation": "downloadWeights raises 'WEIGHTS_URL is not set' whenever the URL contains 'kgiraldo09'. The real URL is on github.com/kgiraldo09/…, so the check always fires. A user who installs from the catalog and does not supply custom weights or a local file gets an error every time. The advertised workflow therefore does not work. It also means the download and checksum path was never exercised.",
+     "suggestion": "Remove the placeholder check, or compare against an explicit empty or placeholder constant. Confirm that the release asset exists and matches WEIGHTS_SHA256.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MRtoCT/MRtoCT.py",
+      "line": 227
+     }
+    },
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Leftover placeholder check unconditionally blocks automatic weight download",
+     "file": "MRtoCT/MRtoCT.py",
+     "line_start": 227,
+     "line_end": 228,
+     "evidence": "        if 'kgiraldo09' in WEIGHTS_URL:\n            raise RuntimeError('WEIGHTS_URL is not set in MRtoCT.py (see README, step 3).')",
+     "explanation": "In `MRtoCTLogic.downloadWeights`, the check `if 'kgiraldo09' in WEIGHTS_URL:` always evaluates to `True` because `WEIGHTS_URL` is `'https://github.com/kgiraldo09/SlicerMRtoCT/releases/download/v1.0/best_net_G_A.pth'`. As a result, any user running the module for the first time without providing custom weights or manually placing `best_net_G_A.pth` in the module directory will get a `RuntimeError` and the model weights will never be downloaded.",
+     "suggestion": "Remove this placeholder check, or check for an actual placeholder string (such as `'YOUR_USERNAME'` or `not WEIGHTS_URL`).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MRtoCT/MRtoCT.py",
+      "line": 227
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Default model download is always rejected",
+     "file": "MRtoCT/MRtoCT.py",
+     "line_start": 226,
+     "line_end": 228,
+     "evidence": "    def downloadWeights(self, target):\n        if 'kgiraldo09' in WEIGHTS_URL:\n            raise RuntimeError('WEIGHTS_URL is not set in MRtoCT.py (see README, step 3).')",
+     "explanation": "The configured URL at line 33 contains kgiraldo09, so every fresh installation without custom or cached weights raises this error before attempting the documented download. The included test bypasses this path using custom weights.",
+     "suggestion": "Replace the placeholder check with a valid configuration check and add a test for the default model resolution and download path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MRtoCT/MRtoCT.py",
+      "line": 226
+     }
+    }
+   ]
+  },
+  {
+   "title": "Catalog entry tracks the moving branch 'main'; weights asset unverified",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": null,
+   "line": 0,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "Catalog entry tracks the moving branch 'main'; weights asset unverified",
+     "file": "",
+     "line_start": 0,
+     "line_end": 0,
+     "evidence": "",
+     "explanation": "The scm_revision is a branch, so what users get can change after review. The weights are loaded from a separate GitHub release, and I could not verify that asset is published. Without it, the module cannot run for catalog users.",
+     "suggestion": "Pin the catalog entry to a commit or tag, and make sure the v1.0 release asset is public.",
+     "confidence": "medium",
+     "verification": {
+      "status": "no quote",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Non-commercial license and leftover template text",
+   "category": "license",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "LICENSE.txt",
+   "line": 13,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "Non-commercial license and leftover template text",
+     "file": "LICENSE.txt",
+     "line_start": 12,
+     "line_end": 13,
+     "evidence": "(Paste the full legal code below: https://creativecommons.org/licenses/by-nc/4.0/legalcode.txt)",
+     "explanation": "CC BY-NC 4.0 allows distribution but excludes commercial use, including by clinics or companies. The LICENSE.txt header still carries an unedited instruction line. Creative Commons recommends against using its licenses for software.",
+     "suggestion": "Remove the template line. Consider a software license for the code, and clearly document the weights' terms and training data provenance.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "LICENSE.txt",
+      "line": 13
+     }
+    },
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Extension code and weights are licensed for non-commercial use only (CC BY-NC 4.0)",
+     "file": "LICENSE.txt",
+     "line_start": 4,
+     "line_end": 5,
+     "evidence": "This work is licensed under the Creative Commons Attribution-NonCommercial 4.0 International\nLicense (CC BY-NC 4.0). Full license text: https://creativecommons.org/licenses/by-nc/4.0/legalcode",
+     "explanation": "Both the extension code and the model weights are licensed under Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0). This permits non-commercial distribution via the Slicer Extensions Index, and the module clearly prompts users to accept the non-commercial and research-only terms before first use (`MRtoCT/MRtoCT.py` lines 38-45, 174-181). Users in commercial settings should be aware of this restriction.",
+     "suggestion": "No action required; the non-commercial and research-only terms are already clearly disclosed in `CMakeLists.txt`, `README.md`, `LICENSE.txt`, and an in-app confirmation dialog.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "LICENSE.txt",
+      "line": 4
+     }
+    }
+   ]
+  },
+  {
+   "title": "Output can overwrite the input volume; inference runs on the GUI thread",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "MRtoCT/MRtoCT.py",
+   "line": 146,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "Output can overwrite the input volume; inference runs on the GUI thread",
+     "file": "MRtoCT/MRtoCT.py",
+     "line_start": 146,
+     "line_end": 159,
+     "evidence": "        outputVolume = self.outputSelector.currentNode()\n        if outputVolume is None:",
+     "explanation": "outputSelector accepts any scalar volume, including the input MR. updateVolumeFromArray would then replace the MR with the sCT. Inference with 0.8 overlap on 128^3 windows blocks the UI, and progress is only a 'Running...' label. The download via urlretrieve has no timeout.",
+     "suggestion": "Reject output == input. Consider progress reporting or a background thread, and add a network timeout.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "MRtoCT/MRtoCT.py",
+      "line": 146
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Long inference runs on the GUI thread without inference progress",
+     "file": "MRtoCT/MRtoCT.py",
+     "line_start": 152,
+     "line_end": 158,
+     "evidence": "        self.statusLabel.text = 'Running...'\n        slicer.app.processEvents()\n        try:\n            with slicer.util.tryWithErrorDisplay('Synthetic CT generation failed.', waitCursor=True):\n                device, seconds = self.logic.process(\n                    inputVolume, outputVolume, customWeights, useGPU=self.gpuCheckBox.checked,\n                    slidingWindow={'sw_batch_size': self.batchSpinBox.value})",
+     "explanation": "The button handler calls processing synchronously, and the sliding-window inference loop does not process events or report progress. Large volumes or CPU inference can leave Slicer unresponsive for a prolonged period.",
+     "suggestion": "Run the computation off the GUI thread and provide progress and cancellation while keeping MRML updates on the main thread.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MRtoCT/MRtoCT.py",
+      "line": 152
+     }
+    }
+   ]
+  },
+  {
+   "title": "Limited validation evidence for the model",
+   "category": "utility",
+   "severity": "info",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gpt"
+   ],
+   "severities": [
+    "info",
+    "info"
+   ],
+   "file": "README.md",
+   "line": 38,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "info",
+     "title": "Limited validation evidence for the model",
+     "file": "README.md",
+     "line_start": 36,
+     "line_end": 38,
+     "evidence": "Paper in preparation",
+     "explanation": "The citation is 'Paper in preparation'. Dataset and validation metrics are not documented. The research-only disclaimer is present and clear, which mitigates clinical risk.",
+     "suggestion": "Document the training data, performance, and limits (brain MR only, sequence and contrast assumptions).",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 38
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "info",
+     "title": "Model provenance and validation are not documented",
+     "file": "README.md",
+     "line_start": 36,
+     "line_end": 38,
+     "evidence": "## Citation\n\nPaper in preparation",
+     "explanation": "The README identifies the model but does not describe its training data or report validation results, making it difficult for researchers to assess its suitability for their data. It appropriately warns that the result is not clinically validated.",
+     "suggestion": "Document training-data provenance, intended input population and available quantitative validation when they can be shared.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 36
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Selecting the input as output destroys the in-scene MR data",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "MRtoCT/MRtoCT.py",
+   "line": 289,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Selecting the input as output destroys the in-scene MR data",
+     "file": "MRtoCT/MRtoCT.py",
+     "line_start": 289,
+     "line_end": 294,
+     "evidence": "        # same voxel grid and position as the input MR\n        ijkToRas = vtk.vtkMatrix4x4()\n        inputVolume.GetIJKToRASMatrix(ijkToRas)\n        outputVolume.SetIJKToRASMatrix(ijkToRas)\n        slicer.util.updateVolumeFromArray(outputVolume, sct)\n        outputVolume.SetAndObserveTransformNodeID(inputVolume.GetTransformNodeID())",
+     "explanation": "Both selectors accept scalar volume nodes and there is no check that the output differs from the input. If a user inadvertently selects the MR as the output, a successful generation replaces its voxel data with synthetic CT; subsequently saving that node can lose the original MR data.",
+     "suggestion": "Reject identical input and output nodes, or require a clear explicit overwrite confirmation; consider protecting other existing output volumes as well.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MRtoCT/MRtoCT.py",
+      "line": 289
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "MRtoCT/MRtoCT.py:289-294 and onApply 146-150 have no check that outputVolume differs from inputVolume, so choosing the MR as output overwrites its voxels in the scene. It needs a deliberate user selection, and it only changes the in-memory node. The original file on disk is not touched unless the user saves over it. Slicer modules commonly allow in-place output. This is an ordinary usability/soundness issue and not a concrete path to harm, so it is minor and not a safety blocker. A guard or warning would be a sensible fix."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "MRtoCT/MRtoCT.py:74-75 and 85-86 give both selectors the same node type: \"self.inputSelector.nodeTypes = ['vtkMRMLScalarVolumeNode']\" and \"self.outputSelector.nodeTypes = ['vtkMRMLScalarVolumeNode']\". Lines 135-158 pass the selected nodes to process without checking that they differ. At lines 291-294 the result is written in place: \"slicer.util.updateVolumeFromArray(outputVolume, sct)\". If the same node is selected, successful inference replaces the in-scene MR voxels; saving that node over the source could make the loss persistent. The source file is not automatically overwritten by this call. This path requires usable custom or local weights at this revision: lines 226-228 reject the configured default download URL. Reject identical nodes in both the UI and logic."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In MRtoCT/MRtoCT.py lines 85-96 and 146-159, outputSelector has `noneEnabled = True` and `noneDisplay = '(Create new volume)'` by default, creating a new volume if left at None. However, if a user manually selects the same volume node in both `inputSelector` and `outputSelector`, neither `onApply()` (lines 135-163) nor `process()` (lines 265-302) checks `if inputVolume == outputVolume:`. At line 293, `slicer.util.updateVolumeFromArray(outputVolume, sct)` overwrites the in-memory MRML node's voxel array. Under the review rubric (\"Do not label ordinary bugs as safety issues merely because the extension processes medical images\" and \"Ordinary bugs are minor or concern, not safety\"), allowing an in-scene output selector to target the input node (a standard Slicer pattern unless guarded, with `(Create new volume)` as the default and without modifying files on disk unless the user later explicitly saves) is a minor soundness/usability oversight, not a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D2",
+   "rating_dispute": {
+    "claude": "ok",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (ok, blocking, ok)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "info",
+     "rating": "ok",
+     "reason": "I read MRtoCT.py 135-300 and found the following. The weights download is a single GitHub release URL, and it is checked against a pinned SHA256 (lines 33-34, 250). The weights are loaded with torch.load(..., weights_only=True) (mr_to_sct.py:109). There is a license acceptance prompt before the download. PyTorch comes through PyTorchUtils. Nothing is sent from the user's machine, and I found no eval, exec, subprocess or pickle use. The input/output overwrite case (D1) is a minor soundness issue, so safety is ok."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": null,
+     "rating": "blocking",
+     "reason": "Safety is blocking because of D1's concrete path to unintended destruction of in-scene MR data and possible persistent loss on save. MRtoCT/MRtoCT.py:146-150 retrieves the output without an identity check, and line 293 writes it: \"slicer.util.updateVolumeFromArray(outputVolume, sct)\". I also inspected model loading (MRtoCT/MRtoCTLib/mr_to_sct.py:103-114, including \"state = torch.load(str(weights), map_location='cpu', weights_only=True)\"), the dependency and weight download paths (MRtoCT/MRtoCT.py:183-253), and the CLI file-writing path (MRtoCT/MRtoCTLib/mr_to_sct.py:226-279). The code does not itself save the replaced scene node to its original file. Exact checkout revision, Slicer runtime behavior, and external payloads were not independently verified."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Checked MRtoCT/MRtoCT.py (lines 1-346) and MRtoCT/MRtoCTLib/mr_to_sct.py (lines 1-289). There is no malicious behavior, telemetry, or unauthorized data transmission. Model weights are loaded safely with `torch.load(..., weights_only=True)` (MRtoCT/MRtoCTLib/mr_to_sct.py:109) and verified with SHA-256 on download (MRtoCT/MRtoCT.py:250-252) after explicit user confirmation of the license and download prompt (MRtoCT/MRtoCT.py:38-45, 140, 174-181). D1 is a minor UI/soundness check omission on in-memory MRML nodes rather than a safety vulnerability. Therefore, the safety rating is `ok`."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "ok",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "ok",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "packaging": {
+   "claude": "minor",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "minor",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "concern",
+   "gemini": "concern",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "minor",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "needs fixes",
+  "gemini": "needs fixes",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 1,
+  "disputed": 2,
+  "single": 2,
+  "unverified": 0,
+  "total": 6,
+  "open_disputes": 1
+ }
+}

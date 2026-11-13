@@ -1,0 +1,139 @@
+{
+ "purpose": "WebSubInterface connects Slicer to a WebSub hub for medical-image worklists, image display, conferencing, and data exchange. It is intended for researchers, educators, and users integrating imaging applications.",
+ "summary": "The installed module omits an imported Python file, and the default hub exposes unauthenticated access to imaging workflows. OIDC mode also grants ordinary users admin access and permits cross-topic conference creation. These issues need correction before admission. The inspected source was provided as commit cf9a934, but the catalog’s moving main revision and downloaded SPA assets could not be independently verified. 🔴 Do not merge yet: fix the loading and security issues and verify the selected revision and external assets.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected hub startup, authentication, admin and conference routes, and image-display request handlers. Default network exposure and authorization failures provide concrete paths to disclosure of patient information and DICOM files."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Inspected startup imports, repo_paths.py, and HubServer.py. Package installation is confirmed with the user, but startup modifies sys.path and imports an optional dependency before the installation prompt can run."
+  },
+  "packaging": {
+   "rating": "blocking",
+   "rationale": "Inspected module CMake and import chains: spa_download.py is imported but neither listed as a script nor covered by the directory installs. The catalog revision and an actual package build could not be verified."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "LICENSE.txt grants MIT distribution permission for the repository. Downloaded browser clients and their bundled third-party dependencies were unavailable for license review."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected hub dependency checks and downloaded-DICOM lifecycle. PyJWT is omitted from the hub dependency check, and database entries can refer to temporary files that are subsequently deleted."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "Inspected the README, in-module quick start, and testing documentation. Documentation and smoke tests exist, but the tests were not run and the documented workflows depend on external clients."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "blocking",
+   "title": "The installed module omits spa_download.py",
+   "file": "WebSubInterface/Lib/HubServer.py",
+   "line_start": 22,
+   "line_end": 26,
+   "evidence": "from .repo_paths import hub_dir, hub_script, repo_root\nfrom .spa_download import (\n    SPA_DOWNLOAD_CATALOG,\n    default_checked,\n    download_and_extract,",
+   "explanation": "WebSubInterface.py imports HubServer at module load, but WebSubInterface/CMakeLists.txt lines 4–13 omit Lib/spa_download.py and its directory install rules cover only hub, python_client, and image_display. An installed extension therefore raises ModuleNotFoundError before the module UI loads.",
+   "suggestion": "Add Lib/spa_download.py to MODULE_PYTHON_SCRIPTS and test an installed package, not only a source checkout.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "aiohttp is imported before the user can install it",
+   "file": "WebSubInterface/python_client/src/hub_client/client.py",
+   "line_start": 167,
+   "line_end": 167,
+   "evidence": "import aiohttp",
+   "explanation": "WebSubInterface.py imports ImageDisplayClient, which imports hub_client; its __init__.py imports this module. On a Slicer environment without aiohttp, module loading fails before the hub Start button can invoke the dependency confirmation in HubServer.py. Installing this extension therefore cannot bootstrap a missing dependency.",
+   "suggestion": "Defer the client import until after an explicit dependency check and confirmation, or provide a supported dependency mechanism that makes it available before module import.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Default local hub exposes unauthenticated DICOM access on every interface",
+   "file": "WebSubInterface/hub/hub.py",
+   "line_start": 261,
+   "line_end": 263,
+   "evidence": "    parser = argparse.ArgumentParser(description=\"Standalone Slicer WebSub Server\")\n    parser.add_argument(\"--port\", type=int, default=2018, help=\"Server port (default: 2018)\")\n    parser.add_argument(\"--host\", type=str, default=\"0.0.0.0\", help=\"Server host (default: 0.0.0.0)\")",
+   "explanation": "The Slicer Start button passes only the port (HubServer.py lines 365–372), so the default binds all interfaces. oauth_tokens.py lines 43–50 defaults to mock mode with authentication disabled; a network peer can subscribe to the same topic and send status or DICOM requests. The connected image client returns patient-name worklists and publishes requested local DICOM files without a per-transfer consent dialog (image_display_client_requests.py lines 115–131, 295–335). The GUI describes this as a local hub but does not warn about this exposure.",
+   "suggestion": "Bind the embedded hub to loopback by default, and require strong authentication and explicit informed sharing consent before exposing sensitive data or enabling remote access.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Any OIDC user can access the privileged admin snapshot and reset",
+   "file": "WebSubInterface/hub/Lib/oauth_tokens.py",
+   "line_start": 422,
+   "line_end": 427,
+   "evidence": "        for token in ordered:\n            if HUB_ADMIN_TOKEN and _token_matches_admin(token):\n                return {\"admin\": True, \"via\": \"admin_token\"}\n            try:\n                claims = verify_bearer_token(token)\n                return claims_to_identity(claims)",
+   "explanation": "In authenticated mode any valid client JWT is accepted as admin, even when HUB_ADMIN_TOKEN is configured; no admin role is checked. The admin snapshot returns subscriptions and audit event contexts across topics, while the reset endpoint disconnects all clients. Thus an ordinary authenticated user can obtain other users' sensitive event data or disrupt their sessions.",
+   "suggestion": "Require a separately authorized admin role or a mandatory admin secret for privileged endpoints, and test that ordinary OIDC users cannot access them.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Authenticated users can join unrelated topics by creating a conference",
+   "file": "WebSubInterface/hub/Lib/routes/conference.py",
+   "line_start": 61,
+   "line_end": 72,
+   "evidence": "@router.post(\"/api/hub/conference\")\nasync def post_conference(request: Request):\n    \"\"\"Create a conference\"\"\"\n    _enforce_bearer_auth(request)\n    try:\n        data = await _parse_request_body(request)\n    except Exception as e:\n        raise HTTPException(status_code=400, detail=f\"Could not parse request: {e}\")\n\n    host_topic = str(data.get(\"hostTopic\") or data.get(\"user\") or \"\").strip()\n    title = str(data.get(\"title\") or \"\").strip()\n    attendee_topics = _normalize_conference_topics(data.get(\"topics\", []))",
+   "explanation": "The route validates a bearer but does not bind hostTopic or attendees to that identity or require attendee approval. hub_request.py lines 44–60 expands requests to all conference topics, and the image display responds to status and DICOM requests. An authenticated user can create a conference including a victim topic and their own, then request the victim's worklist and DICOM data despite OIDC topic checks on ordinary subscription and publish.",
+   "suggestion": "Bind conference mutations to the authenticated identity and require independently authenticated attendee consent before expanding cross-topic routing; test isolation across users.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Import-time sys.path changes expose generic module names globally",
+   "file": "WebSubInterface/Lib/repo_paths.py",
+   "line_start": 26,
+   "line_end": 34,
+   "evidence": "    extras = (\n        root,\n        root / \"python_client\" / \"src\",\n        root / \"image_display\" / \"lib\",\n    )\n    for path in extras:\n        s = str(path)\n        if path.is_dir() and s not in sys.path:\n            sys.path.insert(0, s)",
+   "explanation": "WebSubInterface.py calls this at module import, including for users who never open the module. It prepends the module root and directories containing generic top-level names to Slicer's shared import path, potentially shadowing unrelated extension modules or resolving an existing generic Lib package instead of its own.",
+   "suggestion": "Package helper modules under a unique namespace and use package-relative imports without globally prepending generic directories.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Temporary DICOM files are indexed without copying then deleted",
+   "file": "WebSubInterface/image_display/lib/image_display_client_load.py",
+   "line_start": 269,
+   "line_end": 275,
+   "evidence": "    from DICOMLib import DICOMUtils\n\n    _require_dicom_database()\n    parent_dir = os.path.commonpath(dicom_paths) if dicom_paths else temp_dir\n    if not os.path.isdir(parent_dir):\n        parent_dir = temp_dir\n    DICOMUtils.importDicom(parent_dir, copyFiles=False)",
+   "explanation": "Downloaded IDC and DICOM URL studies are imported into the user's DICOM database without copying the temporary files. clear_loaded_study removes that temporary directory at lines 433–446 when the study is closed or replaced, leaving database references to missing files; failures after import also remove the temporary directory.",
+   "suggestion": "Copy imported files into persistent database storage, or use a separate temporary database and remove its records before deleting files.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Hub dependency installer does not check required PyJWT",
+   "file": "WebSubInterface/Lib/HubServer.py",
+   "line_start": 33,
+   "line_end": 40,
+   "evidence": "# pip spec -> import name (Slicer pip_install accepts one package per call).\n_HUB_PIP_PACKAGES = (\n    (\"fastapi\", \"fastapi\"),\n    (\"uvicorn[standard]\", \"uvicorn\"),\n    (\"python-multipart\", \"multipart\"),\n    (\"aiohttp\", \"aiohttp\"),\n    (\"psutil\", \"psutil\"),\n)",
+   "explanation": "hub/Lib/oauth_tokens.py unconditionally imports jwt and PyJWKClient, but the dependency check omits PyJWT. Where it is absent, accepting the displayed installation prompt still leaves the hub subprocess unable to start.",
+   "suggestion": "Include PyJWT with the required crypto support in the explicit dependency check, and test starting from a clean Slicer environment.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The catalog entry selects the moving main branch. No network access or revision-resolution tool was available to verify that main points to cf9a93425b0d5139afa583b18c4f720879283b41, or to compare it with a prior reviewed baseline.",
+  "No build, Slicer runtime, automated tests, CI results, or network interactions were executed or inspected.",
+  "The downloadable floating SPA release archives, their third-party code, licenses, and behavior were not accessible for inspection.",
+  "Review of the large client and server codebase was targeted rather than exhaustive; deployed cloud hub configuration and access controls were not independently verified."
+ ],
+ "questions_for_author": [
+  "Can you provide the exact published SPA assets, source revisions, and applicable third-party license notices for review?",
+  "What sharing-consent and access-control model is intended for real patient data, especially across conference participants and the local hub?"
+ ]
+}

@@ -1,0 +1,80 @@
+{
+ "purpose": "ClasificacionZE reconstructs cortical anatomy from a T1 MRI with FreeSurfer and visualizes predicted epileptogenic regions alongside EEG and sEEG electrodes. It is intended for epilepsy researchers using 3D Slicer.",
+ "summary": "The processed-patient workflow can silently delete or overwrite existing patient files, and patient IDs of '.' and '..' escape the intended subject subdirectory. These data-loss risks need fixes. The module asks before installing Python dependencies, and documentation describes the research-only intended use and model validation. Review of the bundled executable-deserialization model and packaged license notices remains incomplete; the supplied commit and branch were not independently resolved. 🔴 Do not merge yet: fix the data-loss risks and complete verification of the bundled model and distribution notices.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "I traced patient-ID validation and both processing paths through Visualizacion/Visualizacion.py, file operations in inferencia_ml.py, and the FreeSurfer pipeline. Existing optional electrode files are deleted without a visualization-specific warning, and '.'/'..' are accepted as subject IDs; the bundled joblib model could not be inspected."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Visualizacion/Visualizacion.py asks for confirmation before pip installation, and inferencia_ml.py pins scikit-learn 1.9.1. The module also prepends unnamespaced inference and visualization directories to the shared sys.path when used."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "I inspected both CMake files and the stated catalog metadata; script and resource installation is explicitly listed and the declared dependency list matches. I could not independently resolve main to the supplied commit, run a build, or inspect the resulting package."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "LICENSE.txt grants distribution subject to notice and noncommercial terms; README.md says the bundled model has the same license. The module CMake resource list does not explicitly include LICENSE.txt, and I could not verify whether Slicer's packaging includes the required license and copyright notice by another route."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "I inspected the pipeline orchestration, inference bridge, user validation, and tests in Visualizacion.py. The lengthy reconstruction is run in a subprocess with progress, but the model tests explicitly skip when its dependencies are absent, so the supplied source alone does not establish successful inference."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md and the user manual provide a demonstration, research-use warning, model provenance, and reported leave-one-patient-out validation; Visualizacion.py includes tests. I could not independently verify the validation or run the demonstration."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Visualizing an existing patient silently deletes or replaces their electrode files",
+   "file": "Visualizacion/Visualizacion.py",
+   "line_start": 1552,
+   "line_end": 1555,
+   "evidence": "        \"\"\"\n        Copia características, EEG y SEEG a la carpeta del paciente. Si\n        EEG o SEEG no se seleccionaron, borra la copia de una ejecución\n        anterior para no mostrar electrodos de otra sesión.\n        \"\"\"",
+   "explanation": "The processed-patient action calls copiarArchivosSujeto without a confirmation (lines 1598–1649). If either optional electrode input is left empty, lines 1579–1581 unlink an existing EEG or SEEG file in the patient's directory; selecting a different file overwrites the existing copy through shutil.copy2. A user merely visualizing an existing subject can thus permanently lose prior electrode data.",
+   "suggestion": "Never delete or overwrite existing patient inputs during visualization without explicit file-specific confirmation; use per-run output directories or retain existing inputs when optional fields are blank.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Patient IDs '.' and '..' escape the intended patient directory",
+   "file": "Visualizacion/Visualizacion.py",
+   "line_start": 74,
+   "line_end": 75,
+   "evidence": "# El ID da nombre a una carpeta y se pasa a FreeSurfer.\nID_VALIDO = re.compile(r\"^[A-Za-z0-9._-]+$\")",
+   "explanation": "The form validation at lines 980–988 accepts both '.' and '..', and lines 1696–1698 join the ID to the chosen results folder. '.' targets the results root and '..' its parent rather than a patient subfolder; copying, deletion, FreeSurfer outputs and prediction writes can then affect pre-existing files outside the intended subject directory. The same join is used in the processed-patient workflow.",
+   "suggestion": "Reject '.' and '..' explicitly, resolve the resulting path, and require it to be a dedicated child of the selected results directory before any write or deletion.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Unnamespaced runtime directories remain at the front of the shared import path",
+   "file": "Visualizacion/Visualizacion.py",
+   "line_start": 2167,
+   "line_end": 2176,
+   "evidence": "        inferenciaDirString = str(self.inferenciaDir)\n\n        if inferenciaDirString not in sys.path:\n\n            sys.path.insert(\n                0,\n                inferenciaDirString\n            )\n\n        import inferencia_ml",
+   "explanation": "After a user runs inference, this extension's directory remains first on the process-wide import path, so later imports with the same module names in other extensions can resolve to these files instead. The visualization directory is inserted similarly.",
+   "suggestion": "Package helper modules under an extension-specific namespace instead of permanently prepending their directories to sys.path.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No commands, Slicer build, tests, inference, or FreeSurfer processing were executed.",
+  "The source checkout's exact Git revision, the availability of the catalog's main branch, and index CI results could not be independently verified with the available tools.",
+  "The binary joblib model was not inspected or deserialized; its executable pickle contents, provenance, and integrity were not independently verified.",
+  "The installed extension package was not inspected to confirm that PolyForm terms and the required copyright notice accompany it; Slicer CPack behavior was not available here.",
+  "The actual PyPI dependency metadata, FreeSurfer installation and license, and reported model validation results were not independently verified."
+ ],
+ "questions_for_author": [
+  "Can you provide a safe, reproducible provenance and integrity verification for the bundled joblib model, including the training/export source?",
+  "Can you confirm that the distributed extension package includes the full PolyForm terms or their URL and the required copyright notice?"
+ ]
+}

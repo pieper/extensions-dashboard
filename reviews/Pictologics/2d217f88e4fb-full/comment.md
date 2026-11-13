@@ -1,0 +1,8 @@
+> *This review was done by AI models (Claude Sonnet 5.5, GPT-6.1 Terra, Gemini 4 Argon) through the Slicer extensions dashboard, and checked by the maintainer posting it. The extension source was read, not executed. Full review: https://pieper.github.io/extensions-dashboard/review.html?ext=Pictologics&dir=2d217f88e4fb-full*
+
+Thanks for Pictologics!
+
+Suggestions for a later update:
+
+- [`PictologicsSlicer/PictologicsLib/exports.py:44-48`](https://github.com/martonkolossvary/SlicerPictologics/blob/2d217f88e4fb1a78f50ec4b61370ba362de35651/PictologicsSlicer/PictologicsLib/exports.py#L44-L48): The save dialog in PictologicsSlicer.py:2700-2715 only selects and confirms the main CSV. The writer at lines 3849-3870 also generates <stem>.provenance.json and <stem>_catalog.csv, and exports.py:55-58 replaces every destination. Thus exporting a new features.csv can silently destroy an unrelated existing features_catalog.csv or features.provenance.json, even when the main CSV did not exist. The temporary backups are removed after success. Before writing, enumerate all destinations and explicitly confirm every existing file that will be replaced, or refuse collisions and let the user select another name.
+- [`PictologicsSlicer/PictologicsSlicer.py:224`](https://github.com/martonkolossvary/SlicerPictologics/blob/2d217f88e4fb1a78f50ec4b61370ba362de35651/PictologicsSlicer/PictologicsSlicer.py#L224): The Validate handler calls this method directly on the GUI thread (lines 1825-1829). If the helper is slow or stuck, communicate blocks the event loop for up to five minutes; the timeout limits the duration but does not keep the UI responsive. Run the check asynchronously or poll the process while reporting progress and supporting cancellation.

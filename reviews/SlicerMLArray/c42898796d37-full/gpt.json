@@ -1,0 +1,76 @@
+{
+ "purpose": "SlicerMLArray lets 3D Slicer users open and save MLArray images and segmentations, and convert bounding boxes to and from markup ROIs. It is intended for researchers and other users working with MLArray-formatted imaging data.",
+ "summary": "The inspected extension code uses an on-demand, confirmed dependency installation and includes geometry and round-trip tests, but several export and label-value edge cases can silently change data. These are non-blocking correctness suggestions under the index policy. The supplied source revision, repository accessibility, and the installed mlarray package and its terms could not be independently verified. 🔴 Do not merge yet: Review incomplete; verify the catalog source and revision and inspect the runtime dependency and its distribution terms.",
+ "overall": "incomplete",
+ "ratings": {
+  "safety": {
+   "rating": "unknown",
+   "rationale": "Inspected the reader, writer, dependency installation, build scripts, and repository-wide searches for common risky APIs. The runtime mlarray package that parses and writes files could not be inspected, so its behavior and dependency chain remain unverified."
+  },
+  "environment": {
+   "rating": "unknown",
+   "rationale": "dependencies.py and slicer_io.py prompt before installing mlarray on first use rather than at startup. Its transitive package requirements could not be examined, so effects on Slicer's shared environment remain unknown."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "The CMake module list includes all local imported library files and the icon, and EXTENSION_DEPENDS is consistent with the supplied empty build_dependencies. Repository accessibility, the moving main revision, and a real catalog build could not be verified."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "LICENSE.txt grants MIT distribution permission for the extension. The separately installed mlarray package and its dependencies were unavailable for license inspection."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected loading, export, geometry, scaling, and the supplied tests. The code can truncate large label IDs and can crop edited segmentations to the original grid; sparse label values also cause excessive color-table allocation."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md documents installation, file workflows and supported layouts, and the repository provides pure-Python and Slicer verification tests. These tests and their reported results were not run."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "64-bit label values are silently truncated to 32 bits",
+   "file": "SlicerMLArray/SlicerMLArrayLib/slicer_io.py",
+   "line_start": 173,
+   "line_end": 176,
+   "evidence": "    labels = frame if np.issubdtype(frame.dtype, np.integer) else np.rint(frame).astype(np.int32)\n    if labels.dtype in (np.uint64, np.int64):\n        labels = labels.astype(np.int32)\n    present = [int(v) for v in np.unique(labels) if v != 0]",
+   "explanation": "A 64-bit label or instance ID outside the signed 32-bit range wraps without warning; for example, 4294967296 becomes zero and is treated as background. The displayed segmentation or labelmap and subsequent export can therefore omit or misidentify regions.",
+   "suggestion": "Preserve supported IDs or reject out-of-range values before casting, and add tests for large IDs and collisions.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Export can crop segmentation edits outside the original file grid",
+   "file": "SlicerMLArray/SlicerMLArrayLib/slicer_io.py",
+   "line_start": 512,
+   "line_end": 518,
+   "evidence": "    if record is not None:\n        shape = record[\"shape\"]\n        k_j_i = [shape[a] for a in record[\"spatial_axes\"]]\n        if record.get(\"is_2d\"):\n            k_j_i = [1] + k_j_i\n        g = type(\"G\", (), {\"ijk_to_ras\": np.array(record[\"ijk_to_ras\"])})()",
+   "explanation": "For a segmentation loaded from MLArray, export rasterizes against the original recorded extent even if the user later adds or extends segments beyond it. Those outside voxels are omitted from the saved file without an explicit warning.",
+   "suggestion": "Detect voxels outside the recorded grid and refuse or warn, or offer an expanded output grid; add an edited-extent round-trip test.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Sparse label IDs allocate a color table up to the largest ID",
+   "file": "SlicerMLArray/SlicerMLArrayLib/slicer_io.py",
+   "line_start": 229,
+   "line_end": 233,
+   "evidence": "    size = (max(label.value for label in table) + 1) if table else 1\n    node.SetNumberOfColors(size)\n    node.SetColor(0, \"background\", 0.0, 0.0, 0.0, 0.0)\n    for v in range(1, size):\n        node.SetColor(v, \"\", 0.0, 0.0, 0.0, 0.0)",
+   "explanation": "A small labelmap with a single large positive label ID requests a color table proportional to the ID and initializes every intermediate entry on the GUI thread. This can exhaust memory or freeze Slicer despite the input image being small.",
+   "suggestion": "Use a bounded or sparse mapping, or reject impractically large label IDs with a clear message.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Independent resolution of https://github.com/MIC-DKFZ/SlicerMLArray.git, the supplied commit c42898796d375872738ba5f420b5a54cb885762a, or the actual current main branch; the commit is supplied by the user but was not verified.",
+  "Source, transitive dependencies, package metadata, and distribution terms of mlarray>=1.0.0,<2 and any downloaded payloads.",
+  "Slicer build, module load, runtime behavior, automated tests, CI results, and catalog validation; no execution or network access was available.",
+  "Previous index entry or source baseline and PR submission checklist; neither was supplied for independent comparison."
+ ],
+ "questions_for_author": []
+}

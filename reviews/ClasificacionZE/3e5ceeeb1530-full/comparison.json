@@ -1,0 +1,492 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Patient IDs '.' and '..' escape the intended patient directory",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "Visualizacion/Visualizacion.py",
+   "line": 74,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Patient IDs '.' and '..' escape the intended patient directory",
+     "file": "Visualizacion/Visualizacion.py",
+     "line_start": 74,
+     "line_end": 75,
+     "evidence": "# El ID da nombre a una carpeta y se pasa a FreeSurfer.\nID_VALIDO = re.compile(r\"^[A-Za-z0-9._-]+$\")",
+     "explanation": "The form validation at lines 980–988 accepts both '.' and '..', and lines 1696–1698 join the ID to the chosen results folder. '.' targets the results root and '..' its parent rather than a patient subfolder; copying, deletion, FreeSurfer outputs and prediction writes can then affect pre-existing files outside the intended subject directory. The same join is used in the processed-patient workflow.",
+     "suggestion": "Reject '.' and '..' explicitly, resolve the resulting path, and require it to be a dedicated child of the selected results directory before any write or deletion.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Visualizacion/Visualizacion.py",
+      "line": 74
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Visualizacion.py:75 `ID_VALIDO = re.compile(r\"^[A-Za-z0-9._-]+$\")` and the check at 984 do accept '.' and '..'. subjectDir = subjectsDir / subjectId (1643-1646, 1696-1698), so the paths resolve to the results folder or its parent. This is a real validation gap. However, the user picks both the folder and the ID in their own session, and there is no remote or untrusted input. The only files touched are the extension's own named outputs, plus FreeSurfer outputs the user asked for. It is a robustness bug, not a path to harm, so not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Visualizacion/Visualizacion.py:74–75 defines `ID_VALIDO = re.compile(r\"^[A-Za-z0-9._-]+$\")`, and lines 980–988 reject only empty or nonmatching IDs, so both `.` and `..` pass. Lines 1696–1698 use `subjectDir = subjectsPath / subjectId`; lines 1643–1648 use the same join for processed patients. Thus `.` targets the results root and `..` its parent. Subject copying/deletion at lines 1558–1581 and prediction deletion at Inferencia/inferencia_ml.py:146–154 can affect existing files there. Full processing has a confirmation and sometimes an overwrite warning (Visualizacion.py:1748–1772), but neither prevents targeting the wrong directory. Reject special components and verify containment before writes."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked Visualizacion/Visualizacion.py lines 74-75 (`ID_VALIDO = re.compile(r\"^[A-Za-z0-9._-]+$\")`), lines 980-988 (form validation checking `ID_VALIDO.match(formulario[\"subjectId\"])`), and lines 1014-1017, 1643-1646, and 1696-1698 (`subjectDir = subjectsPath / subjectId`). The regex indeed matches \".\" and \"..\", which resolve to the results root or its parent directory when joined with `Path`. However, `subjectId` is typed by the local user into a GUI text field on their own machine (not untrusted external input), and in the full pipeline `onRunPipeline` displays the resolved `subjectDir` in a confirmation dialog before proceeding. Under the review policy, an edge-case validation omission on a user's own local input is a minor validation bug, not a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Visualizing an existing patient silently deletes or replaces their electrode files",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "Visualizacion/Visualizacion.py",
+   "line": 91,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Visualizing an existing patient silently deletes or replaces their electrode files",
+     "file": "Visualizacion/Visualizacion.py",
+     "line_start": 1552,
+     "line_end": 1555,
+     "evidence": "        \"\"\"\n        Copia características, EEG y SEEG a la carpeta del paciente. Si\n        EEG o SEEG no se seleccionaron, borra la copia de una ejecución\n        anterior para no mostrar electrodos de otra sesión.\n        \"\"\"",
+     "explanation": "The processed-patient action calls copiarArchivosSujeto without a confirmation (lines 1598–1649). If either optional electrode input is left empty, lines 1579–1581 unlink an existing EEG or SEEG file in the patient's directory; selecting a different file overwrites the existing copy through shutil.copy2. A user merely visualizing an existing subject can thus permanently lose prior electrode data.",
+     "suggestion": "Never delete or overwrite existing patient inputs during visualization without explicit file-specific confirmation; use per-run output directories or retain existing inputs when optional fields are blank.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "Visualizacion/Visualizacion.py",
+      "line": 91
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "copiarArchivosSujeto (1550-1592) does unlink an existing electrode copy (1579-1581) when the field is empty, and copy2 overwrites it. But these are only the extension's own copies (electrodos/eeg_superficie.csv, seeg_dipolos.tsv) inside the patient folder. The originals the user selected are untouched, and the docstring documents the behavior. Neither the docstring nor the UI asks for confirmation, which is a UX weakness. This is not unintended destruction of user data, so it is minor."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Visualizacion/Visualizacion.py:497–518 describes EEG and SEEG as optional and says leaving them empty merely means electrodes are not drawn. The processed-patient handler calls `self.copiarArchivosSujeto(formulario, subjectDir)` at lines 1643–1649 without a destructive-action confirmation. Lines 1558–1561 identify the patient electrode files and lines 1579–1581 execute `elif destino.exists():` followed by `destino.unlink()`. If a different input is selected, lines 1542–1547 call `shutil.copy2(origen, destino)`, replacing the existing copy. The original source may still exist elsewhere, but it need not: a previously selected file may itself be the patient copy. Preserve existing data or explicitly confirm destructive changes."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked Visualizacion/Visualizacion.py lines 1550-1592 (`copiarArchivosSujeto`) and lines 1598-1650 (`onVisualizarProcesado`). When `onVisualizarProcesado` runs, it calls `copiarArchivosSujeto(formulario, subjectDir)` without a confirmation prompt. In `copiarArchivosSujeto` (lines 1558-1581), if `formulario[\"eeg\"]` or `formulario[\"seeg\"]` is empty and the corresponding target file (`<subjectDir>/electrodos/eeg_superficie.csv` or `seeg_dipolos.tsv`) exists, `destino.unlink()` deletes that copy, and if a file is selected, `shutil.copy2` overwrites `destino` (unless `origen` and `destino` resolve to the same file, lines 1542-1543). While this is intentional per the docstring (lines 1552-1555) to avoid displaying stale electrodes from a previous session, someone re-running `onVisualizarProcesado` on an existing patient folder without re-selecting the optional electrode files will have the cached copy in `<subjectDir>/electrodos/` deleted without warning. Because this can unexpectedly delete existing files in a pre-processed subject directory when the user only intends to visualize, it is a real concern (major), though usually the original files remain at their source path unless the us"
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Exact pin `scikit-learn==1.9.1` may fail to resolve on PyPI or conflict with Slicer's environment",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Inferencia/inferencia_ml.py",
+   "line": 23,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Exact pin `scikit-learn==1.9.1` may fail to resolve on PyPI or conflict with Slicer's environment",
+     "file": "Inferencia/inferencia_ml.py",
+     "line_start": 23,
+     "line_end": 31,
+     "evidence": "VERSION_SKLEARN = \"1.9.1\"\n\n# distribución de pip -> requisito que se instala si falta.\nDEPENDENCIAS = {\n    \"pandas\": \"pandas\",\n    \"joblib\": \"joblib\",\n    \"scikit-learn\": f\"scikit-learn=={VERSION_SKLEARN}\",\n    \"nibabel\": \"nibabel\",  # superficies y anotaciones de FreeSurfer (VisualizacionML)\n}",
+     "explanation": "`Inferencia/inferencia_ml.py` pins `scikit-learn==1.9.1`. As of April 2026, scikit-learn 1.9.1 does not exist on PyPI (and if a different version is already installed in Slicer's shared Python environment, `dependenciasFaltantes()` will attempt to replace it with `1.9.1`, or `pip_install` will fail with `No matching distribution found for scikit-learn==1.9.1`). Additionally, installing an exact pin of `scikit-learn` can trigger upgrades or downgrades of `numpy` or `scipy` that Slicer bundles.",
+     "suggestion": "Verify the exact scikit-learn version on PyPI (e.g. `1.6.1` or `>=1.5`) or relax the hard `==` pin in `DEPENDENCIAS` (relying on the runtime warning in `soz_inferencia.cargar_modelo` if versions differ) so `pip_install` does not fail or alter Slicer's bundled `numpy`/`scipy`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Inferencia/inferencia_ml.py",
+      "line": 23
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unnamespaced runtime directories remain at the front of the shared import path",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Visualizacion/Visualizacion.py",
+   "line": 2167,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Unnamespaced runtime directories remain at the front of the shared import path",
+     "file": "Visualizacion/Visualizacion.py",
+     "line_start": 2167,
+     "line_end": 2176,
+     "evidence": "        inferenciaDirString = str(self.inferenciaDir)\n\n        if inferenciaDirString not in sys.path:\n\n            sys.path.insert(\n                0,\n                inferenciaDirString\n            )\n\n        import inferencia_ml",
+     "explanation": "After a user runs inference, this extension's directory remains first on the process-wide import path, so later imports with the same module names in other extensions can resolve to these files instead. The visualization directory is inserted similarly.",
+     "suggestion": "Package helper modules under an extension-specific namespace instead of permanently prepending their directories to sys.path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Visualizacion/Visualizacion.py",
+      "line": 2167
+     }
+    }
+   ]
+  },
+  {
+   "title": "Licensed under PolyForm Noncommercial License 1.0.0 (non-commercial use only)",
+   "category": "license",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "LICENSE.txt",
+   "line": 3,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Licensed under PolyForm Noncommercial License 1.0.0 (non-commercial use only)",
+     "file": "LICENSE.txt",
+     "line_start": 3,
+     "line_end": 5,
+     "evidence": "# PolyForm Noncommercial License 1.0.0\n\n<https://polyformproject.org/licenses/noncommercial/1.0.0>",
+     "explanation": "The extension and its bundled `.joblib` model are licensed under the PolyForm Noncommercial License 1.0.0 (`LICENSE.txt` and `CMakeLists.txt`). This explicitly permits distribution and modification for noncommercial purposes (including by the Slicer Extensions Index and academic/public health institutions), while prohibiting commercial use. Users in commercial settings should be aware of this restriction.",
+     "suggestion": "No change required; the noncommercial restriction is already clearly noted in `CMakeLists.txt`, `README.md`, and `LICENSE.txt`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "LICENSE.txt",
+      "line": 3
+     }
+    }
+   ]
+  },
+  {
+   "title": "Temporary status directory created by `tempfile.mkdtemp` is not cleaned up after pipeline finishes",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "Visualizacion/Visualizacion.py",
+   "line": 1883,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Temporary status directory created by `tempfile.mkdtemp` is not cleaned up after pipeline finishes",
+     "file": "Visualizacion/Visualizacion.py",
+     "line_start": 1883,
+     "line_end": 1887,
+     "evidence": "        runDir = Path(\n            tempfile.mkdtemp(\n                prefix=\"Visualizacion_epilepsia_\"\n            )\n        )",
+     "explanation": "In `onRunPipeline`, a temporary directory (`runDir`) is created with `tempfile.mkdtemp` to hold `pipeline_status.txt`, `pipeline_current.txt`, and `pipeline.log`. After `finishPipeline()` copies `pipeline.log` to the subject folder, `runDir` is never removed (`shutil.rmtree`), leaving small temporary directories behind in the system temp folder after each FreeSurfer run.",
+     "suggestion": "Remove `runDir` with `shutil.rmtree(runDir, ignore_errors=True)` at the end of `finishPipeline` and `cleanup`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Visualizacion/Visualizacion.py",
+      "line": 1883
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Patient IDs '.' and '..' escape the intended patient directory",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "Visualizacion/Visualizacion.py",
+   "line": 74,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Patient IDs '.' and '..' escape the intended patient directory",
+     "file": "Visualizacion/Visualizacion.py",
+     "line_start": 74,
+     "line_end": 75,
+     "evidence": "# El ID da nombre a una carpeta y se pasa a FreeSurfer.\nID_VALIDO = re.compile(r\"^[A-Za-z0-9._-]+$\")",
+     "explanation": "The form validation at lines 980–988 accepts both '.' and '..', and lines 1696–1698 join the ID to the chosen results folder. '.' targets the results root and '..' its parent rather than a patient subfolder; copying, deletion, FreeSurfer outputs and prediction writes can then affect pre-existing files outside the intended subject directory. The same join is used in the processed-patient workflow.",
+     "suggestion": "Reject '.' and '..' explicitly, resolve the resulting path, and require it to be a dedicated child of the selected results directory before any write or deletion.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Visualizacion/Visualizacion.py",
+      "line": 74
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Visualizacion.py:75 `ID_VALIDO = re.compile(r\"^[A-Za-z0-9._-]+$\")` and the check at 984 do accept '.' and '..'. subjectDir = subjectsDir / subjectId (1643-1646, 1696-1698), so the paths resolve to the results folder or its parent. This is a real validation gap. However, the user picks both the folder and the ID in their own session, and there is no remote or untrusted input. The only files touched are the extension's own named outputs, plus FreeSurfer outputs the user asked for. It is a robustness bug, not a path to harm, so not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Visualizacion/Visualizacion.py:74–75 defines `ID_VALIDO = re.compile(r\"^[A-Za-z0-9._-]+$\")`, and lines 980–988 reject only empty or nonmatching IDs, so both `.` and `..` pass. Lines 1696–1698 use `subjectDir = subjectsPath / subjectId`; lines 1643–1648 use the same join for processed patients. Thus `.` targets the results root and `..` its parent. Subject copying/deletion at lines 1558–1581 and prediction deletion at Inferencia/inferencia_ml.py:146–154 can affect existing files there. Full processing has a confirmation and sometimes an overwrite warning (Visualizacion.py:1748–1772), but neither prevents targeting the wrong directory. Reject special components and verify containment before writes."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked Visualizacion/Visualizacion.py lines 74-75 (`ID_VALIDO = re.compile(r\"^[A-Za-z0-9._-]+$\")`), lines 980-988 (form validation checking `ID_VALIDO.match(formulario[\"subjectId\"])`), and lines 1014-1017, 1643-1646, and 1696-1698 (`subjectDir = subjectsPath / subjectId`). The regex indeed matches \".\" and \"..\", which resolve to the results root or its parent directory when joined with `Path`. However, `subjectId` is typed by the local user into a GUI text field on their own machine (not untrusted external input), and in the full pipeline `onRunPipeline` displays the resolved `subjectDir` in a confirmation dialog before proceeding. Under the review policy, an edge-case validation omission on a user's own local input is a minor validation bug, not a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Visualizing an existing patient silently deletes or replaces their electrode files",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "Visualizacion/Visualizacion.py",
+   "line": 91,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Visualizing an existing patient silently deletes or replaces their electrode files",
+     "file": "Visualizacion/Visualizacion.py",
+     "line_start": 1552,
+     "line_end": 1555,
+     "evidence": "        \"\"\"\n        Copia características, EEG y SEEG a la carpeta del paciente. Si\n        EEG o SEEG no se seleccionaron, borra la copia de una ejecución\n        anterior para no mostrar electrodos de otra sesión.\n        \"\"\"",
+     "explanation": "The processed-patient action calls copiarArchivosSujeto without a confirmation (lines 1598–1649). If either optional electrode input is left empty, lines 1579–1581 unlink an existing EEG or SEEG file in the patient's directory; selecting a different file overwrites the existing copy through shutil.copy2. A user merely visualizing an existing subject can thus permanently lose prior electrode data.",
+     "suggestion": "Never delete or overwrite existing patient inputs during visualization without explicit file-specific confirmation; use per-run output directories or retain existing inputs when optional fields are blank.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "Visualizacion/Visualizacion.py",
+      "line": 91
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "copiarArchivosSujeto (1550-1592) does unlink an existing electrode copy (1579-1581) when the field is empty, and copy2 overwrites it. But these are only the extension's own copies (electrodos/eeg_superficie.csv, seeg_dipolos.tsv) inside the patient folder. The originals the user selected are untouched, and the docstring documents the behavior. Neither the docstring nor the UI asks for confirmation, which is a UX weakness. This is not unintended destruction of user data, so it is minor."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Visualizacion/Visualizacion.py:497–518 describes EEG and SEEG as optional and says leaving them empty merely means electrodes are not drawn. The processed-patient handler calls `self.copiarArchivosSujeto(formulario, subjectDir)` at lines 1643–1649 without a destructive-action confirmation. Lines 1558–1561 identify the patient electrode files and lines 1579–1581 execute `elif destino.exists():` followed by `destino.unlink()`. If a different input is selected, lines 1542–1547 call `shutil.copy2(origen, destino)`, replacing the existing copy. The original source may still exist elsewhere, but it need not: a previously selected file may itself be the patient copy. Preserve existing data or explicitly confirm destructive changes."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked Visualizacion/Visualizacion.py lines 1550-1592 (`copiarArchivosSujeto`) and lines 1598-1650 (`onVisualizarProcesado`). When `onVisualizarProcesado` runs, it calls `copiarArchivosSujeto(formulario, subjectDir)` without a confirmation prompt. In `copiarArchivosSujeto` (lines 1558-1581), if `formulario[\"eeg\"]` or `formulario[\"seeg\"]` is empty and the corresponding target file (`<subjectDir>/electrodos/eeg_superficie.csv` or `seeg_dipolos.tsv`) exists, `destino.unlink()` deletes that copy, and if a file is selected, `shutil.copy2` overwrites `destino` (unless `origen` and `destino` resolve to the same file, lines 1542-1543). While this is intentional per the docstring (lines 1552-1555) to avoid displaying stale electrodes from a previous session, someone re-running `onVisualizarProcesado` on an existing patient folder without re-selecting the optional electrode files will have the cached copy in `<subjectDir>/electrodos/` deleted without warning. Because this can unexpectedly delete existing files in a pre-processed subject directory when the user only intends to visualize, it is a real concern (major), though usually the original files remain at their source path unless the us"
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D3",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (ok, blocking, minor)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": "ok",
+     "reason": "I searched the repo for network calls, eval/exec, pickle and shell=True and found no data exfiltration, servers, or downloaded executables. subprocess calls are used to run FreeSurfer, and the form blocks shell-dangerous characters (973). pip_install at Visualizacion.py:2246 runs only after an explicit consent dialog (2220-2226) and only for missing packages. joblib loads only the bundled model. The D1 and D2 issues are minor bugs, not safety blockers, so I rate safety ok. I did not audit every Pipeline script in depth."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "Inspected ID validation, processed and new-patient workflows, copying, inference output deletion, and representative pipeline invocation. The concrete unintended data-loss paths in D1 and D2 justify blocking safety: Visualizacion/Visualizacion.py:1579–1581 has `elif destino.exists():` and `destino.unlink()`, while lines 74–75 and 1696–1698 permit `..` to target the results folder's parent. Binary joblib payload contents and the exact repository revision could not be verified using the available text-reading tools; the safety assessment is not a complete audit."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": null,
+     "rating": "minor",
+     "reason": "Checked Visualizacion/Visualizacion.py, Inferencia/inferencia_ml.py, Inferencia/soz_inferencia.py, and Pipeline/input_t1.py. There is no malicious behavior, hidden telemetry, or arbitrary code execution from untrusted sources (the bundled model `Inferencia/soz_extratrees_sEEG_15pacientes.joblib` is part of the repo and loaded locally via `joblib.load` in `Inferencia/soz_inferencia.py:39`, shell characters in paths are checked via `CARACTERES_PELIGROSOS` in `Visualizacion/Visualizacion.py:79,973`, and package installation in `Visualizacion/Visualizacion.py:2246` asks for user confirmation first). However, there are minor/non-blocking safety-related edge cases in file handling: `onVisualizarProcesado` (`Visualizacion/Visualizacion.py:1579-1581, 1648`) silently unlinks existing cached electrode files `<subjectDir>/electrodos/eeg_superficie.csv` and `seeg_dipolos.tsv` when the optional form fields are left blank, and `ID_VALIDO` (`Visualizacion/Visualizacion.py:75`) does not reject `.` or `..`. Thus `minor` is the appropriate rating for safety."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "minor"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "minor issues",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 3,
+  "single": 6,
+  "unverified": 0,
+  "total": 6,
+  "open_disputes": 1
+ }
+}

@@ -1,0 +1,63 @@
+{
+ "purpose": "MRtoCT is a 3D Slicer scripted module for radiotherapy researchers that generates a synthetic CT volume (in Hounsfield units) from a brain MR volume using a 3D ResNet generator (SAdaNGF).",
+ "summary": "MRtoCT is a clean, well-structured extension for brain MR-to-synthetic-CT translation using a pure-PyTorch 3D ResNet generator. It follows Slicer best practices: it uses `PyTorchUtils` for PyTorch, avoids heavy imports at startup, verifies downloaded weights with SHA-256, loads weights safely with `weights_only=True`, and clearly discloses its CC BY-NC 4.0 and research-only terms. One major non-blocking bug should be fixed by the author: `MRtoCTLogic.downloadWeights` (`MRtoCT/MRtoCT.py:227-228`) still checks `if 'kgiraldo09' in WEIGHTS_URL:`, which matches the configured `WEIGHTS_URL` and raises a `RuntimeError` whenever automatic weight download is triggered. Under the Extensions Index admission policy (safety, license, and catalog entry requirements all met), 🟢 Recommend merge.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all files in the repository (`CMakeLists.txt`, `MRtoCT/CMakeLists.txt`, `MRtoCT/MRtoCT.py`, `MRtoCT/MRtoCTLib/mr_to_sct.py`, `LICENSE.txt`, `README.md`). There is no telemetry or data exfiltration; model weights are downloaded from a GitHub release only after user confirmation, verified with SHA-256 (`MRtoCT/MRtoCT.py` lines 250-252), and loaded safely with `torch.load(..., weights_only=True)` (`MRtoCT/MRtoCTLib/mr_to_sct.py` line 109)."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected `MRtoCT/MRtoCT.py` and `MRtoCT/MRtoCTLib/mr_to_sct.py`. Heavy imports (`torch`, `MRtoCTLib.mr_to_sct`) are deferred until execution inside `MRtoCTLogic`, and PyTorch is obtained solely through `PyTorchUtils` when the user runs the module, with no pip installs or global side effects at import/startup."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected the catalog entry, `CMakeLists.txt`, and `MRtoCT/CMakeLists.txt`. `EXTENSION_DEPENDS` (`PyTorch`) matches `build_dependencies`, and `MRtoCT/CMakeLists.txt` installs `MRtoCT.py`, `MRtoCTLib/__init__.py`, `MRtoCTLib/mr_to_sct.py`, and the module icon."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE.txt`, `README.md`, and `MRtoCT/MRtoCT.py`. The code and model weights are clearly licensed under CC BY-NC 4.0 by the author, which permits non-commercial distribution, and the module displays a clear license/research-only confirmation dialog before first use."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected `MRtoCT/MRtoCT.py` and `MRtoCT/MRtoCTLib/mr_to_sct.py`. The architecture, geometry handling, pure-PyTorch sliding-window inference, and unit test are clean, but `downloadWeights` in `MRtoCT/MRtoCT.py` (lines 227-228) still contains a template guard `if 'kgiraldo09' in WEIGHTS_URL:` that matches the author's own GitHub username in `WEIGHTS_URL` and unconditionally raises a `RuntimeError` when downloading weights."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md`, `MRtoCT/MRtoCT.py`, and `MRtoCT/MRtoCTLib/mr_to_sct.py`. The module provides clear documentation, clinical-use disclaimers, a self-contained pure-PyTorch inference implementation, and a self-test using synthetic data."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Leftover placeholder check unconditionally blocks automatic weight download",
+   "file": "MRtoCT/MRtoCT.py",
+   "line_start": 227,
+   "line_end": 228,
+   "evidence": "        if 'kgiraldo09' in WEIGHTS_URL:\n            raise RuntimeError('WEIGHTS_URL is not set in MRtoCT.py (see README, step 3).')",
+   "explanation": "In `MRtoCTLogic.downloadWeights`, the check `if 'kgiraldo09' in WEIGHTS_URL:` always evaluates to `True` because `WEIGHTS_URL` is `'https://github.com/kgiraldo09/SlicerMRtoCT/releases/download/v1.0/best_net_G_A.pth'`. As a result, any user running the module for the first time without providing custom weights or manually placing `best_net_G_A.pth` in the module directory will get a `RuntimeError` and the model weights will never be downloaded.",
+   "suggestion": "Remove this placeholder check, or check for an actual placeholder string (such as `'YOUR_USERNAME'` or `not WEIGHTS_URL`).",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Extension code and weights are licensed for non-commercial use only (CC BY-NC 4.0)",
+   "file": "LICENSE.txt",
+   "line_start": 4,
+   "line_end": 5,
+   "evidence": "This work is licensed under the Creative Commons Attribution-NonCommercial 4.0 International\nLicense (CC BY-NC 4.0). Full license text: https://creativecommons.org/licenses/by-nc/4.0/legalcode",
+   "explanation": "Both the extension code and the model weights are licensed under Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0). This permits non-commercial distribution via the Slicer Extensions Index, and the module clearly prompts users to accept the non-commercial and research-only terms before first use (`MRtoCT/MRtoCT.py` lines 38-45, 174-181). Users in commercial settings should be aware of this restriction.",
+   "suggestion": "No action required; the non-commercial and research-only terms are already clearly disclosed in `CMakeLists.txt`, `README.md`, `LICENSE.txt`, and an in-app confirmation dialog.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Availability and SHA-256 checksum of the remote model weights asset at https://github.com/kgiraldo09/SlicerMRtoCT/releases/download/v1.0/best_net_G_A.pth (no network access in review environment)."
+ ],
+ "questions_for_author": [
+  "Could you remove the leftover `if 'kgiraldo09' in WEIGHTS_URL:` check in `MRtoCT/MRtoCT.py` (lines 227-228) so that the first-run download of `best_net_G_A.pth` from your GitHub release works?"
+ ]
+}

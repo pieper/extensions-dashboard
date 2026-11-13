@@ -1,0 +1,88 @@
+{
+ "purpose": "MRtoCT generates a synthetic CT volume from a brain MR using a deep-learning model. It is intended for non-commercial radiotherapy research, not clinical treatment planning.",
+ "summary": "The module can overwrite its input MR in place without warning if the same volume is selected as output. Its default model download also always fails because a placeholder check matches the configured URL; that functionality issue is non-blocking under the index policy. Licensing permits non-commercial distribution. 🔴 Do not merge yet: prevent unintended input-volume destruction. Review is also incomplete because the source revision and model asset could not be independently verified.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "I inspected the volume selectors, processing path, download handling and model loading. Selecting the input as output replaces its image data without confirmation; downloaded weights are checksum-checked and loaded with weights_only=True."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "I inspected imports and ensureDependencies: PyTorch is requested through PyTorchUtils on use, and the declared extension dependency is PyTorch. No import-time package installation or global environment modifications were found in the inspected code."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "CMake lists the module, both helper files and the existing icon, and its PyTorch dependency matches the supplied catalog entry. Repository accessibility, branch resolution and an actual build could not be verified."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE.txt explicitly licenses the code and model weights under CC BY-NC 4.0, permitting non-commercial distribution; README and the UI state the research-only and non-commercial limitations."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "I inspected model resolution, inference and the included test. The configured URL is rejected unconditionally, and inference is synchronous; the included test uses custom random weights and does not exercise the default download."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README describes installation, operation and clinical limitations, and the source includes a plumbing test. The published-model path is broken and the README gives no validation results or training-data provenance."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Selecting the input as output destroys the in-scene MR data",
+   "file": "MRtoCT/MRtoCT.py",
+   "line_start": 289,
+   "line_end": 294,
+   "evidence": "        # same voxel grid and position as the input MR\n        ijkToRas = vtk.vtkMatrix4x4()\n        inputVolume.GetIJKToRASMatrix(ijkToRas)\n        outputVolume.SetIJKToRASMatrix(ijkToRas)\n        slicer.util.updateVolumeFromArray(outputVolume, sct)\n        outputVolume.SetAndObserveTransformNodeID(inputVolume.GetTransformNodeID())",
+   "explanation": "Both selectors accept scalar volume nodes and there is no check that the output differs from the input. If a user inadvertently selects the MR as the output, a successful generation replaces its voxel data with synthetic CT; subsequently saving that node can lose the original MR data.",
+   "suggestion": "Reject identical input and output nodes, or require a clear explicit overwrite confirmation; consider protecting other existing output volumes as well.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Default model download is always rejected",
+   "file": "MRtoCT/MRtoCT.py",
+   "line_start": 226,
+   "line_end": 228,
+   "evidence": "    def downloadWeights(self, target):\n        if 'kgiraldo09' in WEIGHTS_URL:\n            raise RuntimeError('WEIGHTS_URL is not set in MRtoCT.py (see README, step 3).')",
+   "explanation": "The configured URL at line 33 contains kgiraldo09, so every fresh installation without custom or cached weights raises this error before attempting the documented download. The included test bypasses this path using custom weights.",
+   "suggestion": "Replace the placeholder check with a valid configuration check and add a test for the default model resolution and download path.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Long inference runs on the GUI thread without inference progress",
+   "file": "MRtoCT/MRtoCT.py",
+   "line_start": 152,
+   "line_end": 158,
+   "evidence": "        self.statusLabel.text = 'Running...'\n        slicer.app.processEvents()\n        try:\n            with slicer.util.tryWithErrorDisplay('Synthetic CT generation failed.', waitCursor=True):\n                device, seconds = self.logic.process(\n                    inputVolume, outputVolume, customWeights, useGPU=self.gpuCheckBox.checked,\n                    slidingWindow={'sw_batch_size': self.batchSpinBox.value})",
+   "explanation": "The button handler calls processing synchronously, and the sliding-window inference loop does not process events or report progress. Large volumes or CPU inference can leave Slicer unresponsive for a prolonged period.",
+   "suggestion": "Run the computation off the GUI thread and provide progress and cancellation while keeping MRML updates on the main thread.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Model provenance and validation are not documented",
+   "file": "README.md",
+   "line_start": 36,
+   "line_end": 38,
+   "evidence": "## Citation\n\nPaper in preparation",
+   "explanation": "The README identifies the model but does not describe its training data or report validation results, making it difficult for researchers to assess its suitability for their data. It appropriately warns that the result is not clinically validated.",
+   "suggestion": "Document training-data provenance, intended input population and available quantitative validation when they can be shared.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not independently access the repository to verify that the supplied files correspond to commit 15d5db4e8ad533a82015c0178e4cd8d78600fdf7 or that the catalog's main branch resolves to it.",
+  "Could not fetch or inspect the external model asset, verify its availability or SHA-256, or independently assess its provenance.",
+  "Could not run Slicer, build the extension, execute tests, or inspect CI results.",
+  "Could not inspect the submission checklist or prior review baseline."
+ ],
+ "questions_for_author": []
+}

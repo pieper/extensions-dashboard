@@ -1,0 +1,113 @@
+{
+ "purpose": "TavrWorkbench is a 3D Slicer extension for clinicians and researchers to review and edit automated TAVR (transcatheter aortic valve replacement) CT segmentations, anatomical contours, hinge points, and height measurements across a batch of cases. It also includes an annular-plane recomputation pipeline and a parametric TAVR valve mesh generator that exports placed valve models to STL.",
+ "summary": "🔴 Do not merge yet: `TavrWorkbench/CMakeLists.txt` only lists `TavrWorkbench.py` in `MODULE_PYTHON_SCRIPTS` and omits the 12 Python files under `TavrWorkbenchLib/`, causing the packaged extension to fail to load (`ModuleNotFoundError: No module named 'TavrWorkbenchLib'`). Additionally, `TavrWorkbench/TavrWorkbench.py` calls `vtk.vtkObject.GlobalWarningDisplayOff()` at import time, which globally silences VTK warnings for the entire Slicer process. Once `TavrWorkbenchLib/*.py` are added to `TavrWorkbench/CMakeLists.txt` (and ideally the global VTK warning suppression at import time is removed), the extension will be ready to merge.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all Python modules in `TavrWorkbench/`, `TavrWorkbench/TavrWorkbenchLib/`, `TavrWorkbench/tools/`, and standalone installer scripts in `install/`. There is no telemetry, unauthorized network communication, unsafe deserialization, or command injection in the extension code."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Inspected all Python files and `Resources/requirements.txt`. No packages are installed at startup or runtime (it uses only bundled numpy and SimpleITK), but `TavrWorkbench/TavrWorkbench.py` calls `vtk.vtkObject.GlobalWarningDisplayOff()` at the top level on module import, silencing VTK warnings globally for the entire Slicer session."
+  },
+  "packaging": {
+   "rating": "blocking",
+   "rationale": "Inspected `CMakeLists.txt`, `TavrWorkbench/CMakeLists.txt`, and all Python imports. `TavrWorkbench/CMakeLists.txt` only installs `TavrWorkbench.py` and omits all 12 files in `TavrWorkbenchLib/`, so the packaged extension will fail to load with `ModuleNotFoundError: No module named 'TavrWorkbenchLib'`."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "Inspected `LICENSE.md` and `LICENSE.txt`. The repository is licensed under Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International (CC BY-NC-ND 4.0), which permits verbatim redistribution by the Extensions Index, though it restricts commercial use and sharing of modified derivatives."
+  },
+  "soundness": {
+   "rating": "ok",
+   "rationale": "Inspected `TavrWorkbench.py` and all modules in `TavrWorkbenchLib/`. The code is well-structured, uses pure NumPy and SimpleITK for geometry and reslicing, writes files atomically via `.tmp` files and `os.replace`, archives previous measurements before overwriting, and cleans up MRML nodes and observers properly."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md`, `TavrWorkbench.py`, and `TavrWorkbenchLib/`. The extension provides a comprehensive, practical workflow for reviewing and correcting TAVR CT segmentations, contours, annular planes, and parametric valve placement, along with a unit test for contour geometry."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "blocking",
+   "title": "TavrWorkbenchLib Python files are missing from MODULE_PYTHON_SCRIPTS in CMakeLists.txt",
+   "file": "TavrWorkbench/CMakeLists.txt",
+   "line_start": 5,
+   "line_end": 7,
+   "evidence": "set(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n  )",
+   "explanation": "`TavrWorkbench/TavrWorkbench.py` imports 11 modules from the `TavrWorkbenchLib/` package (`annular_plane.py`, `annulus_pipeline.py`, `cases.py`, `constants.py`, `geometry.py`, `measurement_editor.py`, `rating_table.py`, `segmentation_editor.py`, `storage.py`, `valve_generator.py`, `valve_panel.py`, and `__init__.py`), but `TavrWorkbench/CMakeLists.txt` only lists `${MODULE_NAME}.py` in `MODULE_PYTHON_SCRIPTS`. When built and packaged by the Slicer Extension build system, none of `TavrWorkbenchLib/*.py` will be installed, causing `ModuleNotFoundError: No module named 'TavrWorkbenchLib'` when Slicer attempts to load `TavrWorkbench`.",
+   "suggestion": "Add all `TavrWorkbenchLib/*.py` files (`TavrWorkbenchLib/__init__.py`, `TavrWorkbenchLib/annular_plane.py`, `TavrWorkbenchLib/annulus_pipeline.py`, `TavrWorkbenchLib/cases.py`, `TavrWorkbenchLib/constants.py`, `TavrWorkbenchLib/geometry.py`, `TavrWorkbenchLib/measurement_editor.py`, `TavrWorkbenchLib/rating_table.py`, `TavrWorkbenchLib/segmentation_editor.py`, `TavrWorkbenchLib/storage.py`, `TavrWorkbenchLib/valve_generator.py`, `TavrWorkbenchLib/valve_panel.py`) to `MODULE_PYTHON_SCRIPTS` in `TavrWorkbench/CMakeLists.txt`.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Global VTK warning display disabled at module import time",
+   "file": "TavrWorkbench/TavrWorkbench.py",
+   "line_start": 46,
+   "line_end": 47,
+   "evidence": "# Suppress VTK warnings globally to prevent console flooding and UI freezing\nvtk.vtkObject.GlobalWarningDisplayOff()",
+   "explanation": "At module import time (when Slicer starts up and discovers scripted modules), `TavrWorkbench.py` disables VTK warning display globally across the entire Slicer process. This affects all users and all other modules even if the user never opens `TavrWorkbench`.",
+   "suggestion": "Remove `vtk.vtkObject.GlobalWarningDisplayOff()` at import time, or scope warning suppression locally around specific noisy operations and restore the previous `GlobalWarningDisplay` state in a `finally:` block.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Leftover development .patch files committed to repository root",
+   "file": "CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "annular_plane.patch  (83184 bytes)\ncrosshair_overlap.patch  (11735 bytes)\nheight_editing.patch  (25690 bytes)\nvalve_tab.patch  (53682 bytes)\nviews_fix.patch  (11375 bytes)",
+   "explanation": "Five development `.patch` files (`annular_plane.patch`, `crosshair_overlap.patch`, `height_editing.patch`, `valve_tab.patch`, `views_fix.patch`) totaling ~185 KB are committed to the repository root. While they do not break the build, they appear to be leftover development artifacts.",
+   "suggestion": "Remove the `.patch` files from the root of the repository.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Placeholder SampleData entries registered at startup",
+   "file": "TavrWorkbench/TavrWorkbench.py",
+   "line_start": 86,
+   "line_end": 91,
+   "evidence": "    # TODO: replace these placeholder sample data entries with real sample datasets for TavrWorkbench,\n    # or remove this function (and the startupCompleted connection above) entirely.\n    SampleData.SampleDataLogic.registerCustomSampleDataSource(\n        category=\"TavrWorkbench\",\n        sampleName=\"TavrWorkbench1\",",
+   "explanation": "`registerSampleData()` registers two template placeholder sample datasets (`TavrWorkbench1` and `TavrWorkbench2`) pointing to generic Slicer testing data with missing icons (`TavrWorkbench1.png`, `TavrWorkbench2.png`).",
+   "suggestion": "Either remove `registerSampleData()` and its `startupCompleted()` connection, or provide real sample data for `TavrWorkbench`.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Module category set to Examples, placeholder help URL, and outdated README",
+   "file": "TavrWorkbench/TavrWorkbench.py",
+   "line_start": 57,
+   "line_end": 67,
+   "evidence": "        self.parent.title = _(\"TavrWorkbench\")\n        self.parent.categories = [translate(\"qSlicerAbstractCoreModule\", \"Examples\")]\n        self.parent.dependencies = [\"Segmentations\", \"SegmentStatistics\", \"Markups\"]\n        self.parent.contributors = [\"Mohammed Khubaib (Saeed Lab: Florida International University)\"]\n        self.parent.helpText = _(\"\"\"\n        A 3D Slicer extension for fast, structured review of TAVR CT segmentations and measurements.\n        Switch between <b>Segmentation</b> review (approve / flag / edit masks) and <b>Measurements</b>\n        review (correct annulus, SOV and STJ contours with live metrics, view heights) on the same case list.\n        Shortcuts: Shift+A approve, Shift+F flag (current mode), Shift+Return save &amp; next.\n        See more information in <a href=\"https://github.com/organization/projectname#TavrWorkbench\">module documentation</a>.\n        \"\"\")",
+   "explanation": "In `TavrWorkbench.py`, `self.parent.categories` is set to `\"Examples\"` (whereas `CMakeLists.txt` and the catalog entry use `\"Segmentation\"`), and `self.parent.helpText` still contains the template placeholder URL `https://github.com/organization/projectname#TavrWorkbench`. Additionally, `README.md` describes an older UI (e.g., \"Directory Mode\", \"Centerline Slicing\", and \"The module installs pandas, numpy and SimpleITK automatically\") that does not match the current implementation.",
+   "suggestion": "Set `self.parent.categories = [\"Segmentation\"]`, update the documentation link in `helpText` to `https://github.com/pcdslab/TavrWorkbench`, and update `README.md` to reflect the current 4-tab workflow.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Extension uses CC BY-NC-ND 4.0 license (NonCommercial, NoDerivatives)",
+   "file": "LICENSE.md",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International Public License",
+   "explanation": "The repository is licensed under CC BY-NC-ND 4.0 (`LICENSE.md` and `LICENSE.txt`), which permits reproduction and sharing of the unmodified material for non-commercial purposes only and prohibits sharing adapted material. While this permits verbatim distribution by the Extensions Index, users should be aware of the non-commercial and no-derivatives restrictions, and a standard open-source software license (such as BSD, MIT, or Apache 2.0) is generally recommended for code repositories.",
+   "suggestion": "Consider whether an open-source software license (or at least noting the non-commercial restriction in `README.md`) is appropriate for your intended users.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Screenshots/main_panel.png (2 MB binary image not inspected)",
+  "Runtime execution in 3D Slicer"
+ ],
+ "questions_for_author": [
+  "Could you add the `TavrWorkbenchLib/*.py` files to `MODULE_PYTHON_SCRIPTS` in `TavrWorkbench/CMakeLists.txt` so that CMake installs the helper package when building the extension?",
+  "Could you remove the module-level `vtk.vtkObject.GlobalWarningDisplayOff()` call in `TavrWorkbench/TavrWorkbench.py` so it does not silence VTK warnings globally across Slicer at startup?"
+ ]
+}

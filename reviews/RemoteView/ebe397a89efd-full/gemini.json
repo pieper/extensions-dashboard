@@ -1,0 +1,74 @@
+{
+ "purpose": "RemoteView is a 3D Slicer extension for clinicians, researchers, and educators to stream visible 3D models and segmentations from Slicer's 3D view to mobile browsers and Meta Quest headsets via a user-specified WebSocket relay server and a 5-character session code. It exports visible surface meshes as quantized, budget-decimated GLB snapshots and pushes incremental visual, transform, and geometry updates in real time.",
+ "summary": "RemoteView is a well-engineered 3D Slicer extension for sharing 3D surface models and segmentations with mobile devices and Meta Quest headsets over a user-specified WebSocket relay. All three admission requirements are met: (1) Safety and privacy are rigorously designed—nothing is installed or transmitted until the user clicks Start session, there is no default relay server, TLS is strictly verified, and potential PHI in node names or IDs is sanitized and kept out of logs; (2) the repository is under the MIT License; and (3) the catalog entry and root/submodule CMakeLists.txt files are complete and consistent. The heuristic flags for `numpy` and `vtk` pins are false positives from offline dev/test files. 🟢 Recommend merge.",
+ "overall": "no concerns",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all Python files under `slicer-plugin/RemoteView/` and `slicer-plugin/scripts/`. No network connections or package installations occur prior to the user clicking Start session; there is no built-in default relay URL; TLS verification is strictly enforced (`ssl.create_default_context()`, `ws://` restricted to loopback); node/segment names and IDs are carefully sanitized/aliased and redacted from logs and exception messages; and there is no unsafe deserialization, command execution, or prompt injection."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Inspected `RemoteView.py`, `remoteview_core/deps.py`, `remoteview_core/vendored.py`, `slicer-plugin/pyproject.toml`, and `slicer-plugin/requirements-dev.txt`. The heuristic hits for `numpy==2.5.4` and `vtk==9.6.2` are in `slicer-plugin/pyproject.toml` and `requirements-dev.txt`, which are offline test/dev files never used by Slicer; runtime installation (`deps.py`) only installs `websockets==17.2` and `segno==1.6.6` after explicit user confirmation when clicking Start session. A minor note is that `RemoteView` adds a toolbar to Slicer's main window on `startupCompleted()`."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected root `CMakeLists.txt`, `slicer-plugin/CMakeLists.txt`, `slicer-plugin/RemoteView/CMakeLists.txt`, `slicer-plugin/RemoteView.json`, and `slicer-plugin/scripts/package.py`. The root `CMakeLists.txt` properly configures the `RemoteView` extension (`EXTENSION_DEPENDS \"NA\"` matching `build_dependencies: []` in the catalog entry), and `slicer-plugin/RemoteView/CMakeLists.txt` explicitly lists all Python scripts (including `remoteview_core/` and `_vendor/remoteview_protocol/`) and UI/schema resources."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE` at the repository root and `slicer-plugin/README.md`. The repository is licensed under the permissive MIT License, and runtime dependencies (`websockets` and `segno`, both BSD-3-Clause) are standard open-source packages."
+  },
+  "soundness": {
+   "rating": "ok",
+   "rationale": "Inspected `RemoteView.py` and all modules in `remoteview_core/`. The architecture cleanly separates the thin Slicer/Qt adapter from a pure-Python core, performs heavy mesh collection and quadric/clustering decimation in cooperative time-sliced steps so the UI stays responsive, runs WebSocket I/O on a dedicated background asyncio thread communicating via a thread-safe queue, and properly detaches MRML observers and stops timers in `cleanup()`."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md`, `slicer-plugin/README.md`, `docs/user-guide/en/install-plugin.md`, `docs/user-guide/en/own-server.md`, and the test suite under `slicer-plugin/tests/`. The extension provides clear user documentation (in English and Polish), a complete self-hostable relay server and web viewer in the monorepo, thorough privacy/consent disclosures, and an extensive unit and integration test suite."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Adds a toolbar to Slicer's main window at application startup",
+   "file": "slicer-plugin/RemoteView/RemoteView.py",
+   "line_start": 92,
+   "line_end": 94,
+   "evidence": "          if not slicer.app.commandOptions().noMainWindow:\n              slicer.app.connect(\"startupCompleted()\", self.addToolbar)",
+   "explanation": "When Slicer finishes starting up, `RemoteView.__init__` connects `startupCompleted()` to `self.addToolbar()`, which adds a `RemoteView` toolbar (`Send scene now` button and `Send changes:` combo box) to Slicer's main window even if the user never opens the RemoteView module. While lightweight (no network or heavy imports), modifying the global main window UI at startup affects all users who have the extension installed.",
+   "suggestion": "Consider creating or showing the toolbar only when the user first opens the `RemoteView` module or starts a session, or providing a setting to hide it by default.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "info",
+   "title": "Exact version pins for runtime dependencies websockets and segno",
+   "file": "slicer-plugin/RemoteView/remoteview_core/deps.py",
+   "line_start": 55,
+   "line_end": 58,
+   "evidence": "PACKAGES: tuple[Package, ...] = (\n    Package(\"websockets\", \"17.2\", \"the secure connection to the relay\"),\n    Package(\"segno\", \"1.6.6\", \"the QR code of the join link\"),\n)",
+   "explanation": "When the user clicks Start session, `ensure_runtime_deps` checks whether `websockets==17.2` and `segno==1.6.6` are installed in those exact versions, and if another version is installed in Slicer's environment, prompts the user to replace or downgrade it. While neither package is bundled by Slicer and the dialog explicitly warns the user before installing, exact `==` pins on shared PyPI packages can cause version conflicts if another extension requires a different compatible version of `websockets` or `segno`.",
+   "suggestion": "Consider accepting compatible version ranges (e.g. `websockets>=15,<18`) while installing a tested version when missing.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Unconditional 1 ms sleep on the Qt main thread in the 50 ms pump timer",
+   "file": "slicer-plugin/RemoteView/RemoteView.py",
+   "line_start": 440,
+   "line_end": 441,
+   "evidence": "        # let the transport thread take the GIL (architecture §6, docs/research/slicer.md §3)\n        time.sleep(0.001)",
+   "explanation": "`onPump` runs on the Qt main thread every 50 ms while a session is active and calls `time.sleep(0.001)` at the end of every tick. Although 1 ms is small, sleeping unconditionally on the GUI thread blocks Qt event processing for 2% of wall time whenever a session is active.",
+   "suggestion": "Python releases the GIL during I/O and regularly at bytecode intervals (`sys.getswitchinterval()`); if yielding is needed only during heavy numpy/VTK work, consider yielding only when the transport thread actually has pending work or during snapshot preparation.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "shared/fixtures/glb/large-synthetic.glb (4 MB binary test fixture not installed by CMake)",
+  "Runtime execution in 3D Slicer 5.12 and live relay connection"
+ ],
+ "questions_for_author": []
+}

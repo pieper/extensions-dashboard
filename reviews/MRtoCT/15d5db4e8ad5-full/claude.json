@@ -1,0 +1,101 @@
+{
+ "purpose": "Slicer extension that generates a synthetic CT (in HU) from a brain MR volume. It uses a SAdaNGF 3D generator run with PyTorch sliding-window inference. It targets radiotherapy researchers.",
+ "summary": "I read all the source in the repository at the listed commit. I found no malicious behavior, telemetry, or unsafe deserialization. The weights download is gated by license acceptance, is SHA-256 checked, and loads with weights_only=True. PyTorch comes through the PyTorch extension, and the CMake and catalog dependencies match. The main defect is functional: downloadWeights refuses to run because the real URL contains \"kgiraldo09\", so the default model can never be fetched. The license is CC BY-NC 4.0, which permits distribution but restricts commercial use. Validation evidence for the model is thin (paper in preparation). I could not check that the release asset exists. Recommendation: 🔴 Do not merge yet, pending the download fix and confirmation that the weights asset is published.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "I read MRtoCT.py and mr_to_sct.py. The only network access is a one-time weights download from the author's GitHub release, after license acceptance, with a SHA-256 check. torch.load uses weights_only=True. No telemetry, subprocess calls, eval or exec."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "PyTorch is obtained via the PyTorchUtils extension, which asks the user. There are no pip installs, no import-time side effects and no pins. torch is imported lazily."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "EXTENSION_DEPENDS and build_dependencies both list PyTorch. The module CMake installs MRtoCT.py, MRtoCTLib/__init__.py and mr_to_sct.py, plus the icon. The scm_revision is the moving branch 'main'. I could not verify that the release asset v1.0/best_net_G_A.pth exists."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "CC BY-NC 4.0 is applied to the code and weights, with the full legal text included. Distribution is permitted, but use is non-commercial only, which users must be told. LICENSE.txt still has a leftover '(Paste the full legal code below…)' template line. Training data provenance for the weights is not stated."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The default weights download can never run because of the 'kgiraldo09' guard in downloadWeights. Processing runs on the GUI thread, and a download has no timeout. Input and output selectors can point to the same volume, which would overwrite the input MR."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "There is a clear README, a screenshot, a research-only disclaimer, a unit test with a tiny random model, and an optional CLI. Model provenance and validation are weak: 'Paper in preparation', and the training data is only named in comments."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Default weights download always fails because of a leftover placeholder guard",
+   "file": "MRtoCT/MRtoCT.py",
+   "line_start": 226,
+   "line_end": 228,
+   "evidence": "        if 'kgiraldo09' in WEIGHTS_URL:\n            raise RuntimeError('WEIGHTS_URL is not set in MRtoCT.py (see README, step 3).')",
+   "explanation": "downloadWeights raises 'WEIGHTS_URL is not set' whenever the URL contains 'kgiraldo09'. The real URL is on github.com/kgiraldo09/…, so the check always fires. A user who installs from the catalog and does not supply custom weights or a local file gets an error every time. The advertised workflow therefore does not work. It also means the download and checksum path was never exercised.",
+   "suggestion": "Remove the placeholder check, or compare against an explicit empty or placeholder constant. Confirm that the release asset exists and matches WEIGHTS_SHA256.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Catalog entry tracks the moving branch 'main'; weights asset unverified",
+   "file": "",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "",
+   "explanation": "The scm_revision is a branch, so what users get can change after review. The weights are loaded from a separate GitHub release, and I could not verify that asset is published. Without it, the module cannot run for catalog users.",
+   "suggestion": "Pin the catalog entry to a commit or tag, and make sure the v1.0 release asset is public.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Non-commercial license and leftover template text",
+   "file": "LICENSE.txt",
+   "line_start": 12,
+   "line_end": 13,
+   "evidence": "(Paste the full legal code below: https://creativecommons.org/licenses/by-nc/4.0/legalcode.txt)",
+   "explanation": "CC BY-NC 4.0 allows distribution but excludes commercial use, including by clinics or companies. The LICENSE.txt header still carries an unedited instruction line. Creative Commons recommends against using its licenses for software.",
+   "suggestion": "Remove the template line. Consider a software license for the code, and clearly document the weights' terms and training data provenance.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Output can overwrite the input volume; inference runs on the GUI thread",
+   "file": "MRtoCT/MRtoCT.py",
+   "line_start": 146,
+   "line_end": 159,
+   "evidence": "        outputVolume = self.outputSelector.currentNode()\n        if outputVolume is None:",
+   "explanation": "outputSelector accepts any scalar volume, including the input MR. updateVolumeFromArray would then replace the MR with the sCT. Inference with 0.8 overlap on 128^3 windows blocks the UI, and progress is only a 'Running...' label. The download via urlretrieve has no timeout.",
+   "suggestion": "Reject output == input. Consider progress reporting or a background thread, and add a network timeout.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Limited validation evidence for the model",
+   "file": "README.md",
+   "line_start": 36,
+   "line_end": 38,
+   "evidence": "Paper in preparation",
+   "explanation": "The citation is 'Paper in preparation'. Dataset and validation metrics are not documented. The research-only disclaimer is present and clear, which mitigates clinical risk.",
+   "suggestion": "Document the training data, performance, and limits (brain MR only, sequence and contrast assumptions).",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Whether the release asset v1.0/best_net_G_A.pth exists and matches the SHA-256",
+  "Actual runtime behavior in Slicer, since nothing could be run",
+  "The contents of the icon file under MRtoCT/Resources/Icons (the folder holds 1 file, presumably MRtoCT.png)",
+  "The model's training data and licensing, and its quality",
+  "Whether the catalog JSON passes the index CI checks"
+ ],
+ "questions_for_author": []
+}

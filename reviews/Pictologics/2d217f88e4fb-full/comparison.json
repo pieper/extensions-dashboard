@@ -1,0 +1,299 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "CSV export silently overwrites existing companion files",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "PictologicsSlicer/PictologicsLib/exports.py",
+   "line": 44,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "CSV export silently overwrites existing companion files",
+     "file": "PictologicsSlicer/PictologicsLib/exports.py",
+     "line_start": 44,
+     "line_end": 48,
+     "evidence": "        destinations = [destination.parent / path.name for path in files]\n        for source, target in zip(files, destinations, strict=True):\n            if target.is_symlink() or (target.exists() and not target.is_file()):\n                raise ValueError(\"Export destination must be a regular file, not a link or directory.\")\n            if target.exists():",
+     "explanation": "The save dialog in PictologicsSlicer.py:2700-2715 only selects and confirms the main CSV. The writer at lines 3849-3870 also generates <stem>.provenance.json and <stem>_catalog.csv, and exports.py:55-58 replaces every destination. Thus exporting a new features.csv can silently destroy an unrelated existing features_catalog.csv or features.provenance.json, even when the main CSV did not exist. The temporary backups are removed after success.",
+     "suggestion": "Before writing, enumerate all destinations and explicitly confirm every existing file that will be replaced, or refuse collisions and let the user select another name.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PictologicsSlicer/PictologicsLib/exports.py",
+      "line": 44
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified. PictologicsSlicer.py:2700-2715 only shows the OS save dialog for the main file. writeSet (3849-3871) also writes <stem>.provenance.json and <stem>_catalog.csv, and exports.py:55-58 os.replace()s every destination after backing it up to a temp dir that is removed on success. An unrelated file with a matching name is therefore overwritten with no prompt. The companion names are derived from the chosen stem, though, and the code comment at 3862-3863 says replacing an older catalog is intentional. It also fails safe for symlinks and directories (exports.py:46-47) and rolls back on error. This is a small UX/data-loss gap that needs a coincidentally named file. It is not a concrete path to serious harm, so it is not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "PictologicsSlicer/PictologicsSlicer.py:2700-2715 selects only the main filename and checks that path, not its companions; lines 3849-3873 create both companions, including `dictionaryPath = stagedPath.with_name(f\"{stagedPath.stem}_catalog.csv\")`. PictologicsSlicer/PictologicsLib/exports.py:44-57 backs up any existing targets then executes `os.replace(source, target)` for each; lines 76-81 delete the staging directory on success. Thus even a new features.csv can silently destroy an unrelated existing features_catalog.csv or features.provenance.json. The user guide, docs/user-guide.md:51-57, describes companion creation but does not provide collision confirmation. Confirm all existing destinations before publication."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in PictologicsSlicer/PictologicsSlicer.py:2700-2715 (`onExport` only checks overwrite confirmation for the main CSV path via `QFileDialog.getSaveFileName` or `path.with_suffix(\".csv\").exists()`), PictologicsSlicer/PictologicsSlicer.py:3849-3873 (`writeSet` always generates `<stem>.provenance.json` and `<stem>_catalog.csv` alongside `<stem>.csv` and notes in line 3862-3863: \"Always write it, so that an empty catalog replaces the one of an older export\"), and PictologicsSlicer/PictologicsLib/exports.py:44-58 (`export_file_set` calls `os.replace(source, target)` for every file in the set). While the code does replace existing `<stem>.provenance.json` and `<stem>_catalog.csv` without separate prompts if `<stem>.csv` didn't exist, these are tightly named sidecar files (`<stem>.provenance.json` and `<stem>_catalog.csv`) in a user-selected save directory during an explicit export action. Prompting before overwriting pre-existing sidecars when the main file doesn't exist would be a nice minor UX improvement, not a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Configuration validation blocks the Slicer GUI",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "PictologicsSlicer/PictologicsSlicer.py",
+   "line": 224,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Configuration validation blocks the Slicer GUI",
+     "file": "PictologicsSlicer/PictologicsSlicer.py",
+     "line_start": 3001,
+     "line_end": 3006,
+     "evidence": "        try:\n            output, _ = process.communicate(timeout=300)\n        except subprocess.TimeoutExpired:\n            # Never let a stuck helper process freeze Slicer.\n            process.kill()\n            process.communicate()",
+     "explanation": "The Validate handler calls this method directly on the GUI thread (lines 1825-1829). If the helper is slow or stuck, communicate blocks the event loop for up to five minutes; the timeout limits the duration but does not keep the UI responsive.",
+     "suggestion": "Run the check asynchronously or poll the process while reporting progress and supporting cancellation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "PictologicsSlicer/PictologicsSlicer.py",
+      "line": 224
+     }
+    }
+   ]
+  },
+  {
+   "title": "Multiple large derivative branding assets committed to the source repository",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "assets/branding/pictologics/README.md",
+   "line": 13,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Multiple large derivative branding assets committed to the source repository",
+     "file": "assets/branding/pictologics/README.md",
+     "line_start": 13,
+     "line_end": 20,
+     "evidence": "assets/branding/pictologics/raster/pictologics-master-1254.png  (1675535 bytes, binary)\nassets/branding/pictologics/raster/pictologics-master-1254.webp  (1144018 bytes, binary)\nassets/branding/pictologics/raster/pictologics-vector-render-4096.png  (1223228 bytes, binary)\nassets/branding/pictologics/raster/pictologics-white-1254.jpg  (597284 bytes, binary)",
+     "explanation": "The repository includes 22 derivative branding files in `assets/branding/pictologics/` (including a ~2 MB `.icns`, ~2 MB `.tiff`, ~1.7 MB master PNG, ~1.2 MB 4096px PNG, ~1.1 MB `.eps`, ~1.1 MB `.webp`, ~1.1 MB 1024px PNG, and ~0.9 MB `.svg`), totaling ~13 MB in the git checkout. While CMake properly excludes these from the built Slicer extension archive, committing multiple multi-megabyte master and print-format derivatives increases repository clone size for the Extensions Index build system and contributors.",
+     "suggestion": "Consider keeping only the catalog/module PNG icons and the master source (or generating derivatives on demand with `scripts/export_branding_assets.py`) to keep the git repository lightweight.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "CSV export silently overwrites existing companion files",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "PictologicsSlicer/PictologicsLib/exports.py",
+   "line": 44,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "CSV export silently overwrites existing companion files",
+     "file": "PictologicsSlicer/PictologicsLib/exports.py",
+     "line_start": 44,
+     "line_end": 48,
+     "evidence": "        destinations = [destination.parent / path.name for path in files]\n        for source, target in zip(files, destinations, strict=True):\n            if target.is_symlink() or (target.exists() and not target.is_file()):\n                raise ValueError(\"Export destination must be a regular file, not a link or directory.\")\n            if target.exists():",
+     "explanation": "The save dialog in PictologicsSlicer.py:2700-2715 only selects and confirms the main CSV. The writer at lines 3849-3870 also generates <stem>.provenance.json and <stem>_catalog.csv, and exports.py:55-58 replaces every destination. Thus exporting a new features.csv can silently destroy an unrelated existing features_catalog.csv or features.provenance.json, even when the main CSV did not exist. The temporary backups are removed after success.",
+     "suggestion": "Before writing, enumerate all destinations and explicitly confirm every existing file that will be replaced, or refuse collisions and let the user select another name.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PictologicsSlicer/PictologicsLib/exports.py",
+      "line": 44
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified. PictologicsSlicer.py:2700-2715 only shows the OS save dialog for the main file. writeSet (3849-3871) also writes <stem>.provenance.json and <stem>_catalog.csv, and exports.py:55-58 os.replace()s every destination after backing it up to a temp dir that is removed on success. An unrelated file with a matching name is therefore overwritten with no prompt. The companion names are derived from the chosen stem, though, and the code comment at 3862-3863 says replacing an older catalog is intentional. It also fails safe for symlinks and directories (exports.py:46-47) and rolls back on error. This is a small UX/data-loss gap that needs a coincidentally named file. It is not a concrete path to serious harm, so it is not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "PictologicsSlicer/PictologicsSlicer.py:2700-2715 selects only the main filename and checks that path, not its companions; lines 3849-3873 create both companions, including `dictionaryPath = stagedPath.with_name(f\"{stagedPath.stem}_catalog.csv\")`. PictologicsSlicer/PictologicsLib/exports.py:44-57 backs up any existing targets then executes `os.replace(source, target)` for each; lines 76-81 delete the staging directory on success. Thus even a new features.csv can silently destroy an unrelated existing features_catalog.csv or features.provenance.json. The user guide, docs/user-guide.md:51-57, describes companion creation but does not provide collision confirmation. Confirm all existing destinations before publication."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in PictologicsSlicer/PictologicsSlicer.py:2700-2715 (`onExport` only checks overwrite confirmation for the main CSV path via `QFileDialog.getSaveFileName` or `path.with_suffix(\".csv\").exists()`), PictologicsSlicer/PictologicsSlicer.py:3849-3873 (`writeSet` always generates `<stem>.provenance.json` and `<stem>_catalog.csv` alongside `<stem>.csv` and notes in line 3862-3863: \"Always write it, so that an empty catalog replaces the one of an older export\"), and PictologicsSlicer/PictologicsLib/exports.py:44-58 (`export_file_set` calls `os.replace(source, target)` for every file in the set). While the code does replace existing `<stem>.provenance.json` and `<stem>_catalog.csv` without separate prompts if `<stem>.csv` didn't exist, these are tightly named sidecar files (`<stem>.provenance.json` and `<stem>_catalog.csv`) in a user-selected save directory during an explicit export action. Prompting before overwriting pre-existing sidecars when the main file doesn't exist would be a nice minor UX improvement, not a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D2",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (blocking, ok)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "The only safety issue I verified is the unconfirmed overwrite of companion export files (exports.py:44-58, PictologicsSlicer.py:3849-3871). That issue is minor and deliberate, with backup and rollback. I did not do a full audit for network access, downloads or deserialization, so I rate this minor rather than blocking. The cited evidence does not support blocking."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "The verified unconfirmed companion-file overwrite in D1 is a concrete path to user data loss, so safety is blocking rather than ok or unknown: PictologicsSlicer/PictologicsSlicer.py:3849-3873 generates companions and PictologicsSlicer/PictologicsLib/exports.py:55-57 calls `os.replace(source, target)`. I also checked the export dialog at PictologicsSlicer/PictologicsSlicer.py:2691-2742 and searched the GUI and CLI sources for network, process-execution, deserialization and deletion APIs; this is not a complete audit. The downloaded Pictologics package and exact repository revision were not independently verified."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "The extension performs local radiomics feature extraction and export using staged atomic writes (`PictologicsSlicer/PictologicsLib/exports.py:19-81`, `PictologicsSlicer/PictologicsSlicer.py:3849-3874`), checks for symlinks/non-files before writing (`exports.py:46-47`), and has no malicious behavior, hidden network calls, or unsafe deserialization. Writing the companion `<stem>.provenance.json` and `<stem>_catalog.csv` files during a user-initiated CSV export is minor at most and does not warrant a blocking safety rating."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "no concerns",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 2,
+  "single": 3,
+  "unverified": 1,
+  "total": 3,
+  "open_disputes": 1
+ }
+}

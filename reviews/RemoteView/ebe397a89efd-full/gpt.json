@@ -1,0 +1,76 @@
+{
+ "purpose": "RemoteView lets 3D Slicer users stream visible models, segments, and live scene changes to a user-selected relay. Remote viewers can join from a browser or Quest headset using a session code.",
+ "summary": "The source provides TLS transport, an explicit Start action, and a separate package-install prompt. However, the in-panel consent omits potentially identifying names and IDs, while the help describes a name-hiding control that is not wired into the panel. Runtime pins may also replace packages used by other extensions. The supplied catalog selects the moving main branch; its current resolution and build could not be verified. 🔴 Do not merge yet: fix the privacy disclosure/control and verify the catalog revision and build.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "I inspected the consent text, UI, help, live-export defaults, transport validation, and portions of the relay. The Start-panel disclosure omits name and ID transmission, and the advertised name-hiding option is not exposed in the inspected UI."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "I inspected deps.py, the install callback, dev requirements, and vendored.py. Runtime installation requires confirmation but pins and may replace websockets and segno; the numpy and VTK pins are in development-only requirements."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "I inspected the catalog supplied in the request and the three CMakeLists files; dependency declarations are consistent and module files are explicitly listed. I could not resolve main, verify the checkout commit against the remote, or run a Slicer build."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "The repository LICENSE grants MIT distribution permission; the vendored protocol is identified as copied from this repository. I could not inspect the terms of packages fetched from PyPI."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "I inspected the panel, live-update defaults, consent and startup code, and preparation steps. The help refers to an unavailable privacy setting; no Slicer execution or end-to-end behavior was verified."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "I inspected the English user guide, plugin README, test inventory, and module help. Documentation and extensive tests exist, but the guide requires a separately operated relay and some help describes an unavailable option."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Start disclosure omits identifying names and IDs sent to the relay",
+   "file": "slicer-plugin/RemoteView/remoteview_core/consent.py",
+   "line_start": 53,
+   "line_end": 56,
+   "evidence": "    return (\n        \"Nothing leaves this computer before you click Start session. Then RemoteView sends the models and \"\n        f\"segments shown in the 3D view, and every later change to them, to {relay}. {transport} \"\n        f'{MORE} <a href=\"{PROJECT_URL}\">{PROJECT_URL}</a>'",
+   "explanation": "The disclosure adjacent to Start says models and segments are sent, but does not say their names and segment IDs can contain patient identifiers, or that later opened scenes are also shared. The linked help is not necessarily opened before Start. PanelController creates LiveUpdates without an anonymization argument (panel.py 936–952), so its False default (live.py 216) is used; names and IDs can therefore be sent to the chosen relay and anyone joining without adequately informed opt-in.",
+   "suggestion": "Before Start, explicitly disclose names, IDs, future loaded scenes, and who can access them; provide a functional name-hiding control before transmission or clearly state that names cannot be hidden.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Help advertises a name-hiding option that the panel cannot enable",
+   "file": "slicer-plugin/RemoteView/RemoteView.py",
+   "line_start": 75,
+   "line_end": 79,
+   "evidence": "Shows the 3D scene on phones, tablets and Meta Quest headsets that join with a 5-character code.\nNothing leaves this computer until you click <b>Start session</b>. From then on the relay server\nshown in the panel receives: the surface meshes of the models and segments shown in 3D (no images\nor volumes), their names (unless <i>Hide node names</i> is on), MRML IDs and segment IDs, colours,\nopacity, visibility and transforms, and the Slicer, extension and operating-system versions.",
+   "explanation": "The UI has no Hide node names control, and the panel creates LiveUpdates without setting anonymize_names, which defaults to False. A user trying to follow this help cannot activate the described protection, and names and segment IDs remain included when a session starts.",
+   "suggestion": "Wire a pre-session name-hiding control through PanelController to LiveUpdates, or remove the claim and warn that identifying names will be sent.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Runtime dependency pins can replace another extension's packages",
+   "file": "slicer-plugin/RemoteView/remoteview_core/deps.py",
+   "line_start": 53,
+   "line_end": 58,
+   "evidence": "#: In the order the dialog lists them. ``websockets`` 17.2 is the tested release (ADR 0009 item 7; the transport\n#: refuses a version below 15). ``segno`` 1.6.6 is the newest release when SLC-10 was written; SLC-11 tests against it.\nPACKAGES: tuple[Package, ...] = (\n    Package(\"websockets\", \"17.2\", \"the secure connection to the relay\"),\n    Package(\"segno\", \"1.6.6\", \"the QR code of the join link\"),\n)",
+   "explanation": "A different installed version is treated as missing and can be replaced or downgraded in Slicer's shared environment after the user confirms, potentially breaking another extension that requires a different version. These are not the numpy and VTK development-only pins from the scan hint.",
+   "suggestion": "Accept compatible versions where feasible, or isolate runtime dependencies; retain the existing disclosure when replacement is unavoidable.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The repository and main branch could not be resolved over the network, so the supplied commit ebe397a89efd47c0ec60df7a4d5446cdd96b8367 and its relationship to the catalog's main revision were not independently verified.",
+  "No Slicer build, module execution, tests, or remote relay deployment were run; available CI status was not inspected.",
+  "External PyPI package contents, transitive dependencies, and their license terms were not independently inspected.",
+  "The complete relay and web-viewer implementation, committed binary fixture, and all repository files were not exhaustively audited."
+ ],
+ "questions_for_author": []
+}

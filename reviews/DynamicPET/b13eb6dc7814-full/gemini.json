@@ -1,0 +1,89 @@
+{
+ "purpose": "DynamicPET is a 3D Slicer extension for importing, visualizing, and quantitatively analyzing dynamic positron emission tomography (PET) acquisitions. It provides PET DICOM and dynamic RT Structure Set import/export, regional time-activity curve (TAC) extraction, kinetic modeling (Patlak, Logan, RE, 1TCM, 2TCM, Liver DBIF), and voxel-wise parametric map generation for researchers.",
+ "summary": "DynamicPET provides a rich C++ loadable module and Python bridges for dynamic PET DICOM and temporal RTSTRUCT handling, time-activity curve extraction, compartmental and graphical kinetic modeling, and voxel-wise parametric imaging. In the inspected main repository (`b13eb6dc`), there are no blocking safety, licensing, or catalog entry defects. Non-blocking suggestions include updating the cookiecutter placeholder metadata and `\"Examples\"` category in `qSlicerDynamicPETModule.cxx`, prompting the user before installing `highdicom`, and guarding the empty test source list in `DynamicPET/Testing/Cxx/CMakeLists.txt`. Note that the three Git submodules (`KMAP-CPP`, `dPETImporter`, `dRTImporter`) are external repositories not expanded in this checkout and could not be directly inspected. 🟢 Recommend merge (subject to submodule availability).",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all CMake, header, and C++ files in the repository, including the embedded Python helper scripts in `DynamicPET/qSlicerDynamicPETModuleWidget.cxx`. There is no telemetry, covert network transmission, shell command execution, unsafe deserialization, or prompt injection; file writes occur only on user-initiated export actions to user-chosen paths. Submodule repositories (`dPETImporter`, `dRTImporter`, `KMAP-CPP`) were not expanded in this workspace."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Inspected `DynamicPET/qSlicerDynamicPETModuleWidget.cxx` lines 9148-10875. No packages are installed at module import or startup; Excel dependencies (`pandas`, `openpyxl`, `xlsxwriter`) prompt the user with `confirmYesNoDisplay` before calling `pip_install`, whereas `highdicom` is installed lazily on Parametric Map export with `--no-deps` (avoiding upgrading Slicer packages) but without a confirmation dialog."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected the catalog entry, `CMakeLists.txt`, `.gitmodules`, `DynamicPET/CMakeLists.txt`, `DynamicPET/Logic/CMakeLists.txt`, and `DynamicPET/Widgets/CMakeLists.txt`. `EXTENSION_DEPENDS` (`SlicerRT`) matches `build_dependencies` in the catalog entry, and CMake build targets for the C++ loadable module and `KMAP-CPP` are properly configured. Note that `DynamicPET/Testing/Cxx/CMakeLists.txt` has an empty `KIT_TEST_SRCS` list, and submodule contents could not be verified directly."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE.txt` and `README.md`. The repository is licensed under the MIT License (Copyright 2026 Daniele Dall'Olio), and `README.md` documents that the KMAP-CPP backend is also MIT-licensed. Submodule license files could not be directly inspected as submodules are not expanded in this checkout."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Inspected `DynamicPET/qSlicerDynamicPETModule.cxx`, `DynamicPETWidgetWorkers.h`, `SegmentationChangeWatcher.cxx`, `qSlicerDynamicPETModuleWidget.cxx`, and `vtkSlicerDynamicPETLogic.cxx`. Heavy voxel-wise fitting runs on worker `QThread`s with cancellation and progress reporting, and VTK observers are properly cleaned up in `SegmentationChangeWatcher::Clear()`. Minor issue: `qSlicerDynamicPETModule.cxx` still uses template values (`\"Examples\"` category and `\"John Doe\"` contributor)."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md` and the module implementation. The extension provides a comprehensive dynamic PET kinetic modeling and parametric imaging workflow with clear documentation, scanner compatibility notes, patient privacy guidance, and research-use/non-medical-device disclaimers."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Unprompted pip install of highdicom during Parametric Map export",
+   "file": "DynamicPET/qSlicerDynamicPETModuleWidget.cxx",
+   "line_start": 9251,
+   "line_end": 9254,
+   "evidence": "        try:\n            slicer.util.pip_install(\"--no-deps highdicom\")\n            importlib.invalidate_caches()\n            import highdicom as hd",
+   "explanation": "When a user exports a DICOM Parametric Map (`DPE_export_parametric_map`), `DPE_get_highdicom()` runs `slicer.util.pip_install(\"--no-deps highdicom\")` without asking the user for confirmation first (unlike `DPE_prepare_excel_dependencies`, which prompts via `slicer.util.confirmYesNoDisplay`). Additionally, because `--no-deps` is used, if any of `highdicom`'s non-bundled dependencies (such as `pyjpegls` or newer `pillow`/`numpy` requirements depending on the PyPI release) are absent, importing or using `highdicom` may fail at runtime.",
+   "suggestion": "Prompt the user with `slicer.util.confirmYesNoDisplay` before installing `highdicom` into Slicer's shared Python environment, just as `DPE_prepare_excel_dependencies` does for `pandas`/`openpyxl`/`xlsxwriter`.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Extension uses three Git submodules (KMAP-CPP, dPETImporter, dRTImporter)",
+   "file": "CMakeLists.txt",
+   "line_start": 139,
+   "line_end": 139,
+   "evidence": "add_subdirectory(KMAP-CPP)",
+   "explanation": "The extension relies on three Git submodules (`KMAP-CPP`, `dPETImporter`, `dRTImporter` declared in `.gitmodules` and added via `add_subdirectory` in `CMakeLists.txt`). While Slicer's extension build system initializes submodules recursively during builds, the contents of those three external repositories are not present in this repository checkout and could not be directly inspected here.",
+   "suggestion": "Verify that the pinned submodule commits in `KMAP-CPP`, `dPETImporter`, and `dRTImporter` exist on GitHub and carry compatible license files.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Placeholder metadata and \"Examples\" category in qSlicerDynamicPETModule.cxx",
+   "file": "DynamicPET/qSlicerDynamicPETModule.cxx",
+   "line_start": 58,
+   "line_end": 87,
+   "evidence": "QString qSlicerDynamicPETModule::helpText() const\n{\n  return \"This is a loadable module that can be bundled in an extension\";\n}",
+   "explanation": "`qSlicerDynamicPETModule.cxx` still has the cookiecutter template strings for `helpText()`, `acknowledgementText()` (\"NIH grant NXNNXXNNNNNN-NNXN\"), `contributors()` (\"John Doe (AnyWare Corp.)\"), and `categories()` (\"Examples\", whereas `CMakeLists.txt` and the catalog entry use \"Quantification\"). Users will look for the module under \"Quantification\" in Slicer's module selector, not \"Examples\".",
+   "suggestion": "Update `categories()` to return `\"Quantification\"` (matching the catalog entry and top-level `CMakeLists.txt`), and replace the placeholder help text, acknowledgements, and contributor name (`John Doe`) in `qSlicerDynamicPETModule.cxx`.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Empty KIT_TEST_SRCS in DynamicPET/Testing/Cxx/CMakeLists.txt",
+   "file": "DynamicPET/Testing/Cxx/CMakeLists.txt",
+   "line_start": 4,
+   "line_end": 14,
+   "evidence": "set(KIT_TEST_SRCS\n  #qSlicer${MODULE_NAME}ModuleTest.cxx\n  )",
+   "explanation": "In `DynamicPET/Testing/Cxx/CMakeLists.txt`, `KIT_TEST_SRCS` is empty (the test source is commented out), which is then passed to `slicerMacroConfigureModuleCxxTestDriver`. Depending on the CMake/Slicer version, configuring a Cxx test driver with no test sources may fail or produce an empty test executable when `BUILD_TESTING` is enabled.",
+   "suggestion": "Either add a basic module test source file or guard `add_subdirectory(Testing)` / `slicerMacroConfigureModuleCxxTestDriver` until C++ tests are enabled.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Source code and license files inside the three Git submodules (dPETImporter, dRTImporter, KMAP-CPP), which are external repositories not expanded in the workspace checkout.",
+  "Whether branch `5.12` (referenced in `scm_revision` of the catalog entry) resolves to commit `b13eb6dc78149d147166a071512bab885e98d949` on GitHub."
+ ],
+ "questions_for_author": [
+  "Could you update `qSlicerDynamicPETModule::categories()` from `\"Examples\"` to `\"Quantification\"` and replace the template `John Doe` contributor and help text in `DynamicPET/qSlicerDynamicPETModule.cxx`?",
+  "Could you add a user confirmation prompt (`slicer.util.confirmYesNoDisplay`) before `slicer.util.pip_install(\"--no-deps highdicom\")` in `DPE_get_highdicom()`, matching how Excel dependencies are handled?"
+ ]
+}

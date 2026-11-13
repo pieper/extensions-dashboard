@@ -1,0 +1,90 @@
+{
+ "purpose": "DynamicPET helps researchers import and analyze dynamic PET data in 3D Slicer. It extracts time-activity curves, fits kinetic models, produces parametric images, and supports temporal RT structures.",
+ "summary": "The main code silently replaces existing DICOM parametric maps and Excel workbooks on repeat exports, creating a concrete risk of data loss. Parametric-map export also installs highdicom without asking. The three required submodules, their licenses and the catalog branch resolution were unavailable for inspection. 🔴 Do not merge yet: prevent unconfirmed overwrites and complete the source, dependency, license and revision review.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "I traced the DICOM parametric-map and Excel export paths to file writes that replace existing files without an overwrite prompt. The separately maintained importers and backend were not available in this checkout, so their safety remains unverified."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "The embedded Python installs highdicom without confirmation when it is absent; Excel dependency installation does ask first. The unavailable importer submodules may have additional environment effects."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "The root CMakeLists declares SlicerRT consistently with the supplied catalog entry and adds three submodule directories, but their contents and gitlinks were unavailable. I could not resolve catalog revision 5.12 or run a build."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "LICENSE.txt grants MIT distribution permission for original code, and README.md states that KMAP-CPP retains upstream MIT terms. The actual licenses and bundled materials in the three unavailable submodules were not inspected."
+  },
+  "soundness": {
+   "rating": "unknown",
+   "rationale": "I inspected CMake, worker dispatch and portions of export and observer logic, but not the complete 31,113-line widget, numerical implementation, or unavailable backend and importers. No Slicer execution or numerical validation was possible."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md describes workflows, scanner limitations, privacy and research-use caveats. The visible C++ test configuration contains no enabled test sources."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Parametric-map export silently deletes existing files",
+   "file": "DynamicPET/qSlicerDynamicPETModuleWidget.cxx",
+   "line_start": 10713,
+   "line_end": 10718,
+   "evidence": "        output_path = os.path.abspath(str(output_path))\n        os.makedirs(os.path.dirname(output_path), exist_ok=True)\n        if os.path.isfile(output_path):\n            os.remove(output_path)\n\n        pm.save_as(output_path, enforce_file_format=True)",
+   "explanation": "When DICOM output is selected, the caller constructs deterministic filenames from the patient name, model and field (lines 22185–22205). Repeating an export into the same directory, including for a different study of the same patient, silently deletes the previous map; if writing fails after removal, the previous file is already lost.",
+   "suggestion": "Detect collisions before export, ask for explicit replacement or generate unique filenames, and write to a temporary file before an atomic replacement.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Excel exports replace existing workbooks without confirmation",
+   "file": "DynamicPET/qSlicerDynamicPETModuleWidget.cxx",
+   "line_start": 9297,
+   "line_end": 9304,
+   "evidence": "    pd, dependency_error = DPE_prepare_excel_dependencies(\"export\")\n    if pd is None:\n        return {\"ok\": False, \"error\": dependency_error}\n\n    with pd.ExcelWriter(filepath, engine=\"xlsxwriter\") as writer:\n        for sheet, data in sheet_data_dict.items():\n            df = pd.DataFrame(data)[[\"Time(s)\", \"FrameStart_s\", \"FrameMid_s\", \"FrameEnd_s\", \"Duration_s\", \"Mean\", \"Median\", \"StDev\",\"IQR\",\"Min\", \"Max\", \"Q1\", \"Q3\", \"Peak\", \"PeakStDev\", \"PeakVoxelCount\", \"VoxelCount\",\"Volume(mm3)\",\"Volume(cm3)\"]]\n            df.to_excel(writer, sheet_name=sheet, index=False)",
+   "explanation": "The TAC save handler passes the chosen directory and default patient-based filename directly to this writer without checking for an existing file (lines 25647–25652 and 25749–25752). A repeated save or same-name patient can therefore destroy a previous workbook without warning; the other Excel save helpers should also be checked.",
+   "suggestion": "Confirm existing-file replacement, use unique study-aware names, and write safely via a temporary file.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Parametric-map export installs highdicom without consent",
+   "file": "DynamicPET/qSlicerDynamicPETModuleWidget.cxx",
+   "line_start": 9242,
+   "line_end": 9254,
+   "evidence": "        import highdicom as hd\n    except ModuleNotFoundError as exc:\n        if exc.name != \"highdicom\":\n            raise RuntimeError(\n                \"The installed highdicom package could not be imported because \"\n                f\"Python module '{exc.name}' is unavailable. SlicerDynamicPET \"\n                \"did not modify the Python environment.\"\n            ) from exc\n\n        try:\n            slicer.util.pip_install(\"--no-deps highdicom\")\n            importlib.invalidate_caches()\n            import highdicom as hd",
+   "explanation": "On parametric-map export, DPE_export_parametric_map calls this function; if highdicom is absent it downloads and installs a package into Slicer's shared Python environment without asking, even though the user selected an export rather than a package installation.",
+   "suggestion": "Explain the dependency and request confirmation before installing it, as the Excel dependency helper does; handle missing dependencies without altering existing bundled packages.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No enabled C++ module tests in the visible test configuration",
+   "file": "DynamicPET/Testing/Cxx/CMakeLists.txt",
+   "line_start": 4,
+   "line_end": 6,
+   "evidence": "set(KIT_TEST_SRCS\n  #qSlicer${MODULE_NAME}ModuleTest.cxx\n  )",
+   "explanation": "The visible test driver has no enabled module test source, so this checkout does not provide automated regression coverage for the main PET workflow through this test configuration.",
+   "suggestion": "Add reproducible tests for representative PET timing, fitting, and export workflows.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The catalog branch 5.12 could not be resolved to the stated b13eb6dc78149d147166a071512bab885e98d949 commit; source repository accessibility and exact revision are unverified.",
+  "The KMAP-CPP, dPETImporter and dRTImporter submodule contents, gitlink revisions, build rules, installation behavior and license files were unavailable. The README reports an additional on-demand highdicom installation in the importer; its consent and dependency behavior could not be inspected.",
+  "No Slicer build, CI results, runtime tests, dependency metadata, numerical validation, or network access were available.",
+  "The large widget and numerical C++ files were searched and sampled rather than reviewed line by line; no complete security audit is claimed."
+ ],
+ "questions_for_author": [
+  "Can you provide the resolved 5.12 commit and a checkout with all three submodules at their recorded revisions, including their license files and build configuration?"
+ ]
+}

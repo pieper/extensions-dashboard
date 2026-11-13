@@ -1,0 +1,77 @@
+{
+ "purpose": "ClasificacionZE is a Spanish-language 3D Slicer extension for epilepsy research that runs a 31-step FreeSurfer cortical reconstruction on a patient's T1 MRI, predicts epileptogenic cortical parcels (Destrieux atlas) from sEEG biomarkers using a pre-trained Extra Trees model, and visualizes the resulting cortical probability map in 3D alongside scalp EEG (10-20) and depth SEEG electrodes.",
+ "summary": "ClasificacionZE is a well-structured extension for processing T1 MRI with FreeSurfer, predicting epileptogenic zones from sEEG markers, and visualizing cortical regions and EEG/SEEG electrodes in 3D. It meets all three Slicer Extensions Index admission requirements: (1) no safety or security issues were found (shell inputs are sanitized and pip installs require user confirmation); (2) `LICENSE.txt` (PolyForm Noncommercial 1.0.0) explicitly permits redistribution for non-commercial purposes; and (3) the catalog entry and CMake build configuration install all required files. One non-blocking concern was noted: `Inferencia/inferencia_ml.py` pins `scikit-learn==1.9.1`, which may fail to resolve on PyPI.\n\n🟢 Recommend merge",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all Python scripts in `Visualizacion/`, `Pipeline/`, `Inferencia/`, `VisualizacionML/`, and `Docs/`. There is no unauthorized network activity or telemetry, `pip_install` prompts the user for consent first, `joblib.load` is only called on the bundled model file, and paths/subject IDs passed to FreeSurfer bash scripts are validated against shell metacharacters (`CARACTERES_PELIGROSOS` and `ID_VALIDO`)."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Inspected `Visualizacion/Visualizacion.py` and `Inferencia/inferencia_ml.py`. Dependencies (`pandas`, `joblib`, `scikit-learn==1.9.1`, `nibabel`) are only installed on user action after an explicit confirmation dialog (`asegurarDependenciasInferencia`), not at startup or import; however, the exact pin `scikit-learn==1.9.1` may fail to resolve on PyPI or cause pip to alter Slicer's bundled `numpy`/`scipy`."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected root `CMakeLists.txt`, `Visualizacion/CMakeLists.txt`, and `Docs/catalogo/ClasificacionZE.json`. All 31 pipeline scripts, inference scripts, the `.joblib` model, visualization modules, demo files, and docs are properly configured and installed into `VisualizacionLib` and `Resources`, matching `carpetaExtension()` in `Visualizacion.py`."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE.txt`, `README.md`, and `CMakeLists.txt`. The extension and its bundled `.joblib` model are distributed under the PolyForm Noncommercial License 1.0.0, which explicitly grants redistribution permission while restricting use to non-commercial purposes (clearly disclosed in `EXTENSION_DESCRIPTION`)."
+  },
+  "soundness": {
+   "rating": "ok",
+   "rationale": "Inspected `Visualizacion/Visualizacion.py`, `Pipeline/pipeline_principal.py`, `Inferencia/`, and `VisualizacionML/`. The extension runs FreeSurfer asynchronously in a background process group with `QTimer` polling, validates input files before starting multi-hour runs, properly cleans up processes, timers, VTK actors, and observers on cancel/cleanup, and includes unit tests."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md`, `Visualizacion/Resources/Docs/MANUAL_USUARIO.md`, demo data in `Visualizacion/Resources/Demo/`, and usability documentation in `Docs/usabilidad/`. The extension provides thorough user documentation in Spanish, an in-app manual viewer, synthetic demo data using `fsaverage`, clear clinical-use disclaimers, and model validation metrics (LOPO AUROC)."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Exact pin `scikit-learn==1.9.1` may fail to resolve on PyPI or conflict with Slicer's environment",
+   "file": "Inferencia/inferencia_ml.py",
+   "line_start": 23,
+   "line_end": 31,
+   "evidence": "VERSION_SKLEARN = \"1.9.1\"\n\n# distribución de pip -> requisito que se instala si falta.\nDEPENDENCIAS = {\n    \"pandas\": \"pandas\",\n    \"joblib\": \"joblib\",\n    \"scikit-learn\": f\"scikit-learn=={VERSION_SKLEARN}\",\n    \"nibabel\": \"nibabel\",  # superficies y anotaciones de FreeSurfer (VisualizacionML)\n}",
+   "explanation": "`Inferencia/inferencia_ml.py` pins `scikit-learn==1.9.1`. As of April 2026, scikit-learn 1.9.1 does not exist on PyPI (and if a different version is already installed in Slicer's shared Python environment, `dependenciasFaltantes()` will attempt to replace it with `1.9.1`, or `pip_install` will fail with `No matching distribution found for scikit-learn==1.9.1`). Additionally, installing an exact pin of `scikit-learn` can trigger upgrades or downgrades of `numpy` or `scipy` that Slicer bundles.",
+   "suggestion": "Verify the exact scikit-learn version on PyPI (e.g. `1.6.1` or `>=1.5`) or relax the hard `==` pin in `DEPENDENCIAS` (relying on the runtime warning in `soz_inferencia.cargar_modelo` if versions differ) so `pip_install` does not fail or alter Slicer's bundled `numpy`/`scipy`.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Licensed under PolyForm Noncommercial License 1.0.0 (non-commercial use only)",
+   "file": "LICENSE.txt",
+   "line_start": 3,
+   "line_end": 5,
+   "evidence": "# PolyForm Noncommercial License 1.0.0\n\n<https://polyformproject.org/licenses/noncommercial/1.0.0>",
+   "explanation": "The extension and its bundled `.joblib` model are licensed under the PolyForm Noncommercial License 1.0.0 (`LICENSE.txt` and `CMakeLists.txt`). This explicitly permits distribution and modification for noncommercial purposes (including by the Slicer Extensions Index and academic/public health institutions), while prohibiting commercial use. Users in commercial settings should be aware of this restriction.",
+   "suggestion": "No change required; the noncommercial restriction is already clearly noted in `CMakeLists.txt`, `README.md`, and `LICENSE.txt`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Temporary status directory created by `tempfile.mkdtemp` is not cleaned up after pipeline finishes",
+   "file": "Visualizacion/Visualizacion.py",
+   "line_start": 1883,
+   "line_end": 1887,
+   "evidence": "        runDir = Path(\n            tempfile.mkdtemp(\n                prefix=\"Visualizacion_epilepsia_\"\n            )\n        )",
+   "explanation": "In `onRunPipeline`, a temporary directory (`runDir`) is created with `tempfile.mkdtemp` to hold `pipeline_status.txt`, `pipeline_current.txt`, and `pipeline.log`. After `finishPipeline()` copies `pipeline.log` to the subject folder, `runDir` is never removed (`shutil.rmtree`), leaving small temporary directories behind in the system temp folder after each FreeSurfer run.",
+   "suggestion": "Remove `runDir` with `shutil.rmtree(runDir, ignore_errors=True)` at the end of `finishPipeline` and `cleanup`.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Binary contents of Inferencia/soz_extratrees_sEEG_15pacientes.joblib (1.44 MB binary joblib/pickle file; cannot be inspected with text-only tools)",
+  "Runtime execution of the 31-step FreeSurfer pipeline (requires local FreeSurfer installation and license.txt)",
+  "PyPI availability of scikit-learn==1.9.1 from Slicer's target Python version (no network/shell access in review environment)"
+ ],
+ "questions_for_author": [
+  "Was the model trained with a pre-release/nightly build of scikit-learn (`1.9.1`), or is `VERSION_SKLEARN = \"1.9.1\"` in `Inferencia/inferencia_ml.py` and `Visualizacion/Resources/requirements.txt` a typo (for example for `1.6.1` or `1.5.1`)? If `1.9.1` is not published on PyPI, `slicer.util.pip_install` will fail when users try to install dependencies."
+ ]
+}

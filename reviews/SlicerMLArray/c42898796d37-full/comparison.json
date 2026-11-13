@@ -1,0 +1,239 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "64-bit label values are silently truncated to 32 bits",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerMLArray/SlicerMLArrayLib/slicer_io.py",
+   "line": 173,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "64-bit label values are silently truncated to 32 bits",
+     "file": "SlicerMLArray/SlicerMLArrayLib/slicer_io.py",
+     "line_start": 173,
+     "line_end": 176,
+     "evidence": "    labels = frame if np.issubdtype(frame.dtype, np.integer) else np.rint(frame).astype(np.int32)\n    if labels.dtype in (np.uint64, np.int64):\n        labels = labels.astype(np.int32)\n    present = [int(v) for v in np.unique(labels) if v != 0]",
+     "explanation": "A 64-bit label or instance ID outside the signed 32-bit range wraps without warning; for example, 4294967296 becomes zero and is treated as background. The displayed segmentation or labelmap and subsequent export can therefore omit or misidentify regions.",
+     "suggestion": "Preserve supported IDs or reject out-of-range values before casting, and add tests for large IDs and collisions.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerMLArray/SlicerMLArrayLib/slicer_io.py",
+      "line": 173
+     }
+    }
+   ]
+  },
+  {
+   "title": "Export can crop segmentation edits outside the original file grid",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerMLArray/SlicerMLArrayLib/slicer_io.py",
+   "line": 512,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Export can crop segmentation edits outside the original file grid",
+     "file": "SlicerMLArray/SlicerMLArrayLib/slicer_io.py",
+     "line_start": 512,
+     "line_end": 518,
+     "evidence": "    if record is not None:\n        shape = record[\"shape\"]\n        k_j_i = [shape[a] for a in record[\"spatial_axes\"]]\n        if record.get(\"is_2d\"):\n            k_j_i = [1] + k_j_i\n        g = type(\"G\", (), {\"ijk_to_ras\": np.array(record[\"ijk_to_ras\"])})()",
+     "explanation": "For a segmentation loaded from MLArray, export rasterizes against the original recorded extent even if the user later adds or extends segments beyond it. Those outside voxels are omitted from the saved file without an explicit warning.",
+     "suggestion": "Detect voxels outside the recorded grid and refuse or warn, or offer an expanded output grid; add an edited-extent round-trip test.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerMLArray/SlicerMLArrayLib/slicer_io.py",
+      "line": 512
+     }
+    }
+   ]
+  },
+  {
+   "title": "Sparse label IDs allocate a color table up to the largest ID",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerMLArray/SlicerMLArrayLib/slicer_io.py",
+   "line": 229,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Sparse label IDs allocate a color table up to the largest ID",
+     "file": "SlicerMLArray/SlicerMLArrayLib/slicer_io.py",
+     "line_start": 229,
+     "line_end": 233,
+     "evidence": "    size = (max(label.value for label in table) + 1) if table else 1\n    node.SetNumberOfColors(size)\n    node.SetColor(0, \"background\", 0.0, 0.0, 0.0, 0.0)\n    for v in range(1, size):\n        node.SetColor(v, \"\", 0.0, 0.0, 0.0, 0.0)",
+     "explanation": "A small labelmap with a single large positive label ID requests a color table proportional to the ID and initializes every intermediate entry on the GUI thread. This can exhaust memory or freeze Slicer despite the input image being small.",
+     "suggestion": "Use a bounded or sparse mapping, or reject impractically large label IDs with a clear message.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerMLArray/SlicerMLArrayLib/slicer_io.py",
+      "line": 229
+     }
+    }
+   ]
+  },
+  {
+   "title": "Self-test imports mlarray directly without ensuring it is installed",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "SlicerMLArray/SlicerMLArray.py",
+   "line": 198,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Self-test imports mlarray directly without ensuring it is installed",
+     "file": "SlicerMLArray/SlicerMLArray.py",
+     "line_start": 198,
+     "line_end": 200,
+     "evidence": "    def test_geometry_labels_boxes(self):\n        from mlarray import MLArray",
+     "explanation": "In automated CTest runs (`BUILD_TESTING=ON`) or fresh Slicer sessions where `mlarray` has not yet been installed via the interactive prompt, `SlicerMLArrayTest.test_geometry_labels_boxes` imports `mlarray` directly and will fail with `ModuleNotFoundError` rather than installing or skipping gracefully.",
+     "suggestion": "Consider using `slicer_io.mlarray()` or installing `mlarray>=1.0.0,<2` in the test when running in non-interactive test mode (or skipping with a clear message if unavailable).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerMLArray/SlicerMLArray.py",
+      "line": 198
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D1",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "concern"
+   },
+   "outcome": "still disputed (concern, ok)",
+   "positions": {
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "Inspected the reader/writer, conversion routines, geometry and tests. There are concrete correctness limitations, so neither ok nor unknown is appropriate. In SlicerMLArray/SlicerMLArrayLib/slicer_io.py:173-176, `if labels.dtype in (np.uint64, np.int64):` followed by `labels = labels.astype(np.int32)` silently narrows every 64-bit label or instance map: e.g. an ID of 4294967296 becomes background 0. Lines 226-233 size and initialize the color table using `size = (max(label.value for label in table) + 1) if table else 1` and `for v in range(1, size):`, so a sparse high ID can require excessive memory and time. The file reader calls the conversion synchronously (SlicerMLArray/SlicerMLArray.py:54-55); the loader materializes the image and computes unique labels (slicer_io.py:77-79, 176), with no progress there. There are also positive signs: user-visible errors at SlicerMLArray.py:56-59 and a round-trip self-test at 198-240, plus independent tests in tests/test_layout_values_boxes.py:19-35, 61-73, 90-105. I did not run Slicer or the tests; the major severity reflects silent corruption of supported label IDs and potentially unresponsive loading, not a blocking admission issue."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "info",
+     "rating": "ok",
+     "reason": "Inspected SlicerMLArray/SlicerMLArray.py (lines 1-241) and all modules under SlicerMLArray/SlicerMLArrayLib/ (slicer_io.py, geometry.py, layout.py, values.py, boxes.py, export.py, dependencies.py, errors.py). The module cleanly implements ScriptedLoadableModule, ScriptedLoadableModuleWidget, ScriptedLoadableModuleLogic, ScriptedLoadableModuleTest, SlicerMLArrayFileReader, and SlicerMLArrayFileWriter. It defers heavy/external imports (mlarray and SlicerMLArrayLib.slicer_io) inside methods rather than at module import time (SlicerMLArray.py lines 52, 80, 87, 108, 151, 173, 178, 183), prompts the user before installing mlarray (slicer_io.py lines 40-44, dependencies.py lines 32-49), cleans up temporary MRML nodes in try/finally blocks (slicer_io.py lines 196-197, 257, 275-276, 498-500, 549-550), and reports errors and warnings cleanly via userMessages() and slicer.util.errorDisplay() (SlicerMLArray.py lines 58-61, 97-100, 164). Soundness is 'ok'."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "no concerns",
+  "gpt": "incomplete"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 1,
+  "single": 4,
+  "unverified": 0,
+  "total": 4,
+  "open_disputes": 1
+ }
+}
