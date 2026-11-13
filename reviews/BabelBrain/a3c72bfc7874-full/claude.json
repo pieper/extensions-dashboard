@@ -1,34 +1,88 @@
 {
- "purpose": "A Slicer scripted module that launches a separately installed BabelBrain (transcranial focused ultrasound simulator) with trajectories planned in Slicer. It exchanges JSON files through ~/.BabelBrainSync and loads the resulting maps and corrected trajectories back into the scene.",
- "summary": "I read all the Python source, both CMakeLists files, the LICENSE and the README. I found no network access, downloads, pip installs, telemetry, or unsafe deserialization. The extension only runs a user-chosen or default BabelBrain executable with a fixed flag, using argument lists and no shell. It writes JSON to ~/.BabelBrainSync and a log to the user's output folder. The BSD-3 license is clear, and CMake installs all the Python files that are imported. The catalog entry tracks branch `main`, which is allowed. One real bug: error handling around `tryWithErrorDisplay` can raise UnboundLocalError after a failure. Documentation and tests are good, and the README carries a research-only disclaimer. 🟢 Recommend merge.",
+ "purpose": "A thin Slicer front-end that launches a separately installed BabelBrain (transcranial focused ultrasound simulator) with trajectories and a T1w volume from the scene. It exchanges JSON files through ~/.BabelBrainSync and loads the resulting maps and corrected trajectories back into Slicer.",
+ "summary": "I read all the Python code, both CMake files, the LICENSE, the README and the catalog entry. I found no network access, no pip installs, no downloads and no shell use. The only subprocess is the user-selected BabelBrain executable, started with a list of arguments and no shell. The license is BSD-3. CMake installs every Python file the module imports, and build_dependencies and EXTENSION_DEPENDS are consistently empty. The remaining issues are minor: the catalog entry tracks the moving branch \"main\", a stale output file can enable the Load button before any run, the module category differs from the extension category, and results are loaded from paths named in the JSON. The Screenshot.png file could not be inspected. Recommend merge.",
  "overall": "minor issues",
  "ratings": {
   "safety": {
-   "rating": "unknown",
-   "rationale": ""
+   "rating": "ok",
+   "rationale": "BabelBrain.py and SyncProtocol.py contain no network code, eval/exec or pickle. subprocess.Popen runs the user-chosen executable with a list of arguments (no shell). Files are written only to the sync directory and the user's output directory."
   },
   "environment": {
-   "rating": "unknown",
-   "rationale": ""
+   "rating": "ok",
+   "rationale": "There are no package installs and no sys.path or environment changes at import. The child process gets Slicer's startup environment. Imports at the top of the module (numpy, vtk, qt) are normal for Slicer."
   },
   "packaging": {
-   "rating": "unknown",
-   "rationale": ""
+   "rating": "minor",
+   "rationale": "CMake installs BabelBrain.py, BabelBrainLib/__init__.py, SyncProtocol.py and the icon, and all of them exist. build_dependencies and EXTENSION_DEPENDS are both empty (\"NA\"). scm_revision is the branch \"main\", which is allowed but not pinned."
   },
   "license": {
-   "rating": "unknown",
-   "rationale": ""
+   "rating": "ok",
+   "rationale": "The LICENSE file is BSD 3-Clause. Nothing is bundled or downloaded. BabelBrain is a separate installation, which the README describes as BSD-3."
   },
   "soundness": {
-   "rating": "unknown",
-   "rationale": ""
+   "rating": "minor",
+   "rationale": "The module follows ScriptedLoadableModule conventions, uses a parameter node, a non-blocking subprocess with a QTimer poll, a log file, and a self-test with a mock BabelBrain. Minor issues: a stale output JSON can enable the Load button, and combined results with the same label are not deduplicated."
   },
   "utility": {
-   "rating": "unknown",
-   "rationale": ""
+   "rating": "ok",
+   "rationale": "A useful bridge for the focused ultrasound community. The README is thorough and the research-only disclaimer is present. A separate BabelBrain installation is required, and it is clearly documented."
   }
  },
- "findings": [],
- "not_checked": [],
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Catalog entry tracks a moving branch",
+   "file": "",
+   "line_start": null,
+   "line_end": null,
+   "evidence": "",
+   "explanation": "scm_revision is \"main\", so the built source can change without a catalog update. Branch references are permitted, but the reviewed commit (a3c72bf) is not what is pinned.",
+   "suggestion": "Optionally pin scm_revision to a commit hash or tag.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Stale output JSON can be loaded as results of a new session",
+   "file": "BabelBrain/BabelBrain.py",
+   "line_start": 662,
+   "line_end": 664,
+   "evidence": "p = os.path.join(self.syncPath, SP.OUTPUT_JSON)\n        return p if os.path.isfile(p) else None",
+   "explanation": "findOutputFile only checks whether ~/.BabelBrainSync/BabelBrainOutput.json exists. The file is deleted only at launch, so before the next Run the Load button can load an old or unrelated session's results (including maps and _mod transforms from other trajectories).",
+   "suggestion": "Enable loading only for the current session, or show the file's timestamp and createdBy.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Result image paths from JSON are loaded without validation",
+   "file": "BabelBrain/BabelBrain.py",
+   "line_start": 735,
+   "line_end": 735,
+   "evidence": "node = slicer.util.loadVolume(path, {\"name\": name, \"show\": False})",
+   "explanation": "Image paths in BabelBrainOutput.json are passed to slicer.util.loadVolume. The file lives in the user's home directory, so there is no privilege boundary. A tampered file could only make Slicer load arbitrary volume files.",
+   "suggestion": "Optionally restrict loading to .nii/.nii.gz files under the output directory.",
+   "confidence": "low"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Module category differs from extension category",
+   "file": "BabelBrain/BabelBrain.py",
+   "line_start": 43,
+   "line_end": 43,
+   "evidence": "self.parent.categories = [_(\"Focused Ultrasound\")]",
+   "explanation": "The module sets \"Focused Ultrasound\" while the extension's CMake and catalog category is \"Ultrasound\". This is cosmetic.",
+   "suggestion": "Align the two categories.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Screenshot.png (2 MB) was not readable",
+  "The BabelBrain executable itself and its installers were not reviewed (separate project)",
+  "Behaviour inside a running Slicer was not tested",
+  "The remote revision was not resolved; main was assumed to match the commit shown"
+ ],
  "questions_for_author": []
 }
