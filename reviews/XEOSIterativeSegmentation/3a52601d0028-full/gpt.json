@@ -1,0 +1,115 @@
+{
+ "purpose": "This extension helps PET imaging users generate and refine lesion segmentations with iterative plateau-based thresholding. It displays lesion metrics and convergence curves and exports spreadsheets, images, segmentations, and rotating MIP GIFs.",
+ "summary": "The inspected source has a destructive export path: fixed filenames are overwritten without confirmation, including files from previous studies. It also installs missing packages without asking and can produce metrics inconsistent with the displayed segmentation. These correctness and environment issues are non-blocking feedback under the index admission policy; the overwrite risk is a blocking safety issue. 🔴 Do not merge yet: protect existing files from unconfirmed overwrite.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Image and spreadsheet exporters write predictable filenames in the selected directory without checking for existing files. I inspected the export callbacks and corresponding image, Excel, plot, and GIF writers; remote branch resolution was unavailable."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "The export functions conditionally pip-install matplotlib, Pillow, openpyxl and pandas without an installation prompt, and the plotting function changes matplotlib's process-wide backend. I inspected imports and the four pip-install call sites; none runs at module import."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "The root CMake file adds the module directory, and the module CMake file lists the Python script and an icon that both exist. The supplied catalog snippet points to main, but its remote resolution and the complete index entry were not independently verified."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "The repository contains an MIT license granting distribution permission. The source refers to ported MIP logic, but its original provenance and any applicable third-party terms could not be independently verified."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "I inspected the iterative search, metrics construction, threshold-preview flow, and crop helper. Metrics are computed before connected-component filtering, previews modify the exportable result before metrics are committed, and the crop excludes the last image voxel at a boundary."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README describes features and developer-mode installation, and the module provides a guided workflow. The included test is only a placeholder, and the supplied documentation does not describe a validation dataset or clinical-use limitations."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Exports silently overwrite existing files in the chosen directory",
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line_start": 2180,
+   "line_end": 2184,
+   "evidence": "            else:\n                # Scalar volume — pull and write directly\n                sitkImg = sitkUtils.PullVolumeFromSlicer(node)\n                outPath = os.path.join(outputDir, f\"{label}.{fmt}\")\n                sitk.WriteImage(sitkImg, outPath, useCompression=True)",
+   "explanation": "Exporting a PET or CT volume writes a fixed name such as PET.nrrd without checking whether it exists or asking before replacement. Reusing a directory for another study, or selecting a directory containing the original PET.nrrd, can irreversibly replace earlier user data. The segmentation, Excel, PNG and GIF exports similarly use fixed filenames.",
+   "suggestion": "Preflight all export paths and require explicit overwrite confirmation, or use user-selected or unique filenames; do not start a multi-file export until collisions are resolved.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Optional exports install dependencies without asking",
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line_start": 1824,
+   "line_end": 1832,
+   "evidence": "        try:\n            import matplotlib\n            matplotlib.use(\"Agg\")   # headless backend — no GUI window\n            import matplotlib.pyplot as plt\n        except ImportError:\n            slicer.util.pip_install(\"matplotlib\")",
+   "explanation": "When matplotlib is missing, exporting the convergence plot installs it into Slicer's shared Python environment without informing the user or requesting installation consent. The GIF and Excel paths similarly install Pillow, openpyxl and pandas; matplotlib can be a substantial download. This occurs on an export action, not at startup.",
+   "suggestion": "Ask for explicit confirmation before installing missing dependencies, and allow users to decline. Avoid changing the global matplotlib backend when generating a file.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Reported automatic metrics can disagree with the final lesion mask",
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line_start": 1354,
+   "line_end": 1358,
+   "evidence": "            lesionResultDfs[lesionIdx] = iterDf\n\n            # Keep largest object\n            if keepLargest:\n                finalSegSitk = self._keepLargestComponent(finalSegSitk)",
+   "explanation": "The plateau search returns finalStats before this filtering, but the result mask is subsequently reduced to its largest component while the summary and cached statistics still use those unfiltered values. With the default largest-component option enabled and multiple components present, exported volume and intensity metrics describe voxels not present in the exported segmentation.",
+   "suggestion": "Recompute the final statistics from the filtered mask before populating the summary and cache, and test with a multi-component lesion.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Uncommitted threshold preview changes the exported segmentation but not the table",
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line_start": 914,
+   "line_end": 922,
+   "evidence": "    def onThresholdSliderChanged(self, value):\n        if self._suppressSliderSignal or self._currentCurveLesionIdx is None:\n            return\n        lesionIdx = self._currentCurveLesionIdx\n        try:\n            stats = self.logic.rethresholdLesion(lesionIdx, value)\n            self.logic.updateLivePreview(lesionIdx)\n            self._updateCurveStatsLabels(stats)\n            self._updateMarkerPosition(lesionIdx, value, stats[\"volume_mL\"])",
+   "explanation": "Moving the slider immediately changes the actual result segmentation, but the results DataFrame is updated only by the separate Apply button. If the user previews a threshold and exports without applying it, the segmentation and spreadsheet describe different thresholds; switching lesions leaves that inconsistency in place.",
+   "suggestion": "Keep preview in a separate node until Apply, or update the official metrics and segmentation atomically whenever the slider changes; prevent export of uncommitted previews.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Cropping excludes the final voxel at image boundaries",
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line_start": 1793,
+   "line_end": 1799,
+   "evidence": "        size = petSitk.GetSize()\n        end_vox = [\n            min(size[i] - 1, bb[i] + bb[i + 3] + margin_vox[i]) for i in range(3)\n        ]\n        crop_size = [end_vox[i] - start[i] for i in range(3)]\n\n        petCropped = sitk.RegionOfInterest(petSitk, crop_size, start)",
+   "explanation": "The end index is treated as exclusive when calculating crop_size, but is capped at size minus one. Lesions or their margins touching an image edge therefore lose the outermost voxel plane, affecting segmentation and metrics.",
+   "suggestion": "Cap the exclusive endpoint at size[i], and add tests for lesions touching each image boundary.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No automated workflow or algorithm tests",
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line_start": 2268,
+   "line_end": 2273,
+   "evidence": "    def runTest(self):\n        self.setUp()\n        self.test_placeholder()\n\n    def test_placeholder(self):\n        self.delayDisplay(\"No automated tests configured yet.\")",
+   "explanation": "The registered module test only displays a message; it does not check segmentation, metrics, interactive thresholding, or export. Regressions in the core PET workflow can therefore pass the generic test.",
+   "suggestion": "Add small synthetic-volume tests covering segmentation and metrics, edge cases, threshold overrides and export collisions.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Cannot execute the extension, build it, run tests, or inspect Slicer runtime behavior in this review.",
+  "Cannot access the remote repository or independently verify that main resolves to the supplied commit 3a52601d002832d15355f866c2a85c5fccf0d6c2; the exact source revision of this checkout is not independently verified.",
+  "The complete Extensions Index catalog entry, submission checklist and CI results were not available; only the supplied catalog snippet was reviewed.",
+  "Original provenance and distribution terms of the referenced ported MIP logic were not available for independent verification.",
+  "External package distributions and their dependency metadata were not inspected."
+ ],
+ "questions_for_author": [
+  "What is the original source and license of the MIP logic described as ported verbatim?"
+ ]
+}

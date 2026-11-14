@@ -1,0 +1,944 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Exports silently overwrite existing files in the chosen directory",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line": 660,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Exports silently overwrite existing files in the chosen directory",
+     "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+     "line_start": 2180,
+     "line_end": 2184,
+     "evidence": "            else:\n                # Scalar volume — pull and write directly\n                sitkImg = sitkUtils.PullVolumeFromSlicer(node)\n                outPath = os.path.join(outputDir, f\"{label}.{fmt}\")\n                sitk.WriteImage(sitkImg, outPath, useCompression=True)",
+     "explanation": "Exporting a PET or CT volume writes a fixed name such as PET.nrrd without checking whether it exists or asking before replacement. Reusing a directory for another study, or selecting a directory containing the original PET.nrrd, can irreversibly replace earlier user data. The segmentation, Excel, PNG and GIF exports similarly use fixed filenames.",
+     "suggestion": "Preflight all export paths and require explicit overwrite confirmation, or use user-selected or unique filenames; do not start a multi-file export until collisions are resolved.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+      "line": 660
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "XEOSIterativeSegmentation.py:2174-2184 and 2229/2239 write fixed filenames (PET.nrrd, iterative-segmentation-summary.xlsx) with no exists check or prompt (search found no overwrite/exists handling). However, the directory is chosen explicitly by the user via ctkDirectoryButton (line 379) and the files are the extension's own exports, so it is a usability nit, not a concrete path to harm; not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py:1053-1057 sets the PET filename stem: `exportItems.append((\"PET\", node, False))`; lines 2182-2184 write it with `outPath = os.path.join(outputDir, f\"{label}.{fmt}\")` and `sitk.WriteImage(sitkImg, outPath, useCompression=True)`. The caller at 1045-1113 does not check for collisions or request overwrite consent. Reusing a directory can destroy a pre-existing PET.nrrd or previous export; explicit file replacement confirmation or collision-safe names are needed. Excel, PNG and GIF also use fixed names at 2229-2235, 1892-1893 and 2126-2129."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked XEOSIterativeSegmentation/XEOSIterativeSegmentation.py lines 1892-1893, 2126-2135, 2174-2185, 2229-2248. All export methods write fixed filenames (e.g., PET.<fmt>, CT.<fmt>, InitialSegmentation.<fmt>, FinalSegmentation.<fmt>, MIP_rotating.gif, convergence_plot_all_lesions.png, iterative-segmentation-summary.xlsx, iterative-segmentation-iterations.xlsx) into the user-selected outputDir without checking for existing files or prompting before overwriting. However, this only occurs when the user explicitly selects an output directory and clicks the export button, so it is a minor usability/file-handling issue rather than a blocking safety vulnerability."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Optional exports install dependencies without asking",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line": 503,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Optional exports install dependencies without asking",
+     "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+     "line_start": 1824,
+     "line_end": 1832,
+     "evidence": "        try:\n            import matplotlib\n            matplotlib.use(\"Agg\")   # headless backend — no GUI window\n            import matplotlib.pyplot as plt\n        except ImportError:\n            slicer.util.pip_install(\"matplotlib\")",
+     "explanation": "When matplotlib is missing, exporting the convergence plot installs it into Slicer's shared Python environment without informing the user or requesting installation consent. The GIF and Excel paths similarly install Pillow, openpyxl and pandas; matplotlib can be a substantial download. This occurs on an export action, not at startup.",
+     "suggestion": "Ask for explicit confirmation before installing missing dependencies, and allow users to decline. Avoid changing the global matplotlib backend when generating a file.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+      "line": 503
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Lines 1825-1829 call slicer.util.pip_install('matplotlib') on ImportError, and 1908 (Pillow), 2203 (openpyxl), 2208 (pandas) do the same, with no confirmation dialog. It happens on a user-initiated export action, not at import or startup, and there are no pins or torch. It still matches the policy's 'installation without user confirmation for large downloads'."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py:1824-1829 says `except ImportError:` followed by `slicer.util.pip_install(\"matplotlib\")`; analogous fallbacks occur at 1905-1909 and 2200-2209. The export callbacks at 1016-1034 and 1045-1134 do not ask for installation consent. These occur on export, not module import; pandas installation in Excel is generally unreachable when pandas is absent because the segmentation run imports it first. The other conditional installations remain real shared-environment changes."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked XEOSIterativeSegmentation/XEOSIterativeSegmentation.py lines 1824-1832 (slicer.util.pip_install(\"matplotlib\")), lines 1905-1909 (slicer.util.pip_install(\"Pillow\")), and lines 2200-2209 (slicer.util.pip_install(\"openpyxl\") and slicer.util.pip_install(\"pandas\")). These install packages into Slicer's shared Python environment without prompting the user for confirmation, though they are triggered only on user-initiated export actions rather than at module import or startup."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Reported automatic metrics can disagree with the final lesion mask",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line": 1354,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Reported automatic metrics can disagree with the final lesion mask",
+     "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+     "line_start": 1354,
+     "line_end": 1358,
+     "evidence": "            lesionResultDfs[lesionIdx] = iterDf\n\n            # Keep largest object\n            if keepLargest:\n                finalSegSitk = self._keepLargestComponent(finalSegSitk)",
+     "explanation": "The plateau search returns finalStats before this filtering, but the result mask is subsequently reduced to its largest component while the summary and cached statistics still use those unfiltered values. With the default largest-component option enabled and multiple components present, exported volume and intensity metrics describe voxels not present in the exported segmentation.",
+     "suggestion": "Recompute the final statistics from the filtered mask before populating the summary and cache, and test with a multi-component lesion.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+      "line": 1354
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "_searchForPlateau returns finalStats (1341-1352). Lines 1357-1358 then reduce finalSegSitk to the largest component. Row values at 1396-1401 and the cache at 1418-1420 still use the unfiltered finalStats. The interactive rethresholdLesion (1654-1671) does recompute stats after keep-largest, so the two paths are inconsistent. It is a real metric mismatch when there are multiple components, but ordinary bug-level."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py:1540-1545 computes `st     = _stats(newSeg)` before any component filtering; 1608-1611 returns the corresponding mask and stats. Lines 1356-1358 then say `if keepLargest:` and `finalSegSitk = self._keepLargestComponent(finalSegSitk)`, while lines 1396-1401 use the unchanged finalStats for the summary. The option is enabled by default at 200-201. If the mask has multiple components, the displayed/exported quantitative results can describe removed voxels. This is a major correctness issue, not a blocking admission safety issue."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked XEOSIterativeSegmentation/XEOSIterativeSegmentation.py lines 1341-1420. _searchForPlateau returns finalStats computed before _keepLargestComponent(finalSegSitk) is applied at lines 1357-1358. The unfiltered finalStats are then recorded into resultsDf (lines 1392-1403) and self._lesionCache[lesionIdx] (lines 1418-1420), whereas the segmentation node and interactive rethresholdLesion (lines 1654-1671) apply keepLargest before computing stats. When keepLargest removes disconnected components, the reported automatic summary metrics do not match the final segmentation mask."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Uncommitted threshold preview changes the exported segmentation but not the table",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line": 914,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Uncommitted threshold preview changes the exported segmentation but not the table",
+     "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+     "line_start": 914,
+     "line_end": 922,
+     "evidence": "    def onThresholdSliderChanged(self, value):\n        if self._suppressSliderSignal or self._currentCurveLesionIdx is None:\n            return\n        lesionIdx = self._currentCurveLesionIdx\n        try:\n            stats = self.logic.rethresholdLesion(lesionIdx, value)\n            self.logic.updateLivePreview(lesionIdx)\n            self._updateCurveStatsLabels(stats)\n            self._updateMarkerPosition(lesionIdx, value, stats[\"volume_mL\"])",
+     "explanation": "Moving the slider immediately changes the actual result segmentation, but the results DataFrame is updated only by the separate Apply button. If the user previews a threshold and exports without applying it, the segmentation and spreadsheet describe different thresholds; switching lesions leaves that inconsistency in place.",
+     "suggestion": "Keep preview in a separate node until Apply, or update the official metrics and segmentation atomically whenever the slider changes; prevent export of uncommitted previews.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+      "line": 914
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "onThresholdSliderChanged (914-922) calls rethresholdLesion and updateLivePreview, which push the new mask into the result segmentation (1679-1708). The results DataFrame changes only in commitLesionThreshold, which is called from onApplyThreshold (961-966). So an unapplied preview leaves the segmentation and table out of sync. The UI text says 'Apply' updates the table, so it is a documented, intentional two-step design and a minor UX inconsistency."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py:919-920 calls `stats = self.logic.rethresholdLesion(lesionIdx, value)` and `self.logic.updateLivePreview(lesionIdx)` as the slider moves. Lines 1704-1708 modify and push the result label array; only the separate Apply callback at 961-966 invokes `self.logic.commitLesionThreshold(lesionIdx, self._resultsDf)`. Excel exports that stored DataFrame at 1024-1028 while image export uses the result node at 1072-1075. Exporting a preview without applying can therefore produce inconsistent results. This is non-blocking correctness feedback under the admission policy."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked XEOSIterativeSegmentation/XEOSIterativeSegmentation.py lines 914-922, 961-974, 1632-1747, and 1869-1887. Dragging the threshold slider calls onThresholdSliderChanged -> rethresholdLesion and updateLivePreview, which immediately mutates cache['currentThreshold'], cache['currentStats'], self._resultLabelArr, and self._resultSegNode. However, self._resultsDf and cache['manuallyOverridden'] are only updated if the user clicks the Apply button (onApplyThreshold -> commitLesionThreshold). Exporting or switching lesions after moving the slider without clicking Apply leaves the exported segmentation and convergence plot threshold out of sync with the exported Excel summary table."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Unconditional `import pandas` in `runIterativeSegmentation` fails when pandas is not installed",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line": 1185,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Unconditional `import pandas` in `runIterativeSegmentation` fails when pandas is not installed",
+     "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+     "line_start": 1289,
+     "line_end": 1291,
+     "evidence": "        import SimpleITK as sitk\n        import sitkUtils\n        import pandas as pd",
+     "explanation": "`runIterativeSegmentation` imports `pandas` directly without a `try/except` fallback or installation check, unlike `exportToExcel` (lines 2205-2209) which wraps `import pandas` in `try/except ImportError` and calls `slicer.util.pip_install(\"pandas\")`. Because `pandas` is not bundled with standard 3D Slicer installations, clicking \"Run Iterative Segmentation\" will raise `ModuleNotFoundError: No module named 'pandas'` unless the user has already installed `pandas` manually.",
+     "suggestion": "Install `pandas` (with user confirmation or via a helper function) before importing it in `runIterativeSegmentation` and `_searchForPlateau`, or avoid `pandas` in the core segmentation loop by using standard Python dictionaries/lists and `vtkTable`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+      "line": 1185
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Line 1291 (runIterativeSegmentation) and line 1472 (_searchForPlateau) do an unguarded 'import pandas as pd'. Only exportToExcel (2205-2209) has the pip_install fallback. A search for pandas finds no other install path, so on a Slicer without pandas the main Run action raises ModuleNotFoundError. This breaks the core function on a fresh install."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py:1289-1291 includes `import pandas as pd` unconditionally in the core run; the caller reports errors at 579-582. The only pandas installation fallback found is in Excel export at 2205-2209, which normally requires an already successful run (1016-1019). Thus a Slicer environment without pandas cannot run the main segmentation without separately installing it. I could not independently verify the claim that pandas is absent from every standard or targeted Slicer build; this is a conditional runtime defect, not proof of broken module loading or catalog configuration."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked XEOSIterativeSegmentation/XEOSIterativeSegmentation.py lines 1291 and 1472. Both runIterativeSegmentation and _searchForPlateau execute an unconditional `import pandas as pd` without a try/except ImportError fallback, unlike exportToExcel (lines 2205-2209) which catches ImportError and calls `slicer.util.pip_install(\"pandas\")`. Because pandas is not bundled with standard 3D Slicer, running the core segmentation fails with ModuleNotFoundError on a fresh Slicer installation."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Chart mouse observers are not removed in widget `cleanup()`",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line": 703,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Chart mouse observers are not removed in widget `cleanup()`",
+     "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+     "line_start": 703,
+     "line_end": 706,
+     "evidence": "        t1 = iren.AddObserver(\"LeftButtonPressEvent\",   self._onChartMousePress)\n        t2 = iren.AddObserver(\"MouseMoveEvent\",         self._onChartMouseMove)\n        t3 = iren.AddObserver(\"LeftButtonReleaseEvent\", self._onChartMouseRelease)\n        self._chartObserverTags = [t1, t2, t3]",
+     "explanation": "`XEOSIterativeSegmentationWidget` attaches VTK event observers to the `ctkVTKChartView` render window interactor during `setup()`, but does not define a `cleanup()` method to remove them when the module widget is destroyed or reloaded.",
+     "suggestion": "Implement `cleanup(self)` in `XEOSIterativeSegmentationWidget` to remove the observers stored in `self._chartObserverTags`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+      "line": 703
+     }
+    }
+   ]
+  },
+  {
+   "title": "Cropping excludes the final voxel at image boundaries",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line": 1793,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Cropping excludes the final voxel at image boundaries",
+     "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+     "line_start": 1793,
+     "line_end": 1799,
+     "evidence": "        size = petSitk.GetSize()\n        end_vox = [\n            min(size[i] - 1, bb[i] + bb[i + 3] + margin_vox[i]) for i in range(3)\n        ]\n        crop_size = [end_vox[i] - start[i] for i in range(3)]\n\n        petCropped = sitk.RegionOfInterest(petSitk, crop_size, start)",
+     "explanation": "The end index is treated as exclusive when calculating crop_size, but is capped at size minus one. Lesions or their margins touching an image edge therefore lose the outermost voxel plane, affecting segmentation and metrics.",
+     "suggestion": "Cap the exclusive endpoint at size[i], and add tests for lesions touching each image boundary.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+      "line": 1793
+     }
+    }
+   ]
+  },
+  {
+   "title": "No automated workflow or algorithm tests",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line": 2268,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "No automated workflow or algorithm tests",
+     "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+     "line_start": 2268,
+     "line_end": 2273,
+     "evidence": "    def runTest(self):\n        self.setUp()\n        self.test_placeholder()\n\n    def test_placeholder(self):\n        self.delayDisplay(\"No automated tests configured yet.\")",
+     "explanation": "The registered module test only displays a message; it does not check segmentation, metrics, interactive thresholding, or export. Regressions in the core PET workflow can therefore pass the generic test.",
+     "suggestion": "Add small synthetic-volume tests covering segmentation and metrics, edge cases, threshold overrides and export collisions.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+      "line": 2268
+     }
+    }
+   ]
+  },
+  {
+   "title": "Typo in `EXTENSION_HOMEPAGE` URL and empty `EXTENSION_ICONURL` in `CMakeLists.txt`",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 4,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Typo in `EXTENSION_HOMEPAGE` URL and empty `EXTENSION_ICONURL` in `CMakeLists.txt`",
+     "file": "CMakeLists.txt",
+     "line_start": 4,
+     "line_end": 9,
+     "evidence": "set(EXTENSION_HOMEPAGE \"https://github.com/yazdan-salimi/XEOSIterativeSegmentation\")\nset(EXTENSION_CATEGORY \"Quantification\")\nset(EXTENSION_CONTRIBUTORS \"Yazdan Salimi\")\nset(EXTENSION_DESCRIPTION\n  \"Iterative PET lesion segmentation using Otsu initialization and plateau-detection thresholding. Loads DICOM directly in 3D Slicer, interactive convergence curve with click-to-set threshold, MIP GIF export, Excel metrics.\")\nset(EXTENSION_ICONURL \"\")",
+     "explanation": "`EXTENSION_HOMEPAGE` in `CMakeLists.txt` uses `yazdan-salimi` (with a hyphen), whereas the actual GitHub repository URL is `https://github.com/YazdanSalimi/XEOSIterativeSegmentation`. Additionally, `EXTENSION_ICONURL` is empty even though an icon (`XEOSIterativeSegmentation/Resources/Icons/XEOSIterativeSegmentation.png`) is present in the repository.",
+     "suggestion": "Update `EXTENSION_HOMEPAGE` to `\"https://github.com/YazdanSalimi/XEOSIterativeSegmentation\"` and set `EXTENSION_ICONURL` to `\"https://raw.githubusercontent.com/YazdanSalimi/XEOSIterativeSegmentation/main/XEOSIterativeSegmentation/Resources/Icons/XEOSIterativeSegmentation.png\"`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 4
+     }
+    }
+   ]
+  },
+  {
+   "title": "Verify catalog entry JSON includes `$schema` and `category`",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": null,
+   "line": 0,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Verify catalog entry JSON includes `$schema` and `category`",
+     "file": "",
+     "line_start": 0,
+     "line_end": 0,
+     "evidence": "{\n  \"scm_url\": \"https://github.com/YazdanSalimi/XEOSIterativeSegmentation.git\",\n  \"scm_revision\": \"main\"\n}",
+     "explanation": "According to the Slicer Extensions Index schema and policy, catalog entry JSON files require `$schema`, `category`, and `scm_url`. If the PR's `XEOSIterativeSegmentation.json` only contains `scm_url` and `scm_revision`, schema validation (`check_description_files.py`) will fail.",
+     "suggestion": "Ensure the catalog entry `XEOSIterativeSegmentation.json` in the ExtensionsIndex PR includes the required `\"$schema\"` and `\"category\": \"Quantification\"` fields.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Exports silently overwrite existing files in the chosen directory",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line": 660,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Exports silently overwrite existing files in the chosen directory",
+     "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+     "line_start": 2180,
+     "line_end": 2184,
+     "evidence": "            else:\n                # Scalar volume — pull and write directly\n                sitkImg = sitkUtils.PullVolumeFromSlicer(node)\n                outPath = os.path.join(outputDir, f\"{label}.{fmt}\")\n                sitk.WriteImage(sitkImg, outPath, useCompression=True)",
+     "explanation": "Exporting a PET or CT volume writes a fixed name such as PET.nrrd without checking whether it exists or asking before replacement. Reusing a directory for another study, or selecting a directory containing the original PET.nrrd, can irreversibly replace earlier user data. The segmentation, Excel, PNG and GIF exports similarly use fixed filenames.",
+     "suggestion": "Preflight all export paths and require explicit overwrite confirmation, or use user-selected or unique filenames; do not start a multi-file export until collisions are resolved.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+      "line": 660
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "XEOSIterativeSegmentation.py:2174-2184 and 2229/2239 write fixed filenames (PET.nrrd, iterative-segmentation-summary.xlsx) with no exists check or prompt (search found no overwrite/exists handling). However, the directory is chosen explicitly by the user via ctkDirectoryButton (line 379) and the files are the extension's own exports, so it is a usability nit, not a concrete path to harm; not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py:1053-1057 sets the PET filename stem: `exportItems.append((\"PET\", node, False))`; lines 2182-2184 write it with `outPath = os.path.join(outputDir, f\"{label}.{fmt}\")` and `sitk.WriteImage(sitkImg, outPath, useCompression=True)`. The caller at 1045-1113 does not check for collisions or request overwrite consent. Reusing a directory can destroy a pre-existing PET.nrrd or previous export; explicit file replacement confirmation or collision-safe names are needed. Excel, PNG and GIF also use fixed names at 2229-2235, 1892-1893 and 2126-2129."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked XEOSIterativeSegmentation/XEOSIterativeSegmentation.py lines 1892-1893, 2126-2135, 2174-2185, 2229-2248. All export methods write fixed filenames (e.g., PET.<fmt>, CT.<fmt>, InitialSegmentation.<fmt>, FinalSegmentation.<fmt>, MIP_rotating.gif, convergence_plot_all_lesions.png, iterative-segmentation-summary.xlsx, iterative-segmentation-iterations.xlsx) into the user-selected outputDir without checking for existing files or prompting before overwriting. However, this only occurs when the user explicitly selects an output directory and clicks the export button, so it is a minor usability/file-handling issue rather than a blocking safety vulnerability."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Optional exports install dependencies without asking",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line": 503,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Optional exports install dependencies without asking",
+     "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+     "line_start": 1824,
+     "line_end": 1832,
+     "evidence": "        try:\n            import matplotlib\n            matplotlib.use(\"Agg\")   # headless backend — no GUI window\n            import matplotlib.pyplot as plt\n        except ImportError:\n            slicer.util.pip_install(\"matplotlib\")",
+     "explanation": "When matplotlib is missing, exporting the convergence plot installs it into Slicer's shared Python environment without informing the user or requesting installation consent. The GIF and Excel paths similarly install Pillow, openpyxl and pandas; matplotlib can be a substantial download. This occurs on an export action, not at startup.",
+     "suggestion": "Ask for explicit confirmation before installing missing dependencies, and allow users to decline. Avoid changing the global matplotlib backend when generating a file.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+      "line": 503
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Lines 1825-1829 call slicer.util.pip_install('matplotlib') on ImportError, and 1908 (Pillow), 2203 (openpyxl), 2208 (pandas) do the same, with no confirmation dialog. It happens on a user-initiated export action, not at import or startup, and there are no pins or torch. It still matches the policy's 'installation without user confirmation for large downloads'."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py:1824-1829 says `except ImportError:` followed by `slicer.util.pip_install(\"matplotlib\")`; analogous fallbacks occur at 1905-1909 and 2200-2209. The export callbacks at 1016-1034 and 1045-1134 do not ask for installation consent. These occur on export, not module import; pandas installation in Excel is generally unreachable when pandas is absent because the segmentation run imports it first. The other conditional installations remain real shared-environment changes."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked XEOSIterativeSegmentation/XEOSIterativeSegmentation.py lines 1824-1832 (slicer.util.pip_install(\"matplotlib\")), lines 1905-1909 (slicer.util.pip_install(\"Pillow\")), and lines 2200-2209 (slicer.util.pip_install(\"openpyxl\") and slicer.util.pip_install(\"pandas\")). These install packages into Slicer's shared Python environment without prompting the user for confirmation, though they are triggered only on user-initiated export actions rather than at module import or startup."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Reported automatic metrics can disagree with the final lesion mask",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line": 1354,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Reported automatic metrics can disagree with the final lesion mask",
+     "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+     "line_start": 1354,
+     "line_end": 1358,
+     "evidence": "            lesionResultDfs[lesionIdx] = iterDf\n\n            # Keep largest object\n            if keepLargest:\n                finalSegSitk = self._keepLargestComponent(finalSegSitk)",
+     "explanation": "The plateau search returns finalStats before this filtering, but the result mask is subsequently reduced to its largest component while the summary and cached statistics still use those unfiltered values. With the default largest-component option enabled and multiple components present, exported volume and intensity metrics describe voxels not present in the exported segmentation.",
+     "suggestion": "Recompute the final statistics from the filtered mask before populating the summary and cache, and test with a multi-component lesion.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+      "line": 1354
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "_searchForPlateau returns finalStats (1341-1352). Lines 1357-1358 then reduce finalSegSitk to the largest component. Row values at 1396-1401 and the cache at 1418-1420 still use the unfiltered finalStats. The interactive rethresholdLesion (1654-1671) does recompute stats after keep-largest, so the two paths are inconsistent. It is a real metric mismatch when there are multiple components, but ordinary bug-level."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py:1540-1545 computes `st     = _stats(newSeg)` before any component filtering; 1608-1611 returns the corresponding mask and stats. Lines 1356-1358 then say `if keepLargest:` and `finalSegSitk = self._keepLargestComponent(finalSegSitk)`, while lines 1396-1401 use the unchanged finalStats for the summary. The option is enabled by default at 200-201. If the mask has multiple components, the displayed/exported quantitative results can describe removed voxels. This is a major correctness issue, not a blocking admission safety issue."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked XEOSIterativeSegmentation/XEOSIterativeSegmentation.py lines 1341-1420. _searchForPlateau returns finalStats computed before _keepLargestComponent(finalSegSitk) is applied at lines 1357-1358. The unfiltered finalStats are then recorded into resultsDf (lines 1392-1403) and self._lesionCache[lesionIdx] (lines 1418-1420), whereas the segmentation node and interactive rethresholdLesion (lines 1654-1671) apply keepLargest before computing stats. When keepLargest removes disconnected components, the reported automatic summary metrics do not match the final segmentation mask."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Uncommitted threshold preview changes the exported segmentation but not the table",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line": 914,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Uncommitted threshold preview changes the exported segmentation but not the table",
+     "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+     "line_start": 914,
+     "line_end": 922,
+     "evidence": "    def onThresholdSliderChanged(self, value):\n        if self._suppressSliderSignal or self._currentCurveLesionIdx is None:\n            return\n        lesionIdx = self._currentCurveLesionIdx\n        try:\n            stats = self.logic.rethresholdLesion(lesionIdx, value)\n            self.logic.updateLivePreview(lesionIdx)\n            self._updateCurveStatsLabels(stats)\n            self._updateMarkerPosition(lesionIdx, value, stats[\"volume_mL\"])",
+     "explanation": "Moving the slider immediately changes the actual result segmentation, but the results DataFrame is updated only by the separate Apply button. If the user previews a threshold and exports without applying it, the segmentation and spreadsheet describe different thresholds; switching lesions leaves that inconsistency in place.",
+     "suggestion": "Keep preview in a separate node until Apply, or update the official metrics and segmentation atomically whenever the slider changes; prevent export of uncommitted previews.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+      "line": 914
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "onThresholdSliderChanged (914-922) calls rethresholdLesion and updateLivePreview, which push the new mask into the result segmentation (1679-1708). The results DataFrame changes only in commitLesionThreshold, which is called from onApplyThreshold (961-966). So an unapplied preview leaves the segmentation and table out of sync. The UI text says 'Apply' updates the table, so it is a documented, intentional two-step design and a minor UX inconsistency."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py:919-920 calls `stats = self.logic.rethresholdLesion(lesionIdx, value)` and `self.logic.updateLivePreview(lesionIdx)` as the slider moves. Lines 1704-1708 modify and push the result label array; only the separate Apply callback at 961-966 invokes `self.logic.commitLesionThreshold(lesionIdx, self._resultsDf)`. Excel exports that stored DataFrame at 1024-1028 while image export uses the result node at 1072-1075. Exporting a preview without applying can therefore produce inconsistent results. This is non-blocking correctness feedback under the admission policy."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked XEOSIterativeSegmentation/XEOSIterativeSegmentation.py lines 914-922, 961-974, 1632-1747, and 1869-1887. Dragging the threshold slider calls onThresholdSliderChanged -> rethresholdLesion and updateLivePreview, which immediately mutates cache['currentThreshold'], cache['currentStats'], self._resultLabelArr, and self._resultSegNode. However, self._resultsDf and cache['manuallyOverridden'] are only updated if the user clicks the Apply button (onApplyThreshold -> commitLesionThreshold). Exporting or switching lesions after moving the slider without clicking Apply leaves the exported segmentation and convergence plot threshold out of sync with the exported Excel summary table."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Unconditional `import pandas` in `runIterativeSegmentation` fails when pandas is not installed",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+   "line": 1185,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Unconditional `import pandas` in `runIterativeSegmentation` fails when pandas is not installed",
+     "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+     "line_start": 1289,
+     "line_end": 1291,
+     "evidence": "        import SimpleITK as sitk\n        import sitkUtils\n        import pandas as pd",
+     "explanation": "`runIterativeSegmentation` imports `pandas` directly without a `try/except` fallback or installation check, unlike `exportToExcel` (lines 2205-2209) which wraps `import pandas` in `try/except ImportError` and calls `slicer.util.pip_install(\"pandas\")`. Because `pandas` is not bundled with standard 3D Slicer installations, clicking \"Run Iterative Segmentation\" will raise `ModuleNotFoundError: No module named 'pandas'` unless the user has already installed `pandas` manually.",
+     "suggestion": "Install `pandas` (with user confirmation or via a helper function) before importing it in `runIterativeSegmentation` and `_searchForPlateau`, or avoid `pandas` in the core segmentation loop by using standard Python dictionaries/lists and `vtkTable`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py",
+      "line": 1185
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Line 1291 (runIterativeSegmentation) and line 1472 (_searchForPlateau) do an unguarded 'import pandas as pd'. Only exportToExcel (2205-2209) has the pip_install fallback. A search for pandas finds no other install path, so on a Slicer without pandas the main Run action raises ModuleNotFoundError. This breaks the core function on a fresh install."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py:1289-1291 includes `import pandas as pd` unconditionally in the core run; the caller reports errors at 579-582. The only pandas installation fallback found is in Excel export at 2205-2209, which normally requires an already successful run (1016-1019). Thus a Slicer environment without pandas cannot run the main segmentation without separately installing it. I could not independently verify the claim that pandas is absent from every standard or targeted Slicer build; this is a conditional runtime defect, not proof of broken module loading or catalog configuration."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked XEOSIterativeSegmentation/XEOSIterativeSegmentation.py lines 1291 and 1472. Both runIterativeSegmentation and _searchForPlateau execute an unconditional `import pandas as pd` without a try/except ImportError fallback, unlike exportToExcel (lines 2205-2209) which catches ImportError and calls `slicer.util.pip_install(\"pandas\")`. Because pandas is not bundled with standard 3D Slicer, running the core segmentation fails with ModuleNotFoundError on a fresh Slicer installation."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D6",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (blocking, ok)",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "I read the segmentation, export and Excel code and searched for pip_install and file writes. I found no network transmission, eval/exec, pickle, subprocess, or obfuscated code. The only file overwriting is of fixed-name exports into a user-chosen directory (D1), which is not a concrete path to harm. My rating for safety is ok, not blocking."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": null,
+     "rating": "blocking",
+     "reason": "The concrete safety issue is accidental data destruction: XEOSIterativeSegmentation/XEOSIterativeSegmentation.py:2183-2184 contains `outPath = os.path.join(outputDir, f\"{label}.{fmt}\")` followed by `sitk.WriteImage(sitkImg, outPath, useCompression=True)` without a collision check in its export path (1045-1113). Fixed-name exports can silently replace existing user files. I searched the available source for network, command execution, deserialization, deletion and downloads; no other such path was established by that search. The exact source revision and any external dependency payloads could not be independently verified with the available tools."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Checked the entire repository including XEOSIterativeSegmentation/XEOSIterativeSegmentation.py (lines 1-2273). There is no malicious behavior, telemetry, network communication, unsafe deserialization, or command execution. Writing fixed export filenames in a user-chosen output directory upon clicking Export (D1) is a minor usability detail, not a safety concern."
+    }
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "concern"
+   },
+   "outcome": "settled: minor (concern, minor)",
+   "positions": {
+    "claude": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "pip_install of matplotlib, Pillow, openpyxl and pandas is done lazily on export actions (1829, 1908, 2203, 2208) with no confirmation. There are no pins, no torch, and nothing at import or startup. This is a mild environment concern, so my rating for environment is concern, not blocking."
+    },
+    "gpt": {
+     "item": "D7",
+     "real": "yes",
+     "severity": null,
+     "rating": "concern",
+     "reason": "XEOSIterativeSegmentation/XEOSIterativeSegmentation.py:1827-1829 includes `except ImportError:` and `slicer.util.pip_install(\"matplotlib\")`; comparable fallback installs occur at 1905-1909 and 2200-2209, without a preceding user installation prompt in the export callbacks. These can modify Slicer's shared Python environment, but only after optional export actions, not at startup. The inspected import block at 17-29 contains no pip install. External package requirements and the exact revision were not independently verified."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": null,
+     "rating": "minor",
+     "reason": "Checked XEOSIterativeSegmentation/XEOSIterativeSegmentation.py lines 17-30, 1824-1832, 1905-1909, and 2200-2209. Top-level imports are clean with no startup/import-time package installation or global side effects, and no pinned or conflicting packages (such as torch, vtk, or Qt) are installed. However, optional export functions call `slicer.util.pip_install` for matplotlib, Pillow, openpyxl, and pandas without a confirmation prompt, warranting a `minor` rating for environment."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "concern"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "minor issues",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 7,
+  "single": 10,
+  "unverified": 1,
+  "total": 10,
+  "open_disputes": 1
+ }
+}

@@ -1,0 +1,1246 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "An incoming full sync can erase an unrelated segmentation in the scene",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+   "line": 691,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "An incoming full sync can erase an unrelated segmentation in the scene",
+     "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+     "line_start": 691,
+     "line_end": 699,
+     "evidence": "    def _getOrCreateSegmentationNode(self):\n        nodeName = \"CollaborativeSegmentation\"\n        node = slicer.mrmlScene.GetFirstNodeByName(nodeName)\n        \n        if not node:\n            # Check if any segmentation node exists to adopt it\n            node = slicer.mrmlScene.GetFirstNodeByClass(\"vtkMRMLSegmentationNode\")\n            if node:\n                node.SetName(nodeName)",
+     "explanation": "When the collaborative node does not exist, an incoming full sync adopts the first pre-existing segmentation, even if it belongs to another case. Lines 837–845 then call RemoveAllSegments on that node before importing the remote data, destroying unsaved local segmentations without confirmation; a failed import can also leave the adopted node empty.",
+     "suggestion": "Create and track a dedicated session-owned node rather than adopting arbitrary scene nodes; stage and validate incoming data before replacing any existing data, with an explicit recovery path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+      "line": 691
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "SlicerConnectEditor.py:691-699 adopts and renames the first vtkMRMLSegmentationNode when no 'CollaborativeSegmentation' node exists. Line 841 then calls RemoveAllSegments() on it without any confirmation. This is real data loss of unsaved local work, but it only happens during a user-initiated collaboration session and only when the scene already has an unrelated segmentation. I rate it major, not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "SlicerConnectEditor/SlicerConnectEditor.py:403-414 dispatches a received full segmentation to handleFullSegmentation. Lines 695-699 adopt and rename the first existing segmentation when no node with the collaborative name exists: `node = slicer.mrmlScene.GetFirstNodeByClass(\"vtkMRMLSegmentationNode\")` and `node.SetName(nodeName)`. Lines 837-845 then execute `segmentationNode.GetSegmentation().RemoveAllSegments()` before importing the remote labelmap. Thus an unrelated unsaved segmentation can be destroyed without confirmation; an import failure after removal can also leave it empty."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In `SlicerConnectEditor/SlicerConnectEditor.py:691-703`, `_getOrCreateSegmentationNode` checks for a node named `\"CollaborativeSegmentation\"`, and if not found, calls `slicer.mrmlScene.GetFirstNodeByClass(\"vtkMRMLSegmentationNode\")` and renames it. Then in `handleFullSegmentation` (`SlicerConnectEditor/SlicerConnectEditor.py:837-846`), it calls `segmentationNode.GetSegmentation().RemoveAllSegments()` before importing the incoming labelmap. However, this is an ordinary logic/design flaw when a user explicitly connects to a collaborative session, rather than a blocking safety vulnerability, so `major` (or `minor`) is more appropriate than `blocking`."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Unencrypted WebSocket (ws://) transmits authentication tokens and segmentation data in cleartext",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "blocking"
+   ],
+   "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+   "line": 339,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Unencrypted WebSocket (ws://) transmits authentication tokens and segmentation data in cleartext",
+     "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+     "line_start": 339,
+     "line_end": 343,
+     "evidence": "class SlicerConnectEditorLogic(ScriptedLoadableModuleLogic):\n    def __init__(self):\n        ScriptedLoadableModuleLogic.__init__(self)\n        self.WS_BASE_URL = \"ws://slicerconnect.from-delhi.net/collaboration/sessions\"",
+     "explanation": "Despite the README claiming that all communication uses HTTPS and Secure WebSockets (WSS), `SlicerConnectEditorLogic` hardcodes an unencrypted `ws://` WebSocket endpoint (`ws://slicerconnect.from-delhi.net/collaboration/sessions`). In `connect()`, the user's authentication token is appended as a query parameter (`wsUrl = f\"{self.WS_BASE_URL}/{sessionId}/ws?token={token}\"`), and all segmentation voxel data and deltas are transmitted over this connection. This exposes both the bearer token and potentially sensitive medical segmentation data in cleartext over the network. Furthermore, the server URL is hardcoded in `SlicerConnectEditorLogic` and `SlicerConnectLoginLogic` rather than configurable by the user.",
+     "suggestion": "Use `wss://` for WebSocket connections and read the server base URL from a user-configurable setting (matching `SlicerConnectServerURL` in `SlicerConnect.py`) rather than hardcoding an unencrypted `ws://` URL.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+      "line": 339
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Segmentation data and bearer tokens travel over plaintext WebSockets",
+     "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+     "line_start": 339,
+     "line_end": 342,
+     "evidence": "class SlicerConnectEditorLogic(ScriptedLoadableModuleLogic):\n    def __init__(self):\n        ScriptedLoadableModuleLogic.__init__(self)\n        self.WS_BASE_URL = \"ws://slicerconnect.from-delhi.net/collaboration/sessions\"",
+     "explanation": "The connect method at lines 365–369 places the bearer token in this WebSocket URL, and full segmentations and deltas are sent over that connection. Anyone able to observe or modify network traffic can obtain the token and segmentation data or tamper with updates. README.md lines 32–35 incorrectly says all communication uses secure WebSockets, so users are not informed of this exposure.",
+     "suggestion": "Require certificate-verified wss:// end to end, ensure the service supports it, and correct the security documentation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+      "line": 339
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "SlicerConnectEditor.py:342 hardcodes WS_BASE_URL as ws://slicerconnect.from-delhi.net/..., and line 367 appends ?token={token} to it. The bearer token and segmentation data therefore travel unencrypted. README.md line 34 describes the server with an https URL, so users are not told the WebSocket is cleartext. Medical segmentation data plus credentials sent in the clear is a concrete exposure."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "SlicerConnectEditor/SlicerConnectEditor.py:342 sets `self.WS_BASE_URL = \"ws://slicerconnect.from-delhi.net/collaboration/sessions\"`; lines 365-369 append `?token={token}` and connect. Lines 610-612 and 617-632 encode and send full voxel data; lines 560-588 send voxel deltas. An observer or active network attacker can read or tamper with these messages and steal the token. README.md:35 incorrectly states `* **Encryption**: All communication is performed over HTTPS and Secure WebSockets (WSS).`"
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "In `SlicerConnectEditor/SlicerConnectEditor.py:342`, `self.WS_BASE_URL = \"ws://slicerconnect.from-delhi.net/collaboration/sessions\"` uses unencrypted `ws://`, and in `connect` (`lines 365-369`), the bearer token is passed in the URL (`wsUrl = f\"{self.WS_BASE_URL}/{sessionId}/ws?token={token}\"`). All full segmentations and deltas are transmitted over this cleartext connection, directly contradicting `README.md:35` which promises \"All communication is performed over HTTPS and Secure WebSockets (WSS).\" Exposing authentication tokens and potentially sensitive medical segmentation data in cleartext despite explicit documentation claiming WSS encryption is a blocking safety issue."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Connection URL logs the authentication bearer token",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+   "line": 365,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Connection URL logs the authentication bearer token",
+     "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+     "line_start": 365,
+     "line_end": 369,
+     "evidence": "    def connect(self, sessionId, token):\n        \"\"\"Connect to WebSocket server with session ID and token\"\"\"\n        wsUrl = f\"{self.WS_BASE_URL}/{sessionId}/ws?token={token}\"\n        print(f\"Connecting to: {wsUrl}\")\n        self.wsHandler.connectToServer(wsUrl)",
+     "explanation": "Each connection prints the complete bearer token to Slicer's Python output or application logs. Anyone receiving a troubleshooting log containing it can potentially impersonate the user; query-string tokens may also be retained in server or proxy access logs even after transport is secured.",
+     "suggestion": "Never print credentials; authenticate with an authorization header or another mechanism that avoids URLs and logs.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+      "line": 365
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SlicerConnectEditor.py:368 runs print(f\"Connecting to: {wsUrl}\"), and wsUrl includes ?token=. The token is printed to the Python console and log. This is a real leak into logs, but it stays local and is much less serious than the cleartext transport in D2. The token-in-URL problem is part of D2."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "SlicerConnectEditor/SlicerConnectEditor.py:365-369 constructs `wsUrl = f\"{self.WS_BASE_URL}/{sessionId}/ws?token={token}\"` and then runs `print(f\"Connecting to: {wsUrl}\")`. The token is consequently exposed in Python output and potentially in shared diagnostic logs; URL query parameters can also be recorded by intermediaries, though their logging configuration was not inspected."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In `SlicerConnectEditor/SlicerConnectEditor.py:367-368`, `connect()` constructs `wsUrl = f\"{self.WS_BASE_URL}/{sessionId}/ws?token={token}\"` and calls `print(f\"Connecting to: {wsUrl}\")`, which writes the full bearer token to Slicer's console/log files. Passing the token in the URL query string also risks exposure in server/proxy logs. This is a real issue, best rated `minor` (or `major`) as local log exposure of a session token."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Login redirects to non-existent module `CollaborativeSegmentation`",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "SlicerConnectLogin/SlicerConnectLogin.py",
+   "line": 149,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Login redirects to non-existent module `CollaborativeSegmentation`",
+     "file": "SlicerConnectLogin/SlicerConnectLogin.py",
+     "line_start": 149,
+     "line_end": 152,
+     "evidence": "            self._update_ui(\"Login successful\")\n            slicer.util.selectModule(\"CollaborativeSegmentation\")\n        else:\n            self._update_ui(message)",
+     "explanation": "After a successful login in `SlicerConnectLoginWidget.onLoginComplete`, the code calls `slicer.util.selectModule(\"CollaborativeSegmentation\")`. However, the module included in this extension is named `SlicerConnect`, not `CollaborativeSegmentation`. This causes switching to the project hub module after login to fail.",
+     "suggestion": "Change `\"CollaborativeSegmentation\"` to `\"SlicerConnect\"`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectLogin/SlicerConnectLogin.py",
+      "line": 149
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Login redirects to a module not defined by this extension",
+     "file": "SlicerConnectLogin/SlicerConnectLogin.py",
+     "line_start": 144,
+     "line_end": 150,
+     "evidence": "            slicer.app.settings().setValue(\"SlicerConnectToken\", token)\n            slicer.app.settings().sync()\n            self.ui.loginEmail.setText(\"\")\n            self.ui.loginPassword.setText(\"\")\n            self.ui.regPassword.setText(\"\")\n            self._update_ui(\"Login successful\")\n            slicer.util.selectModule(\"CollaborativeSegmentation\")",
+     "explanation": "The installed module is named SlicerConnect, not CollaborativeSegmentation. Successful login therefore cannot perform the intended automatic transition to the project hub; users must navigate there manually.",
+     "suggestion": "Select SlicerConnect and test the login-to-project workflow.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectLogin/SlicerConnectLogin.py",
+      "line": 144
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SlicerConnectLogin.py:150 calls selectModule(\"CollaborativeSegmentation\"). No module has that name; the modules are SlicerConnect, SlicerConnectLogin and SlicerConnectEditor. The automatic switch after login therefore fails, and the user has to open the hub manually."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": "minor",
+     "reason": "SlicerConnectLogin/SlicerConnectLogin.py:149-150 runs `self._update_ui(\"Login successful\")` followed by `slicer.util.selectModule(\"CollaborativeSegmentation\")`. CMakeLists.txt:21-23 includes SlicerConnectLogin, SlicerConnect and SlicerConnectEditor, and SlicerConnect/CMakeLists.txt:4 says `set(module_name SlicerConnect)`. The intended project hub is not registered under the requested name by this extension, so the automatic transition fails; the user can select SlicerConnect manually."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In `SlicerConnectLogin/SlicerConnectLogin.py:150`, `onLoginComplete` calls `slicer.util.selectModule(\"CollaborativeSegmentation\")`, whereas the hub module in this repository is named `SlicerConnect` (`SlicerConnect/SlicerConnect.py`). Because the automatic redirect after login fails and raises an error or fails to switch modules, this is a real soundness bug (`major` or `minor`; since the user can still manually switch modules in the Slicer toolbar, `minor` or `major` is appropriate—`major` because it breaks the primary post-login workflow step)."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "NameError (`local_path=Null`) breaks segmentation download",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "SlicerConnect/SlicerConnect.py",
+   "line": 487,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "NameError (`local_path=Null`) breaks segmentation download",
+     "file": "SlicerConnect/SlicerConnect.py",
+     "line_start": 487,
+     "line_end": 490,
+     "evidence": "        seg_id = selectedSegs[0].data(qt.Qt.UserRole)\n        local_path=Null\n        try:\n            local_path = self.api_client.download_segmentation(seg_id)",
+     "explanation": "In `onDownloadSegClicked`, `local_path=Null` uses `Null` instead of Python's `None`. When the user clicks the \"Download Segmentation\" button, Python raises `NameError: name 'Null' is not defined` before the `try` block even executes, completely breaking segmentation downloads. Additionally, in the `finally` block (`if os.path.exists(local_path):`), if `download_segmentation` fails and `local_path` is `None`, `os.path.exists(None)` raises a `TypeError`.",
+     "suggestion": "Initialize `local_path = None` and check `if local_path and os.path.exists(local_path):` in the `finally` block.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnect/SlicerConnect.py",
+      "line": 487
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Download button raises before starting the download",
+     "file": "SlicerConnect/SlicerConnect.py",
+     "line_start": 487,
+     "line_end": 491,
+     "evidence": "        seg_id = selectedSegs[0].data(qt.Qt.UserRole)\n        local_path=Null\n        try:\n            local_path = self.api_client.download_segmentation(seg_id)\n            self.logic.load_segmentation(local_path, selectedSegs[0].text())",
+     "explanation": "Null is not a Python name, so selecting a segmentation and pressing Download raises NameError before the try block and never downloads the file. Replacing it with None also requires guarding the cleanup path when download fails.",
+     "suggestion": "Initialize to None and remove the temporary file only when a valid path exists.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnect/SlicerConnect.py",
+      "line": 487
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SlicerConnect.py:488 has local_path=Null, which raises NameError before the try block, so every segmentation download fails. The finally block at line 495 would also fail with os.path.exists(None) if the download raised. This is an ordinary bug in one feature. It is minor-to-major, and I rate it minor because it is not a safety issue."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "SlicerConnect/SlicerConnect.py:487-490 has `local_path=Null` before the `try:` and download call. No definition of Null was found in the repository, so with a selected segmentation this raises NameError and prevents the download. Lines 494-495 say `finally:` and `if os.path.exists(local_path):`; if the initializer is changed to None, that cleanup would also need a guard when download fails. This is an ordinary correctness issue, not a safety admission blocker."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In `SlicerConnect/SlicerConnect.py:488`, `onDownloadSegClicked` has `local_path=Null` outside the `try` block. Because `Null` is not defined in Python, clicking Download Segmentation immediately raises `NameError: name 'Null' is not defined`. Furthermore, in the `finally` block at line 495 (`if os.path.exists(local_path):`), if `local_path` were initialized to `None` and `download_segmentation` failed, `os.path.exists(None)` would raise a `TypeError`. Because this completely breaks the segmentation download feature in the project hub, it is a `major` soundness bug."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Stray identifier `m` in `_try_refresh_token` causes NameError on token refresh",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "SlicerConnect/SlicerConnect.py",
+   "line": 65,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Stray identifier `m` in `_try_refresh_token` causes NameError on token refresh",
+     "file": "SlicerConnect/SlicerConnect.py",
+     "line_start": 65,
+     "line_end": 69,
+     "evidence": "            if response.status_code == 200:\n                m\n                data = response.json()\n                self.token = data.get(\"access_token\")",
+     "explanation": "In `BackendAPIClient._try_refresh_token()`, line 66 contains a stray `m` statement. When a 401 response triggers token refresh and the server responds with HTTP 200, executing line 66 raises `NameError: name 'm' is not defined`, which is caught by `except Exception` on line 80, causing token refresh to always fail.",
+     "suggestion": "Remove the stray `m` on line 66.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnect/SlicerConnect.py",
+      "line": 65
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Successful token refresh is defeated by an undefined name",
+     "file": "SlicerConnect/SlicerConnect.py",
+     "line_start": 65,
+     "line_end": 69,
+     "evidence": "            if response.status_code == 200:\n                m\n                data = response.json()\n                self.token = data.get(\"access_token\")\n                new_refresh = data.get(\"refresh_token\")",
+     "explanation": "If a refresh token is present and the server returns 200, the standalone undefined name m raises NameError, which is caught and treated as refresh failure. Expired sessions therefore cannot be renewed through this path.",
+     "suggestion": "Remove the stray name and test the complete login, refresh, and retry flow.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnect/SlicerConnect.py",
+      "line": 65
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SlicerConnect.py:66 contains a bare 'm' on its own line inside the HTTP 200 branch of _try_refresh_token. It raises NameError, and the surrounding try/except treats that as a failed refresh. Token refresh therefore never works. It is a contained functional bug."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": "minor",
+     "reason": "SlicerConnect/SlicerConnect.py:53-66 reads the refresh token and contains `if response.status_code == 200:` followed by the standalone undefined name `m`. Lines 80-82 catch the resulting NameError and return False; lines 36-42 then treat the 401 as authentication failure. A successful refresh response cannot renew the session on this path."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In `SlicerConnect/SlicerConnect.py:65-67`, inside `_try_refresh_token()`, immediately after `if response.status_code == 200:` there is a standalone undefined identifier `m` on line 66. Executing this line raises `NameError: name 'm' is not defined`, which is caught by `except Exception as e:` on line 80 and causes token refresh to always return `False`. This completely breaks automatic session token refresh and is a `major` soundness issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Unprompted pip_install of websocket-client on logic instantiation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+   "line": 927,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Unprompted pip_install of websocket-client on logic instantiation",
+     "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+     "line_start": 927,
+     "line_end": 930,
+     "evidence": "    def test_SlicerConnectEditor1(self):\n        self.delayDisplay(\"Starting the test\")\n        logic = SlicerConnectEditorLogic()\n        segmentationNode = slicer.mrmlScene.AddNewNodeByClass(\"vtkMRMLSegmentationNode\")",
+     "explanation": "`SlicerConnectEditorLogic.__init__()` instantiates `WebSocketHandler()`, which immediately calls `self.ensureDependencies()` and runs `slicer.util.pip_install(\"websocket-client\")` without user confirmation. This happens whenever `SlicerConnectEditorWidget.setup()` runs (opening the module) or when `SlicerConnectEditorTest` instantiates `SlicerConnectEditorLogic()`. Installing packages into Slicer's shared Python environment when a module is opened or tested—without asking the user first—violates Slicer's environment rules.",
+     "suggestion": "Prompt the user for confirmation (e.g., via `slicer.util.confirmOkCancelDisplay`) before calling `slicer.util.pip_install(\"websocket-client\")`, and defer the check until the user actually initiates a connection rather than in `__init__`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+      "line": 927
+     }
+    }
+   ],
+   "id": "D7",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SlicerConnectEditor.py:269-271 calls ensureDependencies() in WebSocketHandler.__init__, and lines 257-266 pip_install websocket-client if it is missing. The install has no confirmation prompt. It happens when the Editor logic is created, not at Slicer startup. The package is small, is not one Slicer bundles, and brings no Qt, VTK or torch. SlicerConnectLogin.py:157-169 does the same for requests. This breaks the convention of asking first, but the impact is low."
+    },
+    "gpt": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "SlicerConnectEditor/SlicerConnectEditor.py:40-42 constructs `self.logic = SlicerConnectEditorLogic()` during widget setup; line 349 constructs `self.wsHandler = WebSocketHandler()`. Lines 257-271 call `self.ensureDependencies()` and, on ImportError, `slicer.util.pip_install(\"websocket-client\")` without a confirmation dialog. This modifies the shared environment when the editor is opened if the package is missing; lines 927-929 also instantiate the logic during the test. It is not an import-time or unconditional installation."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In `SlicerConnectEditor/SlicerConnectEditor.py:257-271`, `WebSocketHandler.__init__` immediately calls `self.ensureDependencies()`, which runs `slicer.util.pip_install(\"websocket-client\")` if `websocket` is not installed (`line 264`). `SlicerConnectEditorLogic.__init__` (`line 349`) instantiates `WebSocketHandler()`, and `SlicerConnectEditorWidget.setup()` instantiates `SlicerConnectEditorLogic()`. While it does not run at module import/Slicer startup, installing a lightweight pure-Python package (`websocket-client`) when the user opens the module widget without a confirmation dialog is a `minor` environment/usability issue (the rubric specifically flags package installation at import/startup or without user confirmation for large downloads)."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Dependencies are installed without a user confirmation",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+   "line": 257,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Dependencies are installed without a user confirmation",
+     "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+     "line_start": 257,
+     "line_end": 265,
+     "evidence": "    def ensureDependencies(self):\n        \"\"\"Checks and installs websocket-client if missing.\"\"\"\n        try:\n            import websocket\n            self.websocket = websocket\n        except ImportError:\n            slicer.util.showStatusMessage(\"Installing websocket dependencies...\")\n            slicer.util.pip_install(\"websocket-client\")\n            import websocket",
+     "explanation": "Opening the editor constructs WebSocketHandler and, if the package is missing, installs it into Slicer's shared environment without asking. Login similarly installs requests when missing. These are conditional on opening the modules, not module-import or startup installs.",
+     "suggestion": "Explain the dependency and request confirmation before installation, with a way to decline.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+      "line": 257
+     }
+    }
+   ]
+  },
+  {
+   "title": "Inconsistent collaborator keys and role casing in `ManageCollaboratorsDialog`",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerConnect/SlicerConnect.py",
+   "line": 45,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Inconsistent collaborator keys and role casing in `ManageCollaboratorsDialog`",
+     "file": "SlicerConnect/SlicerConnect.py",
+     "line_start": 671,
+     "line_end": 675,
+     "evidence": "        try:\n            all_users = self.api_client.get_all_users()\n            existing_ids = {collab.get('id') for collab in collaborators}\n            self.userCombo.clear()",
+     "explanation": "In `ManageCollaboratorsDialog._refresh()`, line 662 reads `collab.get('user_id')` for each collaborator in the table, whereas line 673 collects `existing_ids = {collab.get('id') for collab in collaborators}`. In `_onRemove`, line 712 reads `username = self.userCombo.currentText` (which is the combo box from the \"Add Collaborator\" tab, not the removed collaborator's name). And in `_onAdd`, `role = self.roleCombo.currentText` sends the capitalized role (`\"Editor\"` or `\"Viewer\"`) instead of lowercase (`\"editor\"` or `\"viewer\"`).",
+     "suggestion": "Use consistent collaborator user ID keys, pass `role.lower()` in `_onAdd`, and display the removed collaborator's actual username in `_onRemove`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "SlicerConnect/SlicerConnect.py",
+      "line": 45
+     }
+    }
+   ]
+  },
+  {
+   "title": "Login spinner is not listed as an installed resource",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerConnectLogin/CMakeLists.txt",
+   "line": 6,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Login spinner is not listed as an installed resource",
+     "file": "SlicerConnectLogin/CMakeLists.txt",
+     "line_start": 6,
+     "line_end": 10,
+     "evidence": "slicerMacroBuildScriptedModule(\n  NAME ${module_name}\n  SCRIPTS ${module_name}.py\n  RESOURCES \"Resources/Icons/${module_name}.png;Resources/UI/${module_name}.ui\"\n)",
+     "explanation": "The login widget loads UI/spinner.gif, which exists in the source tree but is not listed in the module's CMake resources. In a packaged installation the loading animation will be unavailable; the primary UI and script are listed.",
+     "suggestion": "Include Resources/UI/spinner.gif in the resource list.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectLogin/CMakeLists.txt",
+      "line": 6
+     }
+    }
+   ]
+  },
+  {
+   "title": "Missing `json` import and unclosed file handle in `create_segmentation`",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerConnect/SlicerConnect.py",
+   "line": 140,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Missing `json` import and unclosed file handle in `create_segmentation`",
+     "file": "SlicerConnect/SlicerConnect.py",
+     "line_start": 140,
+     "line_end": 150,
+     "evidence": "    def create_segmentation(self, project_id: str, name: str, color: str, file_path: str) -> Dict:\n        import os\n        files = {\"file\": (os.path.basename(file_path), open(file_path, \"rb\"), \"application/octet-stream\")}\n        data = {\"name\": name, \"color\": color}\n\n        return self._make_request(\n            'POST',\n            f\"{self.base_url}/projects/{project_id}/segmentations\",\n            data={\"data\": json.dumps(data)},\n            files=files\n        )",
+     "explanation": "`SlicerConnect.py` does not import `json`, so calling `json.dumps(data)` in `create_segmentation` will raise `NameError: name 'json' is not defined`. Furthermore, the file handle opened with `open(file_path, \"rb\")` is never closed.",
+     "suggestion": "Import `json` in `SlicerConnect.py` and use a `with open(file_path, \"rb\") as f:` context manager.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnect/SlicerConnect.py",
+      "line": 140
+     }
+    }
+   ]
+  },
+  {
+   "title": "Catalog `icon_url` points to a non-existent root path",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Catalog `icon_url` points to a non-existent root path",
+     "file": "CMakeLists.txt",
+     "line_start": 9,
+     "line_end": 11,
+     "evidence": "  \"homepage\": \"https://github.com/pka420/SlicerConnect\",\n  \"icon_url\": \"https://raw.githubusercontent.com/pka420/SlicerConnect/main/SlicerConnect.png\",\n  \"build_dependencies\": [],",
+     "explanation": "In the catalog entry JSON, `icon_url` is set to `https://raw.githubusercontent.com/pka420/SlicerConnect/main/SlicerConnect.png`, which does not exist at the repository root. The actual icon in the repository is at `SlicerConnect/Resources/Icons/SlicerConnect.png` (as correctly set in `CMakeLists.txt` line 10).",
+     "suggestion": "Update `icon_url` in the catalog entry to `https://raw.githubusercontent.com/pka420/SlicerConnect/main/SlicerConnect/Resources/Icons/SlicerConnect.png`.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "An incoming full sync can erase an unrelated segmentation in the scene",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+   "line": 691,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "An incoming full sync can erase an unrelated segmentation in the scene",
+     "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+     "line_start": 691,
+     "line_end": 699,
+     "evidence": "    def _getOrCreateSegmentationNode(self):\n        nodeName = \"CollaborativeSegmentation\"\n        node = slicer.mrmlScene.GetFirstNodeByName(nodeName)\n        \n        if not node:\n            # Check if any segmentation node exists to adopt it\n            node = slicer.mrmlScene.GetFirstNodeByClass(\"vtkMRMLSegmentationNode\")\n            if node:\n                node.SetName(nodeName)",
+     "explanation": "When the collaborative node does not exist, an incoming full sync adopts the first pre-existing segmentation, even if it belongs to another case. Lines 837–845 then call RemoveAllSegments on that node before importing the remote data, destroying unsaved local segmentations without confirmation; a failed import can also leave the adopted node empty.",
+     "suggestion": "Create and track a dedicated session-owned node rather than adopting arbitrary scene nodes; stage and validate incoming data before replacing any existing data, with an explicit recovery path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+      "line": 691
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "SlicerConnectEditor.py:691-699 adopts and renames the first vtkMRMLSegmentationNode when no 'CollaborativeSegmentation' node exists. Line 841 then calls RemoveAllSegments() on it without any confirmation. This is real data loss of unsaved local work, but it only happens during a user-initiated collaboration session and only when the scene already has an unrelated segmentation. I rate it major, not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "SlicerConnectEditor/SlicerConnectEditor.py:403-414 dispatches a received full segmentation to handleFullSegmentation. Lines 695-699 adopt and rename the first existing segmentation when no node with the collaborative name exists: `node = slicer.mrmlScene.GetFirstNodeByClass(\"vtkMRMLSegmentationNode\")` and `node.SetName(nodeName)`. Lines 837-845 then execute `segmentationNode.GetSegmentation().RemoveAllSegments()` before importing the remote labelmap. Thus an unrelated unsaved segmentation can be destroyed without confirmation; an import failure after removal can also leave it empty."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In `SlicerConnectEditor/SlicerConnectEditor.py:691-703`, `_getOrCreateSegmentationNode` checks for a node named `\"CollaborativeSegmentation\"`, and if not found, calls `slicer.mrmlScene.GetFirstNodeByClass(\"vtkMRMLSegmentationNode\")` and renames it. Then in `handleFullSegmentation` (`SlicerConnectEditor/SlicerConnectEditor.py:837-846`), it calls `segmentationNode.GetSegmentation().RemoveAllSegments()` before importing the incoming labelmap. However, this is an ordinary logic/design flaw when a user explicitly connects to a collaborative session, rather than a blocking safety vulnerability, so `major` (or `minor`) is more appropriate than `blocking`."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Unencrypted WebSocket (ws://) transmits authentication tokens and segmentation data in cleartext",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "blocking"
+   ],
+   "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+   "line": 339,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Unencrypted WebSocket (ws://) transmits authentication tokens and segmentation data in cleartext",
+     "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+     "line_start": 339,
+     "line_end": 343,
+     "evidence": "class SlicerConnectEditorLogic(ScriptedLoadableModuleLogic):\n    def __init__(self):\n        ScriptedLoadableModuleLogic.__init__(self)\n        self.WS_BASE_URL = \"ws://slicerconnect.from-delhi.net/collaboration/sessions\"",
+     "explanation": "Despite the README claiming that all communication uses HTTPS and Secure WebSockets (WSS), `SlicerConnectEditorLogic` hardcodes an unencrypted `ws://` WebSocket endpoint (`ws://slicerconnect.from-delhi.net/collaboration/sessions`). In `connect()`, the user's authentication token is appended as a query parameter (`wsUrl = f\"{self.WS_BASE_URL}/{sessionId}/ws?token={token}\"`), and all segmentation voxel data and deltas are transmitted over this connection. This exposes both the bearer token and potentially sensitive medical segmentation data in cleartext over the network. Furthermore, the server URL is hardcoded in `SlicerConnectEditorLogic` and `SlicerConnectLoginLogic` rather than configurable by the user.",
+     "suggestion": "Use `wss://` for WebSocket connections and read the server base URL from a user-configurable setting (matching `SlicerConnectServerURL` in `SlicerConnect.py`) rather than hardcoding an unencrypted `ws://` URL.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+      "line": 339
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Segmentation data and bearer tokens travel over plaintext WebSockets",
+     "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+     "line_start": 339,
+     "line_end": 342,
+     "evidence": "class SlicerConnectEditorLogic(ScriptedLoadableModuleLogic):\n    def __init__(self):\n        ScriptedLoadableModuleLogic.__init__(self)\n        self.WS_BASE_URL = \"ws://slicerconnect.from-delhi.net/collaboration/sessions\"",
+     "explanation": "The connect method at lines 365–369 places the bearer token in this WebSocket URL, and full segmentations and deltas are sent over that connection. Anyone able to observe or modify network traffic can obtain the token and segmentation data or tamper with updates. README.md lines 32–35 incorrectly says all communication uses secure WebSockets, so users are not informed of this exposure.",
+     "suggestion": "Require certificate-verified wss:// end to end, ensure the service supports it, and correct the security documentation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+      "line": 339
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "SlicerConnectEditor.py:342 hardcodes WS_BASE_URL as ws://slicerconnect.from-delhi.net/..., and line 367 appends ?token={token} to it. The bearer token and segmentation data therefore travel unencrypted. README.md line 34 describes the server with an https URL, so users are not told the WebSocket is cleartext. Medical segmentation data plus credentials sent in the clear is a concrete exposure."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "SlicerConnectEditor/SlicerConnectEditor.py:342 sets `self.WS_BASE_URL = \"ws://slicerconnect.from-delhi.net/collaboration/sessions\"`; lines 365-369 append `?token={token}` and connect. Lines 610-612 and 617-632 encode and send full voxel data; lines 560-588 send voxel deltas. An observer or active network attacker can read or tamper with these messages and steal the token. README.md:35 incorrectly states `* **Encryption**: All communication is performed over HTTPS and Secure WebSockets (WSS).`"
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "In `SlicerConnectEditor/SlicerConnectEditor.py:342`, `self.WS_BASE_URL = \"ws://slicerconnect.from-delhi.net/collaboration/sessions\"` uses unencrypted `ws://`, and in `connect` (`lines 365-369`), the bearer token is passed in the URL (`wsUrl = f\"{self.WS_BASE_URL}/{sessionId}/ws?token={token}\"`). All full segmentations and deltas are transmitted over this cleartext connection, directly contradicting `README.md:35` which promises \"All communication is performed over HTTPS and Secure WebSockets (WSS).\" Exposing authentication tokens and potentially sensitive medical segmentation data in cleartext despite explicit documentation claiming WSS encryption is a blocking safety issue."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Connection URL logs the authentication bearer token",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+   "line": 365,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Connection URL logs the authentication bearer token",
+     "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+     "line_start": 365,
+     "line_end": 369,
+     "evidence": "    def connect(self, sessionId, token):\n        \"\"\"Connect to WebSocket server with session ID and token\"\"\"\n        wsUrl = f\"{self.WS_BASE_URL}/{sessionId}/ws?token={token}\"\n        print(f\"Connecting to: {wsUrl}\")\n        self.wsHandler.connectToServer(wsUrl)",
+     "explanation": "Each connection prints the complete bearer token to Slicer's Python output or application logs. Anyone receiving a troubleshooting log containing it can potentially impersonate the user; query-string tokens may also be retained in server or proxy access logs even after transport is secured.",
+     "suggestion": "Never print credentials; authenticate with an authorization header or another mechanism that avoids URLs and logs.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+      "line": 365
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SlicerConnectEditor.py:368 runs print(f\"Connecting to: {wsUrl}\"), and wsUrl includes ?token=. The token is printed to the Python console and log. This is a real leak into logs, but it stays local and is much less serious than the cleartext transport in D2. The token-in-URL problem is part of D2."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "SlicerConnectEditor/SlicerConnectEditor.py:365-369 constructs `wsUrl = f\"{self.WS_BASE_URL}/{sessionId}/ws?token={token}\"` and then runs `print(f\"Connecting to: {wsUrl}\")`. The token is consequently exposed in Python output and potentially in shared diagnostic logs; URL query parameters can also be recorded by intermediaries, though their logging configuration was not inspected."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In `SlicerConnectEditor/SlicerConnectEditor.py:367-368`, `connect()` constructs `wsUrl = f\"{self.WS_BASE_URL}/{sessionId}/ws?token={token}\"` and calls `print(f\"Connecting to: {wsUrl}\")`, which writes the full bearer token to Slicer's console/log files. Passing the token in the URL query string also risks exposure in server/proxy logs. This is a real issue, best rated `minor` (or `major`) as local log exposure of a session token."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Login redirects to non-existent module `CollaborativeSegmentation`",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "SlicerConnectLogin/SlicerConnectLogin.py",
+   "line": 149,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Login redirects to non-existent module `CollaborativeSegmentation`",
+     "file": "SlicerConnectLogin/SlicerConnectLogin.py",
+     "line_start": 149,
+     "line_end": 152,
+     "evidence": "            self._update_ui(\"Login successful\")\n            slicer.util.selectModule(\"CollaborativeSegmentation\")\n        else:\n            self._update_ui(message)",
+     "explanation": "After a successful login in `SlicerConnectLoginWidget.onLoginComplete`, the code calls `slicer.util.selectModule(\"CollaborativeSegmentation\")`. However, the module included in this extension is named `SlicerConnect`, not `CollaborativeSegmentation`. This causes switching to the project hub module after login to fail.",
+     "suggestion": "Change `\"CollaborativeSegmentation\"` to `\"SlicerConnect\"`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectLogin/SlicerConnectLogin.py",
+      "line": 149
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Login redirects to a module not defined by this extension",
+     "file": "SlicerConnectLogin/SlicerConnectLogin.py",
+     "line_start": 144,
+     "line_end": 150,
+     "evidence": "            slicer.app.settings().setValue(\"SlicerConnectToken\", token)\n            slicer.app.settings().sync()\n            self.ui.loginEmail.setText(\"\")\n            self.ui.loginPassword.setText(\"\")\n            self.ui.regPassword.setText(\"\")\n            self._update_ui(\"Login successful\")\n            slicer.util.selectModule(\"CollaborativeSegmentation\")",
+     "explanation": "The installed module is named SlicerConnect, not CollaborativeSegmentation. Successful login therefore cannot perform the intended automatic transition to the project hub; users must navigate there manually.",
+     "suggestion": "Select SlicerConnect and test the login-to-project workflow.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectLogin/SlicerConnectLogin.py",
+      "line": 144
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SlicerConnectLogin.py:150 calls selectModule(\"CollaborativeSegmentation\"). No module has that name; the modules are SlicerConnect, SlicerConnectLogin and SlicerConnectEditor. The automatic switch after login therefore fails, and the user has to open the hub manually."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": "minor",
+     "reason": "SlicerConnectLogin/SlicerConnectLogin.py:149-150 runs `self._update_ui(\"Login successful\")` followed by `slicer.util.selectModule(\"CollaborativeSegmentation\")`. CMakeLists.txt:21-23 includes SlicerConnectLogin, SlicerConnect and SlicerConnectEditor, and SlicerConnect/CMakeLists.txt:4 says `set(module_name SlicerConnect)`. The intended project hub is not registered under the requested name by this extension, so the automatic transition fails; the user can select SlicerConnect manually."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In `SlicerConnectLogin/SlicerConnectLogin.py:150`, `onLoginComplete` calls `slicer.util.selectModule(\"CollaborativeSegmentation\")`, whereas the hub module in this repository is named `SlicerConnect` (`SlicerConnect/SlicerConnect.py`). Because the automatic redirect after login fails and raises an error or fails to switch modules, this is a real soundness bug (`major` or `minor`; since the user can still manually switch modules in the Slicer toolbar, `minor` or `major` is appropriate—`major` because it breaks the primary post-login workflow step)."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "NameError (`local_path=Null`) breaks segmentation download",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "SlicerConnect/SlicerConnect.py",
+   "line": 487,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "NameError (`local_path=Null`) breaks segmentation download",
+     "file": "SlicerConnect/SlicerConnect.py",
+     "line_start": 487,
+     "line_end": 490,
+     "evidence": "        seg_id = selectedSegs[0].data(qt.Qt.UserRole)\n        local_path=Null\n        try:\n            local_path = self.api_client.download_segmentation(seg_id)",
+     "explanation": "In `onDownloadSegClicked`, `local_path=Null` uses `Null` instead of Python's `None`. When the user clicks the \"Download Segmentation\" button, Python raises `NameError: name 'Null' is not defined` before the `try` block even executes, completely breaking segmentation downloads. Additionally, in the `finally` block (`if os.path.exists(local_path):`), if `download_segmentation` fails and `local_path` is `None`, `os.path.exists(None)` raises a `TypeError`.",
+     "suggestion": "Initialize `local_path = None` and check `if local_path and os.path.exists(local_path):` in the `finally` block.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnect/SlicerConnect.py",
+      "line": 487
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Download button raises before starting the download",
+     "file": "SlicerConnect/SlicerConnect.py",
+     "line_start": 487,
+     "line_end": 491,
+     "evidence": "        seg_id = selectedSegs[0].data(qt.Qt.UserRole)\n        local_path=Null\n        try:\n            local_path = self.api_client.download_segmentation(seg_id)\n            self.logic.load_segmentation(local_path, selectedSegs[0].text())",
+     "explanation": "Null is not a Python name, so selecting a segmentation and pressing Download raises NameError before the try block and never downloads the file. Replacing it with None also requires guarding the cleanup path when download fails.",
+     "suggestion": "Initialize to None and remove the temporary file only when a valid path exists.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnect/SlicerConnect.py",
+      "line": 487
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SlicerConnect.py:488 has local_path=Null, which raises NameError before the try block, so every segmentation download fails. The finally block at line 495 would also fail with os.path.exists(None) if the download raised. This is an ordinary bug in one feature. It is minor-to-major, and I rate it minor because it is not a safety issue."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "SlicerConnect/SlicerConnect.py:487-490 has `local_path=Null` before the `try:` and download call. No definition of Null was found in the repository, so with a selected segmentation this raises NameError and prevents the download. Lines 494-495 say `finally:` and `if os.path.exists(local_path):`; if the initializer is changed to None, that cleanup would also need a guard when download fails. This is an ordinary correctness issue, not a safety admission blocker."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In `SlicerConnect/SlicerConnect.py:488`, `onDownloadSegClicked` has `local_path=Null` outside the `try` block. Because `Null` is not defined in Python, clicking Download Segmentation immediately raises `NameError: name 'Null' is not defined`. Furthermore, in the `finally` block at line 495 (`if os.path.exists(local_path):`), if `local_path` were initialized to `None` and `download_segmentation` failed, `os.path.exists(None)` would raise a `TypeError`. Because this completely breaks the segmentation download feature in the project hub, it is a `major` soundness bug."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Stray identifier `m` in `_try_refresh_token` causes NameError on token refresh",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "SlicerConnect/SlicerConnect.py",
+   "line": 65,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Stray identifier `m` in `_try_refresh_token` causes NameError on token refresh",
+     "file": "SlicerConnect/SlicerConnect.py",
+     "line_start": 65,
+     "line_end": 69,
+     "evidence": "            if response.status_code == 200:\n                m\n                data = response.json()\n                self.token = data.get(\"access_token\")",
+     "explanation": "In `BackendAPIClient._try_refresh_token()`, line 66 contains a stray `m` statement. When a 401 response triggers token refresh and the server responds with HTTP 200, executing line 66 raises `NameError: name 'm' is not defined`, which is caught by `except Exception` on line 80, causing token refresh to always fail.",
+     "suggestion": "Remove the stray `m` on line 66.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnect/SlicerConnect.py",
+      "line": 65
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Successful token refresh is defeated by an undefined name",
+     "file": "SlicerConnect/SlicerConnect.py",
+     "line_start": 65,
+     "line_end": 69,
+     "evidence": "            if response.status_code == 200:\n                m\n                data = response.json()\n                self.token = data.get(\"access_token\")\n                new_refresh = data.get(\"refresh_token\")",
+     "explanation": "If a refresh token is present and the server returns 200, the standalone undefined name m raises NameError, which is caught and treated as refresh failure. Expired sessions therefore cannot be renewed through this path.",
+     "suggestion": "Remove the stray name and test the complete login, refresh, and retry flow.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnect/SlicerConnect.py",
+      "line": 65
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SlicerConnect.py:66 contains a bare 'm' on its own line inside the HTTP 200 branch of _try_refresh_token. It raises NameError, and the surrounding try/except treats that as a failed refresh. Token refresh therefore never works. It is a contained functional bug."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": "minor",
+     "reason": "SlicerConnect/SlicerConnect.py:53-66 reads the refresh token and contains `if response.status_code == 200:` followed by the standalone undefined name `m`. Lines 80-82 catch the resulting NameError and return False; lines 36-42 then treat the 401 as authentication failure. A successful refresh response cannot renew the session on this path."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In `SlicerConnect/SlicerConnect.py:65-67`, inside `_try_refresh_token()`, immediately after `if response.status_code == 200:` there is a standalone undefined identifier `m` on line 66. Executing this line raises `NameError: name 'm' is not defined`, which is caught by `except Exception as e:` on line 80 and causes token refresh to always return `False`. This completely breaks automatic session token refresh and is a `major` soundness issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Unprompted pip_install of websocket-client on logic instantiation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+   "line": 927,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Unprompted pip_install of websocket-client on logic instantiation",
+     "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+     "line_start": 927,
+     "line_end": 930,
+     "evidence": "    def test_SlicerConnectEditor1(self):\n        self.delayDisplay(\"Starting the test\")\n        logic = SlicerConnectEditorLogic()\n        segmentationNode = slicer.mrmlScene.AddNewNodeByClass(\"vtkMRMLSegmentationNode\")",
+     "explanation": "`SlicerConnectEditorLogic.__init__()` instantiates `WebSocketHandler()`, which immediately calls `self.ensureDependencies()` and runs `slicer.util.pip_install(\"websocket-client\")` without user confirmation. This happens whenever `SlicerConnectEditorWidget.setup()` runs (opening the module) or when `SlicerConnectEditorTest` instantiates `SlicerConnectEditorLogic()`. Installing packages into Slicer's shared Python environment when a module is opened or tested—without asking the user first—violates Slicer's environment rules.",
+     "suggestion": "Prompt the user for confirmation (e.g., via `slicer.util.confirmOkCancelDisplay`) before calling `slicer.util.pip_install(\"websocket-client\")`, and defer the check until the user actually initiates a connection rather than in `__init__`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerConnectEditor/SlicerConnectEditor.py",
+      "line": 927
+     }
+    }
+   ],
+   "id": "D7",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SlicerConnectEditor.py:269-271 calls ensureDependencies() in WebSocketHandler.__init__, and lines 257-266 pip_install websocket-client if it is missing. The install has no confirmation prompt. It happens when the Editor logic is created, not at Slicer startup. The package is small, is not one Slicer bundles, and brings no Qt, VTK or torch. SlicerConnectLogin.py:157-169 does the same for requests. This breaks the convention of asking first, but the impact is low."
+    },
+    "gpt": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "SlicerConnectEditor/SlicerConnectEditor.py:40-42 constructs `self.logic = SlicerConnectEditorLogic()` during widget setup; line 349 constructs `self.wsHandler = WebSocketHandler()`. Lines 257-271 call `self.ensureDependencies()` and, on ImportError, `slicer.util.pip_install(\"websocket-client\")` without a confirmation dialog. This modifies the shared environment when the editor is opened if the package is missing; lines 927-929 also instantiate the logic during the test. It is not an import-time or unconditional installation."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In `SlicerConnectEditor/SlicerConnectEditor.py:257-271`, `WebSocketHandler.__init__` immediately calls `self.ensureDependencies()`, which runs `slicer.util.pip_install(\"websocket-client\")` if `websocket` is not installed (`line 264`). `SlicerConnectEditorLogic.__init__` (`line 349`) instantiates `WebSocketHandler()`, and `SlicerConnectEditorWidget.setup()` instantiates `SlicerConnectEditorLogic()`. While it does not run at module import/Slicer startup, installing a lightweight pure-Python package (`websocket-client`) when the user opens the module widget without a confirmation dialog is a `minor` environment/usability issue (the rubric specifically flags package installation at import/startup or without user confirmation for large downloads)."
+    }
+   },
+   "settled_severity": "minor"
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "blocking",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "concern"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "concern",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "needs fixes",
+  "gemini": "needs fixes",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 7,
+  "single": 8,
+  "unverified": 1,
+  "total": 12,
+  "open_disputes": 0
+ }
+}

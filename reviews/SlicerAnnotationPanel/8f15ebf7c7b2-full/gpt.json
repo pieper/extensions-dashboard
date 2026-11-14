@@ -1,0 +1,126 @@
+{
+ "purpose": "Provides a unified, preset-driven workspace for classification, ROI, and segmentation annotations in 3D Slicer. It is intended for annotators and research teams that export and resume imaging annotation projects.",
+ "summary": "The build installs only the entry-point script, so the packaged module cannot import its required helpers. Import can also silently overwrite a saved preset or discard an existing annotation session. Several spatial-metadata issues warrant non-blocking follow-up. 🔴 Do not merge yet: fix the missing packaged files and unintended data loss; the production branch revision also needs verification.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected import and preset-writing paths in PanelWidget.py, AnnotationModel.py, and PresetStorage.py. Import can overwrite an existing preset and replace unsaved scene annotations without a specific confirmation."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Searched module sources for dependency installation and inspected the entry-point import behavior. It prepends its directory to the shared Python path and imports generically named modules; no pip installation was found in the inspected source."
+  },
+  "packaging": {
+   "rating": "blocking",
+   "rationale": "Compared both CMake files with AnnotationPanel.py and its imports. Only AnnotationPanel.py is installed, but it immediately imports helper files that CMake omits."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected LICENSE, which provides Apache License 2.0 terms. No bundled model or external dependency was identified in the inspected build and module sources."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected import handling, ROI export, and slice-context capture. The slice tracker has a late-binding callback and slice indexing assumes a fixed relationship between voxel axes and anatomical planes."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "Inspected README and export documentation, and noted the included example preset and test files. The export includes patient identifiers, but the user-facing export description does not clearly warn about patient ID disclosure."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "blocking",
+   "title": "Packaged module omits every required helper script",
+   "file": "AnnotationPanel/CMakeLists.txt",
+   "line_start": 6,
+   "line_end": 8,
+   "evidence": "set(KIT_PYTHON_SCRIPTS\n  AnnotationPanel.py\n)",
+   "explanation": "The entry point imports LabelColors and PresetStorage immediately and the widget imports PanelWidget and other helpers. None are installed by this CMake target, so a normal packaged installation fails at module import rather than providing the annotation panel.",
+   "suggestion": "Install all imported Python files alongside the module, and verify the built package in a clean Slicer installation.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Importing a different configuration silently overwrites an existing preset",
+   "file": "AnnotationPanel/PanelWidget.py",
+   "line_start": 232,
+   "line_end": 235,
+   "evidence": "    def _apply_imported_label_configuration(self, config, preset_name):\n        \"\"\"Persist imported label configuration and activate it across the panel.\"\"\"\n        try:\n            save_preset_overwrite(preset_name, config.to_dict())",
+   "explanation": "When importing a different configuration, the preset name is derived from the imported scan or directory. If that name already exists, save_preset_overwrite truncates and replaces its JSON without asking; importing another package with the same name can destroy the user's previously saved configuration.",
+   "suggestion": "Check for name collisions and ask before replacement, or save to a unique name; use atomic writes.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Matching-configuration import clears the current session without confirmation",
+   "file": "AnnotationPanel/PanelWidget.py",
+   "line_start": 548,
+   "line_end": 553,
+   "evidence": "    def set_record(self, record, *, clear_existing=True):\n        volume = self._active_volume_node\n        if clear_existing:\n            self._class_label_tab.set_class_label_annotations([])\n            self._roi_tab.clear_and_unbind()\n            self._segmentation_tab.clear_and_unbind()",
+   "explanation": "The matching-configuration import path calls set_record with its default clear_existing=True, without the replacement prompt used for differing configurations. Existing ROI and segmentation scene nodes and classification annotations are removed, including unsaved work; a subsequent segmentation load can also fail after this destruction.",
+   "suggestion": "Explicitly confirm replacement whenever existing annotations are present, and load and validate the incoming project before deleting the old session.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Entry point alters the process-wide Python import path",
+   "file": "AnnotationPanel/AnnotationPanel.py",
+   "line_start": 11,
+   "line_end": 13,
+   "evidence": "MODULE_DIR = os.path.dirname(os.path.abspath(__file__))\nif MODULE_DIR not in sys.path:\n    sys.path.insert(0, MODULE_DIR)",
+   "explanation": "If the directory is not already present, importing the module inserts it at the front of the shared interpreter search path. Generic helper names such as PanelWidget and SliceInfo may then collide with other extensions' imports or already-loaded modules.",
+   "suggestion": "Package helpers under a uniquely named Python package and use qualified imports without prepending a generic module directory.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Slice-view event filters all reference the final loop callback",
+   "file": "AnnotationPanel/SliceInfo.py",
+   "line_start": 72,
+   "line_end": 79,
+   "evidence": "            def _remember_view(view_name=name):\n                global _last_active_slice_view\n                _last_active_slice_view = view_name\n\n            class _SliceViewTracker(qt.QObject):\n                def eventFilter(self, obj, event):\n                    if event.type() in (qt.QEvent.MouseButtonPress, qt.QEvent.Wheel):\n                        _remember_view()",
+   "explanation": "The eventFilter method closes over the loop-local name _remember_view rather than binding the current callback. After the loop completes, filters can all use the last view's callback, so mouse or wheel events in another view may record the wrong active slice and thus the wrong ROI context.",
+   "suggestion": "Bind the view name or callback separately to each tracker instance and test interactions in all slice views.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Anatomical slice indices assume voxel axes match anatomical axes",
+   "file": "AnnotationPanel/SliceInfo.py",
+   "line_start": 271,
+   "line_end": 277,
+   "evidence": "    normalized = slice_view_to_plane(plane)\n    if normalized == \"Axial\":\n        return int(voxel_index_ijk[2])\n    if normalized == \"Coronal\":\n        return int(voxel_index_ijk[1])\n    if normalized == \"Sagittal\":\n        return int(voxel_index_ijk[0])",
+   "explanation": "IJK axes depend on the volume's orientation, not on anatomical plane names. For permuted or oblique acquisitions this can export a different voxel axis as the slice index; additionally, index zero falls through to a different calculation in capture_slice_info_for_view.",
+   "suggestion": "Derive the relevant axis and index from the volume and slice geometry, and explicitly handle zero and oblique views in tests.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Export includes patient identifiers without a clear privacy warning",
+   "file": "AnnotationPanel/AnnotationModel.py",
+   "line_start": 1039,
+   "line_end": 1043,
+   "evidence": "            \"modality\": self.modality,\n            \"patient_id\": self.patient_id,\n            \"study_description\": self.study_description,\n            \"series_description\": self.series_description,\n            \"study_instance_uid\": self.study_instance_uid,",
+   "explanation": "Patient ID and DICOM identifiers are automatically captured and written into the user-selected export. Users sharing annotation packages may not realize they contain identifiers: the README mentions series metadata and UIDs but does not explicitly mention patient ID. No automatic network transmission was found.",
+   "suggestion": "Warn in the export dialog and documentation, and offer a de-identified export option.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not run Slicer, build the extension, or execute the test suite; findings are based on static inspection.",
+  "Could not access the remote repository or resolve the production branch to independently verify that it matches the supplied commit 8f15ebf7c7b23f7b4f7120f190bec89cbdd73bae.",
+  "No prior catalog entry, PR checklist, CI reports, or trusted previous source revision was available for comparison.",
+  "External dependencies and binary image assets were not independently audited for provenance or licensing."
+ ],
+ "questions_for_author": [
+  "Can the catalog production branch be verified to resolve to the supplied source commit, and can a clean packaged-install smoke test be provided?"
+ ]
+}

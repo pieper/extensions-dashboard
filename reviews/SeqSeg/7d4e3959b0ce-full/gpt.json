@@ -1,0 +1,150 @@
+{
+ "purpose": "SeqSeg provides seed-based segmentation of vascular and other tubular structures in CT and MR volumes using the SeqSeg and nnUNet workflows. It is intended for clinicians and researchers who want to load segmentations and related outputs in 3D Slicer.",
+ "summary": "The submitted catalog entry omits required extension dependencies. Running the module can silently downgrade shared NumPy, install or update the SeqSeg package without confirmation, and overwrite user files. Additional non-blocking concerns include stale output selection and outdated tutorial instructions. The extension source is Apache-2.0, but downloaded dependencies and model weights could not be inspected. 🔴 Do not merge yet: fix the destructive writes, shared-environment changes and catalog dependencies; review of external payloads and their distribution terms remains incomplete.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "I inspected the weight download and extraction path, image and seed output writes, and subprocess invocation in seqseg/seqseg.py. Fixed filenames can overwrite existing user files without confirmation; external model and PyPI payloads were not available for inspection."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "I inspected setupPythonRequirements and pipInstallSelective in seqseg/seqseg.py. NumPy is downgraded without a prompt, SeqSeg and its dependencies can be installed or upgraded without confirmation, and an exact PyTorch version can replace an existing shared version."
+  },
+  "packaging": {
+   "rating": "blocking",
+   "rationale": "The supplied index entry lists no build dependencies, while CMakeLists.txt declares PyTorch and NNUNet; the separate source-repository SeqSeg.json lists both. The scripted module and UI are listed in seqseg/CMakeLists.txt, but the remote branch and build could not be verified."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "LICENSE.txt grants Apache-2.0 terms for the extension. I could not inspect the licenses or distribution terms of the separately downloaded SeqSeg package and Zenodo weights."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "I inspected seed coordinates, result discovery, exception handling, and the tests in seqseg/seqseg.py. Reused output folders can cause old results to be loaded as new, and the tests do not reliably fail on algorithm errors."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md supplies a sample-data tutorial and publication citation, but its seed-creation instructions do not match the inspected UI. Model weights and independent validation were not available to review."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Running segmentation overwrites existing seeds and input images",
+   "file": "seqseg/seqseg.py",
+   "line_start": 2465,
+   "line_end": 2467,
+   "evidence": "            seeds_file = os.path.join(data_dir, \"seeds.json\")\n            with open(seeds_file, 'w') as f:\n                json.dump(seeds_data, f, indent=4)",
+   "explanation": "Each run truncates any existing seeds.json in the chosen output directory without asking, including a user-maintained file unrelated to this run. Lines 2434–2438 likewise save the input volume to a predictable images/<sanitized-volume-name>.nii.gz, potentially replacing a previous image with the same name.",
+   "suggestion": "Create a unique per-run workspace, or detect collisions and request explicit overwrite permission before writing any input or seed file.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Weight download overwrites and deletes an existing archive",
+   "file": "seqseg/seqseg.py",
+   "line_start": 1547,
+   "line_end": 1551,
+   "evidence": "                logging.info(f\"Extracting {zip_file} to {download_dir}\")\n                with zipfile.ZipFile(zip_file, 'r') as zip_ref:\n                    zip_ref.extractall(download_dir)\n\n                os.remove(zip_file)",
+   "explanation": "The archive is downloaded to a fixed filename in the directory chosen by the user, and urlretrieve at line 1542 overwrites that file before it is deleted here. The existing-weights prompt only tests the extracted directory, so an unrelated nnUNet_results.zip or nnUNet_results_coronary.zip can be destroyed without warning. Extraction can also overwrite existing files in the destination.",
+   "suggestion": "Download to a unique temporary file, extract to a new staging directory, and handle destination collisions explicitly before moving results into place.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Running SeqSeg silently downgrades shared NumPy",
+   "file": "seqseg/seqseg.py",
+   "line_start": 1951,
+   "line_end": 1956,
+   "evidence": "        numpy_version_str = importlib.metadata.version(\"numpy\")\n        if pkg_version.parse(numpy_version_str) >= pkg_version.parse(\"2.0.0\"):\n            logging.info(_(\"Downgrading NumPy from {current} to <2 for PyTorch 2.2.2 compatibility...\").format(current=numpy_version_str))\n            slicer.util.pip_install(\"numpy<2\")\n            raise InstallError(\n                _(\"NumPy 2.x is incompatible with the required PyTorch 2.2.2. NumPy was downgraded to 1.x; restart Slicer and run SeqSeg again.\"),",
+   "explanation": "On a Slicer installation with NumPy 2, starting a run immediately replaces the shared package before the dependency confirmation or even checking that required extensions are present. This can break Slicer or unrelated extensions after restart.",
+   "suggestion": "Support the Slicer-provided NumPy and a compatible PyTorch version rather than downgrading the shared environment.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "SeqSeg and its dependencies install or upgrade without confirmation",
+   "file": "seqseg/seqseg.py",
+   "line_start": 2072,
+   "line_end": 2075,
+   "evidence": "        seqseg_install_command = self._seqseg_install_command(installed_seqseg_version, upgrade=upgrade)\n        if seqseg_install_command:\n            logging.info(_(\"Installing SeqSeg Python package ({spec})...\").format(spec=seqseg_install_command))\n            self.pipInstallSelective(self.SEQSEG_PYTHON_PACKAGE_NAME, seqseg_install_command, packagesToSkip)",
+   "explanation": "The earlier confirmation only lists missing or mismatched PyTorch and nnunetv2. When those are already present, the first run installs SeqSeg and its selectively processed dependencies without a dialog; later runs automatically upgrade to the current PyPI release, also without confirmation. This can download substantial packages and change the shared environment unexpectedly.",
+   "suggestion": "Include SeqSeg and all planned dependency installations and upgrades in an explicit confirmation before changing the environment; avoid automatically upgrading on every run.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "blocking",
+   "title": "Catalog omits the build dependencies declared by the extension",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 13,
+   "evidence": "# PyTorch and NNUNet extensions supply PyTorchUtils and SlicerNNUNetLib used by setupPythonRequirements().\nset(EXTENSION_DEPENDS \"PyTorch NNUNet\")",
+   "explanation": "The submitted index entry in the request has an empty build_dependencies array, although CMake declares both dependencies and runtime setup imports their libraries. The index cannot schedule or install those prerequisites from the submitted metadata. The separate SeqSeg.json in the source repository does list them, but it is not the submitted index entry.",
+   "suggestion": "Set the index entry's build_dependencies to [\"PyTorch\", \"NNUNet\"] and verify the index resolves them.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Existing shared PyTorch is forced to an old exact version",
+   "file": "seqseg/seqseg.py",
+   "line_start": 2018,
+   "line_end": 2023,
+   "evidence": "        if \"PyTorch\" in confirmPackagesToInstall:\n            logging.info(_(\"Installing PyTorch Python packages (may take several minutes)...\"))\n            torch_result = torchLogic.installTorch(\n                askConfirmation=False,\n                torchVersionRequirement=f\"=={requiredTorchVersion}\",\n                torchVisionVersionRequirement=f\"=={requiredTorchVisionVersion}\",",
+   "explanation": "Any installed torch version whose base version is not 2.2.2 is treated as requiring replacement, including newer versions used by other extensions. Although the PyTorch extension performs the install and a generic confirmation is shown, users are not told that an existing shared installation may be downgraded.",
+   "suggestion": "Support compatible installed PyTorch versions and avoid forcing a shared exact version; if replacement is unavoidable, clearly disclose the current and proposed versions.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "A prior segmentation can be presented as the current run's output",
+   "file": "seqseg/seqseg.py",
+   "line_start": 2580,
+   "line_end": 2585,
+   "evidence": "            if not output_files:\n                raise RuntimeError(f\"No output segmentation file found in {output_dir}. SeqSeg may have failed or output format changed.\")\n            \n            # Use the latest output file (sort by modification time)\n            output_files.sort(key=lambda f: os.path.getmtime(os.path.join(output_dir, f)), reverse=True)\n            output_file = os.path.join(output_dir, output_files[0])",
+   "explanation": "The output directory is reused and the search does not restrict files to the current case or require them to have been created during the run. If the CLI exits successfully without producing a new matching file, an earlier patient's or earlier run's segmentation may be loaded and displayed over the current volume as a successful result.",
+   "suggestion": "Use a fresh per-run output directory and validate that the returned output belongs to the current case before loading it.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Unexpected algorithm failures are swallowed by the built-in test",
+   "file": "seqseg/seqseg.py",
+   "line_start": 2691,
+   "line_end": 2696,
+   "evidence": "        except ImportError as e:\n            # This is expected if SeqSeg package is not installed\n            logging.info(f\"SeqSeg package not available for testing: {e}\")\n            self.delayDisplay(\"SeqSeg package not installed - this is expected for basic testing\")\n        except Exception as e:\n            logging.error(f\"Unexpected error in SeqSeg test: {e}\")",
+   "explanation": "The test catches and logs any unexpected runtime failure without failing the test, so broken inference can be reported as a passing test.",
+   "suggestion": "Fail on unexpected exceptions and add an isolated integration test with controlled dependencies and known output.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Tutorial describes seed controls that no longer match the module",
+   "file": "README.md",
+   "line_start": 80,
+   "line_end": 82,
+   "evidence": "After the volume is in Slicer, open **SeqSeg Vessel Segmentation**, click **Auto-Create Seeds**, then **toggle on Planes visible in 3D** for the seed markups (so slice intersections show in the 3D view). Zoom into the anatomy and **drag the seed points** until they sit where you want (inside the vessel).\n\nWhether you used **Auto-Create Seeds** or the **Markups** module, you need two fiducials in the vessel. Place **Seed point 1** in the **ascending aorta** near the **aortic root / proximal ascending** segment, and **Seed point 2** **higher** along the same lumen toward the **arch**—both inside the contrast-filled vessel. Seed 1 is the start; seed 2 sets the initial tracking direction along the aorta.",
+   "explanation": "The inspected UI instead provides Add Seed for tagged two-point line markups, and the implementation collects tagged line nodes rather than arbitrary fiducials. Users following the tutorial cannot perform the described steps as written.",
+   "suggestion": "Update the tutorial and screenshots to explain Add Seed, line placement and the radius derived from line length.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The supplied source snapshot could not be independently resolved to commit 7d4e3959b0cef777673e9726292e22edf268a1f4 or to the catalog's moving main branch; no remote access was available.",
+  "The external SeqSeg PyPI package, its full transitive dependencies, the NNUNet and PyTorch extension implementations, Zenodo archives, model provenance and their distribution licenses could not be inspected.",
+  "No Slicer build, runtime tests, index validation, CI results, or previous reviewed revision were available.",
+  "Binary images and the committed Python bytecode were not inspected as executable content."
+ ],
+ "questions_for_author": [
+  "Can you provide the precise SeqSeg package and model-weight licenses, checksums, and source versions used for the intended release?"
+ ]
+}
