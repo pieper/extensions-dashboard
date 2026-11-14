@@ -1,0 +1,447 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "PyTorch installed directly via light-the-torch instead of the Slicer PyTorch extension",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "blocking"
+   ],
+   "file": "SlicerSPINEPS/SlicerSPINEPSLib/InstallLogic.py",
+   "line": 498,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "PyTorch installed directly via light-the-torch instead of the Slicer PyTorch extension",
+     "file": "SlicerSPINEPS/SlicerSPINEPSLib/InstallLogic.py",
+     "line_start": 498,
+     "line_end": 507,
+     "evidence": "        if not self.isPackageInstalled(\"light-the-torch\"):\n            self._log(\"Installing light-the-torch (selects the right PyTorch build)...\")\n            self.pip_install(LIGHT_THE_TORCH_REQUIREMENT)\n\n        backend = \"CUDA\" if self.isCudaGpuAvailable() else \"CPU\"\n        self._log(\n            f\"Downloading PyTorch ({backend} build, this is a large download and may \"\n            \"take several minutes)...\"\n        )\n        slicer.util._executePythonModule(\"light_the_torch\", [\"install\", *TORCH_PACKAGES])",
+     "explanation": "The Slicer Extensions Index review policy explicitly requires PyTorch to be installed through the Slicer PyTorch extension (`PyTorchUtils`, listed in `build_dependencies` and `EXTENSION_DEPENDS`) rather than via direct use of `light-the-torch`. Additionally, the catalog entry has `\"build_dependencies\": []` and `CMakeLists.txt` has `set(EXTENSION_DEPENDS \"NA\")`. While the author's design rationale (avoiding an extra extension install, Slicer restart, and importing `torch` into the main Slicer process on Windows) and the care taken to reuse existing PyTorch installations and pin core packages (`SimpleITK`, `numpy`, `scipy`, `torch`, `nnunetv2`) are well-reasoned, bypassing the `PyTorch` extension directly conflicts with the Extensions Index policy for managing Slicer's shared Python environment.",
+     "suggestion": "Declare `PyTorch` (and optionally `NNUNet` if sharing its install logic) in `EXTENSION_DEPENDS` in `CMakeLists.txt` and `build_dependencies` in `SPINEPS.json`, and use `PyTorchUtils` to manage PyTorch installation in accordance with Slicer Extensions Index policy.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSPINEPS/SlicerSPINEPSLib/InstallLogic.py",
+      "line": 498
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "PyTorch is installed directly instead of through the PyTorch extension",
+     "file": "SlicerSPINEPS/SlicerSPINEPSLib/InstallLogic.py",
+     "line_start": 498,
+     "line_end": 507,
+     "evidence": "        if not self.isPackageInstalled(\"light-the-torch\"):\n            self._log(\"Installing light-the-torch (selects the right PyTorch build)...\")\n            self.pip_install(LIGHT_THE_TORCH_REQUIREMENT)",
+     "explanation": "On a fresh Slicer installation, accepting the dependency prompt invokes light-the-torch directly to install torch and torchvision into Slicer's shared Python environment. This bypasses the required PyTorch extension and can produce a build or version incompatible with other extensions.",
+     "suggestion": "Declare PyTorch in both EXTENSION_DEPENDS and catalog build_dependencies, and install or reuse torch through PyTorchUtils; prevent transitive dependencies from independently installing torch.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSPINEPS/SlicerSPINEPSLib/InstallLogic.py",
+      "line": 498
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "InstallLogic.py:498-507 pip-installs light-the-torch and then runs `slicer.util._executePythonModule(\"light_the_torch\", [\"install\", *TORCH_PACKAGES])`. This is the direct light-the-torch use that the policy lists as a reason to request changes. CMakeLists.txt:19 has `set(EXTENSION_DEPENDS \"NA\")` and README.md:70-77 explains why PyTorchUtils is not used. The code mitigates the risk: ensureTorchAvailable (441-485) reuses any existing torch, the user is asked first (422-423, 634+), and a constraints file pins protected packages (542+). The path is still real and conflicts with the policy, so I rate it as the policy requires."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "InstallLogic.py:415-425 calls ensureTorchAvailable after the install confirmation; lines 471-477 call _installTorch only if no torch is present. Lines 498-507 state `self.pip_install(LIGHT_THE_TORCH_REQUIREMENT)` and `slicer.util._executePythonModule(\"light_the_torch\", [\"install\", *TORCH_PACKAGES])`; lines 105-107 define `TORCH_PACKAGES = [\"torch\", \"torchvision\"]`. CMakeLists.txt:13-19 explicitly states `set(EXTENSION_DEPENDS \"NA\")`. The existing torch is reused (InstallLogic.py:457-469), and the user is asked before installation, but direct light-the-torch installation violates the policy's explicit PyTorch extension requirement. The catalog entry was not available here, so its dependency list was not independently verified."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Checked `SlicerSPINEPS/SlicerSPINEPSLib/InstallLogic.py` lines 487-509 and `CMakeLists.txt` lines 13-19. In `InstallLogic._installTorch`, when PyTorch is not already installed, the code installs `light-the-torch>=0.8` via `self.pip_install(LIGHT_THE_TORCH_REQUIREMENT)` and runs `slicer.util._executePythonModule(\"light_the_torch\", [\"install\", *TORCH_PACKAGES])`. `CMakeLists.txt` line 19 sets `set(EXTENSION_DEPENDS \"NA\")`. Under the Slicer Extensions Index review policy (Security review of extensions, item 3), requests for changes are explicitly required for \"PyTorch installed other than through the Slicer PyTorch extension (`PyTorchUtils`, listed in `build_dependencies` and `EXTENSION_DEPENDS`). This includes `pip_install(\"torch\")`, direct use of light-the-torch, PyTorch index URLs, exact torch pins, and packages that pull torch from PyPI as a dependency\"."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "A first run can download several large models without confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+   "line": 173,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "A first run can download several large models without confirmation",
+     "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+     "line_start": 173,
+     "line_end": 180,
+     "evidence": "        if not models:\n            return (\n                f\"Model weights: none yet. The first segmentation downloads them \"\n                f\"(a few hundred MB per model) into {folder} and needs an internet \"\n                \"connection. To work offline, copy that folder from a machine that \"\n                \"already has them.\"\n            )\n        return f\"Model weights ({len(models)}) in {folder}: {', '.join(models)}\"",
+     "explanation": "The widget warns when the model folder is empty, but running inference initiates downloads without a confirmation. Once any model directory exists it only lists directories, so selecting a different model may silently trigger further downloads of hundreds of MB per model.",
+     "suggestion": "Check whether the selected model and its companion weights are available, and ask for confirmation before any substantial missing-weight download.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+      "line": 173
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SlicerSPINEPS.py:173-180 shows the widget tells the user before they run anything that the first segmentation downloads weights of a few hundred MB each, and onApplyClicked (239-256) starts inference with no further prompt. A search of the module found no confirmation dialog for the weights download. The downloads are done by the SPINEPS package at inference time, not by this extension's installer. They are documented in the UI and Parameter.py:84. The package-install confirmation rule does not clearly cover this. The remaining gap is that the label only counts existing model folders, so picking another model can download again without warning. That makes it a minor usability issue, not a major or safety one."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "SlicerSPINEPS.py:173-180 says `f\"Model weights: none yet. The first segmentation downloads them \"` and `f\"(a few hundred MB per model) into {folder} and needs an internet \"`, but once any directory exists it only returns `f\"Model weights ({len(models)}) in {folder}: {', '.join(models)}\"`. The selected model is passed directly to a run without a download confirmation (lines 239-256); Parameter.py:157-162 passes semantic, instance, and labeling model names, and SegmentationLogic.py:228-240 starts the external process. Parameter.py:33-42 identifies different CT companion models. Thus the first run is warned about but not separately confirmed, and subsequent selections may download missing models without the initial warning. The external SPINEPS downloader and exact transfer sizes were not available for independent verification."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked `SlicerSPINEPS/SlicerSPINEPS.py` lines 160-180 and 239-256. `describeWeightsState` inspects `folder.iterdir()` for existing subdirectories (`models = sorted(p.name for p in folder.iterdir() if p.is_dir())`) and displays a label in the UI explaining that the first segmentation downloads weights (\"a few hundred MB per model\"), or lists existing folders if any exist. `onApplyClicked` starts the segmentation process directly when the user clicks \"Run segmentation\" without a separate modal confirmation dialog before downloading missing model weights. However, because the user explicitly clicks \"Run segmentation\" in an AI segmentation module whose UI label (`self.weightsLabel`) already states ahead of time that the first run downloads model weights into the target folder, this is a minor UX/informational issue rather than a major environment defect (model weights are stored in a dedicated models folder, not modifying Slicer's shared Python environment)."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Registered test uses obsolete command-line flags",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+   "line": 394,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Registered test uses obsolete command-line flags",
+     "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+     "line_start": 394,
+     "line_end": 398,
+     "evidence": "        self.assertIn(\"sample\", args)\n        self.assertIn(\"--model-semantic\", args)\n        self.assertEqual(args[args.index(\"--model-semantic\") + 1], \"t2w\")\n        self.assertIn(\"-cpu\", args)\n        self.assertEqual(parameter.inputFileName(), \"sub-spineps_acq-sag_T2w.nii.gz\")",
+     "explanation": "Parameter.asArgList emits --cpu, not -cpu, so this registered test fails deterministically. Its later CT assertions also expect old -model_instance and -model_labeling spellings rather than the current double-dash forms.",
+     "suggestion": "Update the assertions to match the current flags and run the registered Slicer test.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+      "line": 394
+     }
+    }
+   ]
+  },
+  {
+   "title": "Result files are accepted before checking inference exit status",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerSPINEPS/SlicerSPINEPSLib/SegmentationLogic.py",
+   "line": 121,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Result files are accepted before checking inference exit status",
+     "file": "SlicerSPINEPS/SlicerSPINEPSLib/SegmentationLogic.py",
+     "line_start": 121,
+     "line_end": 127,
+     "evidence": "    def _findOutputFile(self, pattern: str, description: str) -> Path:\n        # SPINEPS places results in a \"derivatives_seg\" folder whose exact location\n        # depends on how it resolves the BIDS path, so search the whole temp tree.\n        matches = sorted(Path(self._tmpDir.path()).rglob(pattern))\n        matches = [m for m in matches if not self._isIntermediateResult(m)]\n        if matches:\n            return matches[0]",
+     "explanation": "The process emits its finished signal for nonzero exits and cancellation as well as success. If a matching final file was written before failure or cancellation, this method returns it without consulting the exit code and the widget can load an incomplete or failed-run result.",
+     "suggestion": "Only signal successful completion and load outputs after confirming normal exit with code zero; report cancellation and failed runs separately.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSPINEPS/SlicerSPINEPSLib/SegmentationLogic.py",
+      "line": 121
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unit test `test_ParameterArgList` checks outdated CLI flag names and will fail",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+   "line": 409,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Unit test `test_ParameterArgList` checks outdated CLI flag names and will fail",
+     "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+     "line_start": 409,
+     "line_end": 415,
+     "evidence": "        # The CT semantic model has its own instance and labeling models. SPINEPS' own\n        # \"sample\" command does not pair them (only \"dataset\" resolves \"auto\"), and it\n        # accepts a mismatch silently, so selecting \"ct\" must switch all three.\n        ctArgs = Parameter(semanticModel=\"ct\").asArgList(Path(\"/tmp/x.nii.gz\"))\n        self.assertEqual(ctArgs[ctArgs.index(\"-model_instance\") + 1], \"ct_instance\")\n        self.assertEqual(ctArgs[ctArgs.index(\"-model_labeling\") + 1], \"ct_labeling\")",
+     "explanation": "`Parameter.asArgList` was updated for SPINEPS >= 2.1.1 to emit double-dash hyphenated flags (`--model-semantic`, `--model-instance`, `--model-labeling`, `--cpu`), and line 395 of `test_ParameterArgList` was updated to check `--model-semantic`. However, lines 397, 413, and 414 of `test_ParameterArgList` still check for the old single-dash flags (`-cpu`, `-model_instance`, `-model_labeling`), which causes `SlicerSPINEPSTest.test_ParameterArgList` to fail with a `ValueError` when the self-test runs.",
+     "suggestion": "Update `test_ParameterArgList` in `SlicerSPINEPS/SlicerSPINEPS.py` to assert `\"--cpu\"`, `\"--model-instance\"`, and `\"--model-labeling\"` instead of `\"-cpu\"`, `\"-model_instance\"`, and `\"-model_labeling\"`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+      "line": 409
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "PyTorch installed directly via light-the-torch instead of the Slicer PyTorch extension",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "blocking"
+   ],
+   "file": "SlicerSPINEPS/SlicerSPINEPSLib/InstallLogic.py",
+   "line": 498,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "PyTorch installed directly via light-the-torch instead of the Slicer PyTorch extension",
+     "file": "SlicerSPINEPS/SlicerSPINEPSLib/InstallLogic.py",
+     "line_start": 498,
+     "line_end": 507,
+     "evidence": "        if not self.isPackageInstalled(\"light-the-torch\"):\n            self._log(\"Installing light-the-torch (selects the right PyTorch build)...\")\n            self.pip_install(LIGHT_THE_TORCH_REQUIREMENT)\n\n        backend = \"CUDA\" if self.isCudaGpuAvailable() else \"CPU\"\n        self._log(\n            f\"Downloading PyTorch ({backend} build, this is a large download and may \"\n            \"take several minutes)...\"\n        )\n        slicer.util._executePythonModule(\"light_the_torch\", [\"install\", *TORCH_PACKAGES])",
+     "explanation": "The Slicer Extensions Index review policy explicitly requires PyTorch to be installed through the Slicer PyTorch extension (`PyTorchUtils`, listed in `build_dependencies` and `EXTENSION_DEPENDS`) rather than via direct use of `light-the-torch`. Additionally, the catalog entry has `\"build_dependencies\": []` and `CMakeLists.txt` has `set(EXTENSION_DEPENDS \"NA\")`. While the author's design rationale (avoiding an extra extension install, Slicer restart, and importing `torch` into the main Slicer process on Windows) and the care taken to reuse existing PyTorch installations and pin core packages (`SimpleITK`, `numpy`, `scipy`, `torch`, `nnunetv2`) are well-reasoned, bypassing the `PyTorch` extension directly conflicts with the Extensions Index policy for managing Slicer's shared Python environment.",
+     "suggestion": "Declare `PyTorch` (and optionally `NNUNet` if sharing its install logic) in `EXTENSION_DEPENDS` in `CMakeLists.txt` and `build_dependencies` in `SPINEPS.json`, and use `PyTorchUtils` to manage PyTorch installation in accordance with Slicer Extensions Index policy.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSPINEPS/SlicerSPINEPSLib/InstallLogic.py",
+      "line": 498
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "PyTorch is installed directly instead of through the PyTorch extension",
+     "file": "SlicerSPINEPS/SlicerSPINEPSLib/InstallLogic.py",
+     "line_start": 498,
+     "line_end": 507,
+     "evidence": "        if not self.isPackageInstalled(\"light-the-torch\"):\n            self._log(\"Installing light-the-torch (selects the right PyTorch build)...\")\n            self.pip_install(LIGHT_THE_TORCH_REQUIREMENT)",
+     "explanation": "On a fresh Slicer installation, accepting the dependency prompt invokes light-the-torch directly to install torch and torchvision into Slicer's shared Python environment. This bypasses the required PyTorch extension and can produce a build or version incompatible with other extensions.",
+     "suggestion": "Declare PyTorch in both EXTENSION_DEPENDS and catalog build_dependencies, and install or reuse torch through PyTorchUtils; prevent transitive dependencies from independently installing torch.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSPINEPS/SlicerSPINEPSLib/InstallLogic.py",
+      "line": 498
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "InstallLogic.py:498-507 pip-installs light-the-torch and then runs `slicer.util._executePythonModule(\"light_the_torch\", [\"install\", *TORCH_PACKAGES])`. This is the direct light-the-torch use that the policy lists as a reason to request changes. CMakeLists.txt:19 has `set(EXTENSION_DEPENDS \"NA\")` and README.md:70-77 explains why PyTorchUtils is not used. The code mitigates the risk: ensureTorchAvailable (441-485) reuses any existing torch, the user is asked first (422-423, 634+), and a constraints file pins protected packages (542+). The path is still real and conflicts with the policy, so I rate it as the policy requires."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "InstallLogic.py:415-425 calls ensureTorchAvailable after the install confirmation; lines 471-477 call _installTorch only if no torch is present. Lines 498-507 state `self.pip_install(LIGHT_THE_TORCH_REQUIREMENT)` and `slicer.util._executePythonModule(\"light_the_torch\", [\"install\", *TORCH_PACKAGES])`; lines 105-107 define `TORCH_PACKAGES = [\"torch\", \"torchvision\"]`. CMakeLists.txt:13-19 explicitly states `set(EXTENSION_DEPENDS \"NA\")`. The existing torch is reused (InstallLogic.py:457-469), and the user is asked before installation, but direct light-the-torch installation violates the policy's explicit PyTorch extension requirement. The catalog entry was not available here, so its dependency list was not independently verified."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Checked `SlicerSPINEPS/SlicerSPINEPSLib/InstallLogic.py` lines 487-509 and `CMakeLists.txt` lines 13-19. In `InstallLogic._installTorch`, when PyTorch is not already installed, the code installs `light-the-torch>=0.8` via `self.pip_install(LIGHT_THE_TORCH_REQUIREMENT)` and runs `slicer.util._executePythonModule(\"light_the_torch\", [\"install\", *TORCH_PACKAGES])`. `CMakeLists.txt` line 19 sets `set(EXTENSION_DEPENDS \"NA\")`. Under the Slicer Extensions Index review policy (Security review of extensions, item 3), requests for changes are explicitly required for \"PyTorch installed other than through the Slicer PyTorch extension (`PyTorchUtils`, listed in `build_dependencies` and `EXTENSION_DEPENDS`). This includes `pip_install(\"torch\")`, direct use of light-the-torch, PyTorch index URLs, exact torch pins, and packages that pull torch from PyPI as a dependency\"."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "A first run can download several large models without confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+   "line": 173,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "A first run can download several large models without confirmation",
+     "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+     "line_start": 173,
+     "line_end": 180,
+     "evidence": "        if not models:\n            return (\n                f\"Model weights: none yet. The first segmentation downloads them \"\n                f\"(a few hundred MB per model) into {folder} and needs an internet \"\n                \"connection. To work offline, copy that folder from a machine that \"\n                \"already has them.\"\n            )\n        return f\"Model weights ({len(models)}) in {folder}: {', '.join(models)}\"",
+     "explanation": "The widget warns when the model folder is empty, but running inference initiates downloads without a confirmation. Once any model directory exists it only lists directories, so selecting a different model may silently trigger further downloads of hundreds of MB per model.",
+     "suggestion": "Check whether the selected model and its companion weights are available, and ask for confirmation before any substantial missing-weight download.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+      "line": 173
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SlicerSPINEPS.py:173-180 shows the widget tells the user before they run anything that the first segmentation downloads weights of a few hundred MB each, and onApplyClicked (239-256) starts inference with no further prompt. A search of the module found no confirmation dialog for the weights download. The downloads are done by the SPINEPS package at inference time, not by this extension's installer. They are documented in the UI and Parameter.py:84. The package-install confirmation rule does not clearly cover this. The remaining gap is that the label only counts existing model folders, so picking another model can download again without warning. That makes it a minor usability issue, not a major or safety one."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "SlicerSPINEPS.py:173-180 says `f\"Model weights: none yet. The first segmentation downloads them \"` and `f\"(a few hundred MB per model) into {folder} and needs an internet \"`, but once any directory exists it only returns `f\"Model weights ({len(models)}) in {folder}: {', '.join(models)}\"`. The selected model is passed directly to a run without a download confirmation (lines 239-256); Parameter.py:157-162 passes semantic, instance, and labeling model names, and SegmentationLogic.py:228-240 starts the external process. Parameter.py:33-42 identifies different CT companion models. Thus the first run is warned about but not separately confirmed, and subsequent selections may download missing models without the initial warning. The external SPINEPS downloader and exact transfer sizes were not available for independent verification."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked `SlicerSPINEPS/SlicerSPINEPS.py` lines 160-180 and 239-256. `describeWeightsState` inspects `folder.iterdir()` for existing subdirectories (`models = sorted(p.name for p in folder.iterdir() if p.is_dir())`) and displays a label in the UI explaining that the first segmentation downloads weights (\"a few hundred MB per model\"), or lists existing folders if any exist. `onApplyClicked` starts the segmentation process directly when the user clicks \"Run segmentation\" without a separate modal confirmation dialog before downloading missing model weights. However, because the user explicitly clicks \"Run segmentation\" in an AI segmentation module whose UI label (`self.weightsLabel`) already states ahead of time that the first run downloads model weights into the target folder, this is a minor UX/informational issue rather than a major environment defect (model weights are stored in a dedicated models folder, not modifying Slicer's shared Python environment)."
+    }
+   },
+   "settled_severity": "minor"
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "blocking",
+   "gpt": "blocking"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "needs fixes",
+  "gemini": "needs fixes",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 2,
+  "single": 4,
+  "unverified": 0,
+  "total": 5,
+  "open_disputes": 0
+ }
+}

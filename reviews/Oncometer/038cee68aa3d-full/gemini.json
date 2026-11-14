@@ -1,0 +1,100 @@
+{
+ "purpose": "Oncometer is a 3D Slicer extension for PET/CT oncology workflows providing automated lesion and organ segmentation (via ENHANCE-PET LION, MOOSE, or custom nnU-Net v2 models) and subsequent radiomics and organ-level SUV quantification. It is designed for clinical researchers and imaging scientists analyzing PET/CT scans.",
+ "summary": "Oncometer is a well-structured PET/CT oncology extension with four modules for lesion/organ segmentation and radiomics/organomics extraction, licensed under MIT. However, it has a blocking environment issue under the Extensions Index policy: `SegmentLesionsModule` and `SegmentOrgansModule` run `slicer.util.pip_install(\"lionz\")` and `slicer.util.pip_install(\"moosez\")` directly without user confirmation and without using the Slicer `PyTorch` extension (`PyTorchUtils`), which pulls `torch`, `nnunetv2`, and transitive dependencies directly from PyPI into Slicer's shared Python environment. Additionally, there are a few non-blocking calculation bugs in `RadiomicsModule` (SUVmean/SUVmax/TLG only consider connected component `== 1`, and `_calculate_medPCD` mixes xyz indices with zyx spacing). 🔴 Do not merge yet.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all Python files, CMake files, and documentation. There is no malicious behavior, telemetry, unauthorized data transmission, or prompt injection; subprocess calls use argument lists and temporary directories safely."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "Inspected `SegmentLesionsModule.py`, `SegmentOrgansModule.py`, and `RadiomicsModule.py`. While no packages are installed at startup/import, clicking Apply in `SegmentLesionsModule` or `SegmentOrgansModule` runs `slicer.util.pip_install(\"lionz\")` or `slicer.util.pip_install(\"moosez\")` without user confirmation and without `PyTorchUtils` (`PyTorch` is not in `EXTENSION_DEPENDS` or `build_dependencies`), which pulls `nnunetv2` and `torch` directly from PyPI and can overwrite Slicer's shared Python environment."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected `CMakeLists.txt` and all four module `CMakeLists.txt` files. All scripts, UI files, and icons exist and are properly listed in `slicerMacroBuildScriptedModule`, and `EXTENSION_DEPENDS \"SlicerRadiomics\"` matches `build_dependencies` in the catalog entry."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE.txt` and `NOTICE.md`. The extension is released under the MIT License (Copyright 2026 Centre Henri Becquerel) and properly documents its Apache-2.0 and BSD-3-Clause third-party dependencies (LION, MOOSE, nnU-Net, PyRadiomics)."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected all four module Python files. The modules follow Slicer's `ScriptedLoadableModule` conventions and clean up observers and temporary nodes, but `RadiomicsModule` has a bug where global SUVmean, SUVmax, and TLG only evaluate connected component label 1 instead of all lesions, and `_calculate_medPCD` mismatches xyz coordinates with zyx spacing."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md` and module tests. The extension provides clear workflow documentation, screenshots, and unit tests for each of the four modules."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Unprompted pip_install(\"moosez\") pulls PyTorch and nnUNetv2 directly from PyPI without PyTorchUtils",
+   "file": "SegmentOrgansModule/SegmentOrgansModule.py",
+   "line_start": 29,
+   "line_end": 31,
+   "evidence": "def _ensureMooseInstalled() -> None:\n    if importlib.util.find_spec(\"moosez\") is None:\n        slicer.util.pip_install(\"moosez\")",
+   "explanation": "Installing `moosez` directly via `pip_install` pulls in `nnunetv2`, `torch`, `torchvision`, and transitive dependencies (such as `SimpleITK`, `scipy`, `numpy`, `requests`, and potentially `opencv-python`) directly from PyPI without going through the Slicer PyTorch extension (`PyTorchUtils`) or the `NNUNet` extension's controlled install logic. This installs CPU/mismatched PyTorch wheels from PyPI, can overwrite or downgrade Slicer's bundled core packages, and runs a multi-gigabyte installation without user confirmation.",
+   "suggestion": "Depend on `PyTorch` (and/or `SlicerNNUNet`) in `CMakeLists.txt` (`EXTENSION_DEPENDS`) and the catalog entry (`build_dependencies`), ensure PyTorch is installed via `PyTorchUtils` before installing `moosez` (or install `nnunetv2`/`moosez` with `--no-deps` or constraints matching Slicer's bundled packages), and prompt the user with `slicer.util.confirmOkCancelDisplay` before downloading and installing large packages.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Unprompted pip_install(\"lionz\") pulls PyTorch and nnUNetv2 directly from PyPI without PyTorchUtils",
+   "file": "SegmentLesionsModule/SegmentLesionsModule.py",
+   "line_start": 47,
+   "line_end": 49,
+   "evidence": "def _ensureLionInstalled() -> None:\n    if importlib.util.find_spec(\"lionz\") is None:\n        slicer.util.pip_install(\"lionz\")",
+   "explanation": "Installing `lionz` directly via `pip_install` pulls in `nnunetv2`, `torch`, and other scientific Python dependencies directly from PyPI without using `PyTorchUtils` or prompting the user for confirmation. This can corrupt Slicer's shared Python environment by replacing Slicer-bundled packages or existing PyTorch installations.",
+   "suggestion": "Add `PyTorch` to `EXTENSION_DEPENDS` and `build_dependencies`, use `PyTorchUtils` to manage PyTorch installation, avoid overwriting Slicer's bundled packages when installing `lionz`/`nnunetv2`, and ask the user for confirmation before installing large dependencies.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Global SUVmax, SUVmean, and TLG calculations only include the first connected component (label == 1)",
+   "file": "RadiomicsModule/RadiomicsModule.py",
+   "line_start": 663,
+   "line_end": 666,
+   "evidence": "        scan_array = sitk.GetArrayFromImage(scan)\n        # temp extractors expect lesion label == 1\n        mask_array = sitk.GetArrayFromImage(composantes_connexes) == 1\n        vals = scan_array[mask_array]",
+   "explanation": "In `RadiomicsModuleLogic.process`, `composantes_connexes = sitk.ConnectedComponent(binaryMask)` assigns distinct integer labels `1, 2, ..., N` to each connected lesion component. However, `_calculate_SUV_max`, `_calculate_SUV_mean`, and `_calculate_TLG` only select voxels where `composantes_connexes == 1`, ignoring all other lesions (`> 1`) when computing global SUVmean, SUVmax, and TLG.",
+   "suggestion": "Use `sitk.GetArrayFromImage(composantes_connexes) > 0` (or pass `binaryMask`) when computing global `SUVmax`, `SUVmean`, and `TLG` across all segmented lesions.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "volume_mm3 in OrganomicsModuleLogic equals voxel count instead of physical volume in mm3",
+   "file": "OrganomicsModule/OrganomicsModule.py",
+   "line_start": 569,
+   "line_end": 576,
+   "evidence": "                results[label] = {\n                    \"name\": self.LABEL_MAP[label][\"name\"],\n                    \"SUV_mean\": float(np.mean(values)),\n                    \"SUV_max\": float(np.max(values)),\n                    \"SUV_min\": float(np.min(values)),\n                    \"n_voxels\": int(np.sum(mask)),\n                    \"volume_mm3\": float(np.sum(mask)),\n                }",
+   "explanation": "In `OrganomicsModuleLogic.process`, `volume_mm3` is set to `float(np.sum(mask))`, which is the raw voxel count rather than the physical volume multiplied by the voxel spacing (`np.prod(petVolume.GetSpacing())`).",
+   "suggestion": "Multiply the voxel count `np.sum(mask)` by `float(np.prod(petVolume.GetSpacing()))` to compute the volume in cubic millimeters.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Axis order mismatch between voxel coordinates and spacing in _calculate_medPCD",
+   "file": "RadiomicsModule/RadiomicsModule.py",
+   "line_start": 510,
+   "line_end": 513,
+   "evidence": "            # centroid in index (zyx) space\n            indices = np.argwhere(mask_arr)\n            center_idx_zyx = np.mean(indices, axis=0)\n            center_mm = center_idx_zyx[::-1].astype(float) * spacing_zyx",
+   "explanation": "In `RadiomicsModuleLogic._calculate_medPCD`, `center_idx_zyx` and `boundary_indices` are reversed (`[::-1]`, converting zyx to xyz) and then multiplied by `spacing_zyx` (which was already reversed from `GetSpacing()` to zyx at line 504). Consequently, the x-index is multiplied by the z-spacing and the z-index is multiplied by the x-spacing, producing inaccurate physical distances on anisotropic volumes.",
+   "suggestion": "Either keep indices in `zyx` order when multiplying by `spacing_zyx`, or use `spacing_xyz = np.array(composantes_connexes.GetSpacing(), dtype=float)` with `indices[:, ::-1]`.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Exact transitive pip dependency trees of lionz and moosez at runtime (no network/pip execution in review environment).",
+  "UI layout rendering in Slicer 5.10."
+ ],
+ "questions_for_author": [
+  "Can `PyTorch` (and optionally `NNUNet`) be added to `EXTENSION_DEPENDS` and `build_dependencies` so PyTorch is installed through `PyTorchUtils` prior to installing `lionz` and `moosez`?"
+ ]
+}

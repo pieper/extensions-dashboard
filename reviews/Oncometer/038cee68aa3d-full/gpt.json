@@ -1,0 +1,140 @@
+{
+ "purpose": "Oncometer supports PET/CT oncology workflows with lesion and organ segmentation and radiomics or organ-level quantification. It is intended for 3D Slicer users analyzing segmented PET/CT data.",
+ "summary": "The extension silently replaces selected output segmentations and installs segmentation packages into Slicer's shared environment without confirmation. Several radiomics calculations also produce incorrect global results, and Windows subprocess handling appears incompatible with pipe selection. The extension source was supplied for commit 038cee68aa3d2c7d823f192cd346bad4969a4c3c, but the catalog's moving branch and external inference packages and models could not be independently verified. 🔴 Do not merge yet: address destructive output replacement and unconfirmed dependency installation; review the external inference payloads and model terms.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "I inspected segmentation output loading, table writing, subprocess calls, and repository-wide network and execution searches. Existing selected segmentation contents are deleted without an explicit replacement warning; the external inference packages and model downloads were not available to inspect."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "The LION and MOOSE inference paths pip-install packages into Slicer's shared environment on first use without confirmation, and radiomics also installs missing packages. The external package dependency trees could not be inspected, so the automated PyTorch hint cannot be confirmed solely from the import."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "Root and module CMake files list the four Python modules and matching SlicerRadiomics dependency, and resource files are present. I could not independently resolve the catalog's main revision or run a build."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "LICENSE.txt permits distribution under MIT and NOTICE.md identifies third-party software licenses. The external inference distributions and their model-weight terms were unavailable for independent verification."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "I inspected radiomics and organomics computations, both segmentation inference pipelines, and the smoke tests. Global SUV/TLG calculations omit lesions, other metrics have definition or unit errors, and the subprocess pipe handling is not portable to Windows."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md provides a step-by-step workflow and identifies models; the modules include phantom smoke tests. The segmentation tests replace actual inference with stubs, and model validation, clinical-use limitations, and real inference testing were not established."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Selected existing segmentations are erased without warning",
+   "file": "SegmentLesionsModule/SegmentLesionsModule.py",
+   "line_start": 732,
+   "line_end": 737,
+   "evidence": "        segmentation = outputSegmentation.GetSegmentation()\n        while segmentation.GetNumberOfSegments() > 0:\n            segmentation.RemoveSegment(segmentation.GetNthSegmentID(0))\n\n        outputSegmentation.CreateDefaultDisplayNodes()\n        slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelMapNode, outputSegmentation)",
+   "explanation": "The output selector explicitly allows an existing segmentation, but successful prediction deletes every existing segment before importing the result, without a replacement confirmation. Unsaved manual or other patient segmentations can be lost; the organ module has the same behavior at SegmentOrgansModule/SegmentOrgansModule.py:773-778. Import failure can also leave the selected node empty.",
+   "suggestion": "Create a new output by default, or clearly confirm destructive replacement and import into a temporary node before replacing existing contents.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Segmentation installs unpinned packages without informed confirmation",
+   "file": "SegmentLesionsModule/SegmentLesionsModule.py",
+   "line_start": 47,
+   "line_end": 49,
+   "evidence": "def _ensureLionInstalled() -> None:\n    if importlib.util.find_spec(\"lionz\") is None:\n        slicer.util.pip_install(\"lionz\")",
+   "explanation": "Running the default lesion model invokes this installer at line 766; the default organ workflow likewise installs moosez at SegmentOrgansModule/SegmentOrgansModule.py:29-31 and 895. Neither path asks permission before modifying Slicer's shared Python environment or explains download size and dependencies. The installed packages and dependency trees were not available, so whether they install torch, downgrade bundled packages, or download additional code or weights remains unverified.",
+   "suggestion": "Ask for explicit confirmation and audit the resolved dependencies; install PyTorch through the PyTorch extension and use Slicer-compatible nnUNet installation logic where applicable.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Radiomics metrics install packages without asking",
+   "file": "RadiomicsModule/RadiomicsModule.py",
+   "line_start": 23,
+   "line_end": 28,
+   "evidence": "def _ensurePythonPackage(packageName: str, moduleName: str) -> None:\n    if importlib.util.find_spec(moduleName) is not None:\n        return\n\n    try:\n        slicer.util.pip_install(packageName)",
+   "explanation": "Selecting TMTS or TVSR calls this helper for scikit-image, and Dmax calls it for scipy if absent. These operations modify the shared environment without a confirmation dialog; pip may also change dependencies used by other modules.",
+   "suggestion": "Check for dependencies before processing, explain the changes and ask for confirmation, while preserving Slicer-bundled packages.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Global SUV and TLG use only the first connected lesion",
+   "file": "RadiomicsModule/RadiomicsModule.py",
+   "line_start": 671,
+   "line_end": 677,
+   "evidence": "    def _calculate_SUV_mean(self, scan, composantes_connexes):\n        scan_array = sitk.GetArrayFromImage(scan)\n        mask_array = sitk.GetArrayFromImage(composantes_connexes) == 1\n        vals = scan_array[mask_array]\n        if vals.size == 0:\n            return 0.0\n        return float(np.mean(vals))",
+   "explanation": "The process creates a distinct connected-component label for each lesion, but global SUVmean and SUVmax select only label 1. TLG also uses only label 1's mean and volume, so a multi-lesion patient's reported global values omit other lesions and may miss the maximum uptake.",
+   "suggestion": "Compute global SUV statistics and TLG on the union of all nonzero lesion labels and add multi-lesion tests with different voxel values.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Dmax measures voxel-to-voxel diameter instead of lesion-centroid distance",
+   "file": "RadiomicsModule/RadiomicsModule.py",
+   "line_start": 723,
+   "line_end": 730,
+   "evidence": "        arr = sitk.GetArrayFromImage(composantes_connexes) > 0\n        coords = np.argwhere(arr)\n        if coords.size == 0:\n            return 0.0\n        # Convex hull in index space, then transform hull vertices to physical points\n        try:\n            hull = ConvexHull(coords)\n            hull_points = coords[hull.vertices]",
+   "explanation": "The module's help defines Dmax as the maximum distance between tumor centroids, but the implementation takes the convex hull of every tumor voxel and computes the farthest pair of hull points. A single extended lesion therefore receives a nonzero Dmax and multi-lesion distances include lesion size rather than just separation.",
+   "suggestion": "Calculate physical centroids per connected component and their maximum pairwise distance; test single and multiple lesions.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "TVSR mixes cubic centimeters with square millimeters",
+   "file": "RadiomicsModule/RadiomicsModule.py",
+   "line_start": 632,
+   "line_end": 637,
+   "evidence": "    def calculate_TVSR(self, TMTV, TMTS):\n        if TMTS <= 0.0:\n            return float('nan') # division par 0\n        \n        # mm^3 / mm^2 = mm\n        return TMTV / TMTS",
+   "explanation": "Despite the comment, _calculate_TMTV returns mm³ divided by 1000, i.e. cm³, while _calculate_TMTS returns surface in mm². The global TVSR result is thus 1000 times smaller than the documented millimeter value.",
+   "suggestion": "Convert volume or surface to consistent units before division and test with a known-volume phantom.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Windows inference uses a selector on subprocess pipes",
+   "file": "SegmentLesionsModule/SegmentLesionsModule.py",
+   "line_start": 635,
+   "line_end": 642,
+   "evidence": "        stdout_lines: list[str] = []\n        stderr_lines: list[str] = []\n        selector = selectors.DefaultSelector()\n        try:\n            if process.stdout is not None:\n                selector.register(process.stdout, selectors.EVENT_READ)\n            if process.stderr is not None:\n                selector.register(process.stderr, selectors.EVENT_READ)",
+   "explanation": "On Windows Python's selector implementation supports sockets, not subprocess pipe handles, so registration fails when a prediction is launched. The organ module uses the same approach at lines 662-669; its process is started before registration and is not terminated on this failure. The provided inference smoke tests stub out the subprocess and do not exercise this path.",
+   "suggestion": "Use a cross-platform subprocess reader such as worker threads or Qt's QProcess, and terminate and reap the child on errors.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Organ segmentations without numeric names silently report zero uptake",
+   "file": "OrganomicsModule/OrganomicsModule.py",
+   "line_start": 532,
+   "line_end": 538,
+   "evidence": "        for i in range(segmentIds.GetNumberOfValues()):\n            segId = segmentIds.GetValue(i)\n            segment = segmentation.GetSegment(segId)\n            segmentName = segment.GetName() or \"\"\n            match = re.search(r\"(\\d+)\", segmentName)\n            if match:\n                labelToSegmentId[int(match.group(1))] = segId",
+   "explanation": "Organomics accepts a segmentation node but maps organs solely by digits in segment names. A segmentation with ordinary names such as 'Liver' is treated as missing and the logic emits SUVmean and SUVmax of zero for those organs, presenting plausible measurements rather than warning that mapping failed. Numbers unrelated to labels may also select the wrong organ.",
+   "suggestion": "Use explicit, validated organ-to-segment mapping or recognized anatomical names, and report missing or ambiguous organs rather than substituting zeros.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Independent resolution of the catalog's main branch to the supplied commit, previous PR baseline, catalog validation, and CI results.",
+  "Execution, builds, runtime tests, and platform verification in 3D Slicer were not possible with the available tools.",
+  "Source, dependency metadata, download destinations, data handling, model integrity, and model-weight licenses of the externally installed lionz and moosez packages were not available.",
+  "Custom nnUNet checkpoints and their provenance, loading behavior, and license terms depend on user-provided models and were not inspected.",
+  "Clinical validation or suitability for clinical decision-making was not verified."
+ ],
+ "questions_for_author": [
+  "Can you provide the exact lionz and moosez distributions, their dependency trees, model download locations and weight licenses, and their handling of input images?",
+  "Can the inference output always be created in a new node, or can replacement of a nonempty output be explicitly confirmed?"
+ ]
+}

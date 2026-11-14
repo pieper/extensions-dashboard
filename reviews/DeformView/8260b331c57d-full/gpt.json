@@ -1,0 +1,139 @@
+{
+ "purpose": "DeformView visualizes displacement magnitudes and local volume changes from registration transforms as voxel-wise overlays. It is intended for researchers and other Slicer users examining non-linear registration and tissue deformation.",
+ "summary": "The source contains concrete scene-data destruction and modification risks: opening the module removes any node named JacobianMap, and recomputing can overwrite an earlier map with unrelated values. The module also modifies input transforms and replaces VTK’s global output window. The catalog uses a moving branch; its remote resolution and repository-size hint could not be verified. 🔴 Do not merge yet: prevent unintended scene data loss and modification, and verify the selected source and catalog build.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected setup, scene-node removal, compute/load handlers, transform scaling, temporary-file handling and repository-wide network and execution searches. Opening the module can delete existing scene nodes by name, and recomputing can overwrite prior map data."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Inspected imports and module setup: no dependency installer or imported PyQt5 is present in the installed module, but opening the widget replaces the process-wide VTK output window without restoring it."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "CMake lists both imported Python scripts and the UI and icon resources; the generated PyQt5 script is not imported. The supplied branch, commit relationship, remote fetch/build and the 233 MB repository-size hint cannot be independently verified with the available tools."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE.txt grants MIT distribution rights; inspected the available source, build files and visible asset list. No downloaded models or bundled third-party software were identified in the inspected code."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected GUI computation, map selection, cursor sampling, transform handling and analytic tests. GUI operations can select stale maps and alter the fixed input or shared transform; logic-level tests do not exercise these interactions."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README and paper describe workflows, limitations and analytic validation, and DeformViewTesting.py supplies synthetic tests. The GUI restricts incremental scaling to B-spline transforms despite the README describing it generally."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Opening the module deletes any scene node named JacobianMap",
+   "file": "DeformView/DeformView.py",
+   "line_start": 235,
+   "line_end": 238,
+   "evidence": "        self.enableVTKErrorTracking()\n\n        self.cleanupDuplicateColorNodes(\"JacobianMap\")\n        self.removeAllNamedNode(\"JacobianMap\")",
+   "explanation": "During widget setup, removeAllNamedNode collects and removes every node with this name without checking its class, origin or ownership (lines 683–707). A user's existing volume, transform, markup or color node named JacobianMap is removed merely by opening the module, potentially losing unsaved scene data and references.",
+   "suggestion": "Keep references to extension-owned color nodes and remove only those created by this module; do not delete arbitrary nodes by name.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Recomputing can overwrite an earlier or unrelated scene volume",
+   "file": "DeformView/DeformView.py",
+   "line_start": 2191,
+   "line_end": 2197,
+   "evidence": "        # Find the volume by suffix\n        scene = slicer.mrmlScene\n        for i in range(scene.GetNumberOfNodesByClass(\"vtkMRMLScalarVolumeNode\")):\n            node = scene.GetNthNodeByClass(i, \"vtkMRMLScalarVolumeNode\")\n            if node.GetName() and suffix in node.GetName():\n                selectedVolume = node\n                break",
+   "explanation": "Compute creates a new map and calls this loader, which instead picks the first scene volume whose name contains the suffix. Lines 2233–2253 then copy the latest computed arrays into that selected volume. Recomputing after changing inputs can silently overwrite the old map or an unrelated matching user volume; different array sizes can instead raise an error.",
+   "suggestion": "Load maps by the actual newly created node references or explicit user selection and never copy cached arrays into an independently selected node.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Compute and incremental slider mutate shared input scene nodes",
+   "file": "DeformView/DeformView.py",
+   "line_start": 2065,
+   "line_end": 2069,
+   "evidence": "            hoverWasEnabled = self.ui.enableHoverDisplayCheckbox.isChecked()\n            \n            #  NEW: Reset background volume to have no transform\n            if self._parameterNode.backgroundVolume:\n                self._parameterNode.backgroundVolume.SetAndObserveTransformNodeID(None)",
+   "explanation": "Compute discards the fixed/background volume's existing parent transform before calculations and later assigns the selected transform to it (line 2102), without restoring the prior relationship even if calculation fails. The slider also changes the shared input transform itself at lines 1262–1264, affecting any other nodes using it and potentially changing subsequently saved registration results.",
+   "suggestion": "Operate on module-owned copies or derived nodes, preserve the original parent transform, and avoid mutating the user-selected transform.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Module replaces the global VTK output window",
+   "file": "DeformView/DeformView.py",
+   "line_start": 454,
+   "line_end": 456,
+   "evidence": "        # Add observer to VTK output window\n        errorObserver = vtk.vtkFileOutputWindow()\n        vtk.vtkOutputWindow.SetInstance(errorObserver)",
+   "explanation": "Opening the module installs a process-wide file output window, replacing Slicer's existing VTK output handler for other modules; cleanup does not restore it. VTK diagnostics can be redirected away from the normal application handler for the remainder of the session.",
+   "suggestion": "Do not replace the global singleton; use scoped observers or preserve and restore the original output window.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Fixed image is transformed despite the UI describing it as stationary",
+   "file": "DeformView/DeformView.py",
+   "line_start": 779,
+   "line_end": 786,
+   "evidence": "        inputLayout.addRow(\"Moving Image:\", self.ui.referenceVolume)\n        inputLayout.addRow(\"Fixed Image:\", self.ui.backgroundVolume)\n        inputLayout.addRow(\"Transformation:\", self.ui.transformNode)\n        self.ui.referenceVolume.setToolTip(\n            \"The volume that is warped by the deformation field to match the fixed image.\"\n        )\n        self.ui.backgroundVolume.setToolTip(\n            \"The reference volume that the moving image is registered to. Does not warp.\"",
+   "explanation": "The apply handler instead attaches the selected transform to backgroundVolume at line 2102 and displays it as the background. Thus the fixed image is moved even though the UI says it does not warp, potentially producing misleading overlays and interpretation.",
+   "suggestion": "Keep the fixed image in its original coordinate system and explicitly define and test the mapping grid and transform direction in an end-to-end GUI test.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Hover sampling ignores the displayed volume's parent transform",
+   "file": "DeformView/DeformView.py",
+   "line_start": 1644,
+   "line_end": 1649,
+   "evidence": "        # convert RAS to IJK\n        rasToIjk = vtk.vtkMatrix4x4()\n        displacementVolume.GetRASToIJKMatrix(rasToIjk)\n        ijk = [0.0, 0.0, 0.0, 1.0]\n        ras_hom = list(ras) + [1.0]\n        rasToIjk.MultiplyPoint(ras_hom, ijk)",
+   "explanation": "The cursor RAS position is in world coordinates, but the volume's local RAS-to-IJK matrix does not invert its parent transform. The apply handler assigns a transform to the displacement map at line 2105, so with a non-identity parent the hover value can come from the wrong voxel or be reported out of bounds.",
+   "suggestion": "Transform the cursor world position into the volume's local coordinates before applying RAS-to-IJK, or keep the output in world coordinates; test a translated and non-linear parent transform.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Incremental slider is restricted to B-spline transforms",
+   "file": "DeformView/DeformView.py",
+   "line_start": 1238,
+   "line_end": 1246,
+   "evidence": "        # Check if it has SetDisplacementScale method\n        if not hasattr(bsplineTransform, 'SetDisplacementScale'):\n            transformType = bsplineTransform.GetClassName()\n            \n            slicer.util.warningDisplay(\n                f\"Incremental Scaling Not Supported\\n\\n\"\n                f\"The current transform type ({transformType}) does not support incremental scaling.\\n\\n\"\n                f\"Incremental scaling is only available for B-spline transforms.\\n\\n\"\n                f\"The slider has been disabled.\"",
+   "explanation": "Grid, linear and other transforms can be used for maps but cannot use this advertised increment feature. README.md lines 76–79 describes the slider without this restriction, while the independent incremental logic tested in DeformViewTesting.py is not called by this slider.",
+   "suggestion": "Document the restriction or implement and test GUI incremental visualization for the other supported transform types.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Cleanup removes other modules' crosshair observers",
+   "file": "DeformView/DeformView.py",
+   "line_start": 1934,
+   "line_end": 1936,
+   "evidence": "        crosshairNode = slicer.mrmlScene.GetFirstNodeByClass('vtkMRMLCrosshairNode')\n        if crosshairNode:\n            crosshairNode.RemoveAllObservers()",
+   "explanation": "When this widget is cleaned up, all observers on the shared crosshair node are removed, including callbacks owned by Slicer or other extensions. Those features may stop reacting to cursor updates after a module reload or cleanup.",
+   "suggestion": "Remove only observer tags registered by DeformView.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No execution, Slicer build, GUI interaction, automated tests or CI results were available.",
+  "The remote repository, current main branch resolution and exact relationship to supplied commit 8260b331c57d7d692957482e80bcbb19b86f3eb9 could not be independently verified.",
+  "Repository history and the reported 233 MB size could not be measured; binary images were not inspected.",
+  "The entire 3,725-line module was not read line by line; targeted searches and relevant execution paths were inspected.",
+  "Submission checklist and index-side validation results were not provided."
+ ],
+ "questions_for_author": [
+  "Can you provide the catalog CI/build results and verify the repository-size limit and the commit currently selected by main?"
+ ]
+}

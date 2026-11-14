@@ -1,0 +1,125 @@
+{
+ "purpose": "DeformView is a scripted 3D Slicer module for researchers and clinicians to quantitatively visualize and analyze non-linear registration deformation fields. It computes and displays dense voxel-wise displacement magnitude (mm) and Jacobian determinant (% volume change) maps as interactive color overlays with real-time cursor hover readouts and incremental transformation scaling.",
+ "summary": "DeformView is a well-documented and thoroughly validated scripted module for visualizing non-linear deformation fields (voxel-wise displacement magnitude and Jacobian determinant maps). It meets all three admission requirements: it is safe with no network or file-system risks, is distributed under the MIT License, and has a valid, buildable CMake and catalog configuration (note that `DeformView_ui.py` which imports `PyQt5` is an unused file neither imported nor installed). One notable non-blocking issue in `DeformViewWidget.setup()` should be fixed soon: `enableVTKErrorTracking()` replaces Slicer's global `vtkOutputWindow` singleton with a bare `vtkFileOutputWindow`. Several minor UI/cleanup bugs are also noted.\n\n🟢 Recommend merge",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected `DeformView/DeformView.py`, `DeformView/DeformViewTesting.py`, `DeformView/DeformView_shift_check.py`, `DeformView/Resources/UI/DeformView.ui`, `DeformView/Resources/UI/DeformView_ui.py`, CMake files, and docs. There is no network communication, telemetry, external binary download, command execution, or unsafe deserialization; temporary files use `tempfile.NamedTemporaryFile` and are cleaned up."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Inspected all Python files and CMake scripts. There are no pip installs or external dependencies at import or runtime, and nothing is executed at module import time. However, when the module widget is initialized (`setup()`), `enableVTKErrorTracking()` replaces VTK's global `vtkOutputWindow` singleton with a bare `vtkFileOutputWindow` and `logging.basicConfig(level=logging.DEBUG)` is called in `showNonZeroWireframe()`."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected `DeformView.json`, root `CMakeLists.txt`, and `DeformView/CMakeLists.txt`. All required scripts (`DeformView.py`, `DeformViewTesting.py`), icons, and `DeformView.ui` are installed by CMake (`DeformView_ui.py` with `PyQt5` is not imported or installed); `EXTENSION_DEPENDS` is `\"NA\"` matching `build_dependencies: []`. Note: a duplicate `DeformView.json` is committed in the extension repo root, and the git history is ~233 MB (though the checked-out tree is ~10 MB)."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE.txt`, `README.md`, and `CONTRIBUTING.md`. The extension is clearly licensed under the permissive MIT License (Copyright 2026 Elise Donszelmann-Lund, Isabel Frolick) with no restrictive third-party bundled code or weights."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Inspected `DeformView/DeformView.py` and `DeformView/DeformViewTesting.py`. The core displacement magnitude and Jacobian determinant calculations in `DeformViewLogic` are mathematically sound and thoroughly tested across linear, oblique, grid, B-spline, and TPS transforms. The GUI widget code has several minor bugs and debugging leftovers (replacing `vtkOutputWindow`, `crosshairNode.RemoveAllObservers()` in `cleanup()`, broken `onResetWindowLevel` signature/attributes, a typo in `windowLevelFlagUpdate`, and leaking an unused display node in `onLoadDisplacementVolume`)."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md`, `paper/paper.md`, and `DeformView/DeformViewTesting.py`. The module fills a clear need for quantitative dense visualization of registration deformation fields (displacement magnitude and Jacobian determinant with cursor hover readout) beyond Slicer's built-in qualitative Transforms module, and includes a comprehensive analytic self-test suite and documentation."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Module setup replaces Slicer's global vtkOutputWindow singleton",
+   "file": "DeformView/DeformView.py",
+   "line_start": 454,
+   "line_end": 456,
+   "evidence": "        # Add observer to VTK output window\n        errorObserver = vtk.vtkFileOutputWindow()\n        vtk.vtkOutputWindow.SetInstance(errorObserver)",
+   "explanation": "When DeformViewWidget.setup() runs, enableVTKErrorTracking() replaces VTK's global singleton vtkOutputWindow with a new unconfigured vtkFileOutputWindow instance. This breaks Slicer's application-wide VTK error and warning logging for the rest of the session across all modules, and causes VTK to write a default output file in the current working directory. Note also that errorCallback defined in that method is never attached as an observer.",
+   "suggestion": "Remove enableVTKErrorTracking() and the call to vtk.vtkOutputWindow.SetInstance(), or use standard Slicer logging without replacing the global VTK output window singleton.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Reset Window/Level button handler has mismatched signature and uninitialized state attributes",
+   "file": "DeformView/DeformView.py",
+   "line_start": 300,
+   "line_end": 301,
+   "evidence": "        # Connect reset button\n        self.ui.resetWindowLevelButton.connect('clicked(bool)', self.onResetWindowLevel)",
+   "explanation": "The QPushButton clicked(bool) signal passes a boolean (the checked state, False) as the first argument to onResetWindowLevel(self, volumeNode). When self.defaultWindow and self.defaultLevel are set, onResetWindowLevel calls volumeNode.GetDisplayNode() on the bool argument, raising AttributeError: 'bool' object has no attribute 'GetDisplayNode'. Furthermore, self.defaultWindow and self.defaultLevel are initialized to None in setup() and never updated (initializeWindowLevelControls sets self.defaultWindow_DisplacementMag and self.defaultWindow_Jacobian instead), so clicking the button currently only re-runs initializeWindowLevelControls and returns early.",
+   "suggestion": "Accept clicked: bool = False in onResetWindowLevel, retrieve selectedVolume = self.ui.loadedTransformVolume.currentNode() inside the method, and check self.defaultWindow_DisplacementMag / self.defaultWindow_Jacobian instead of self.defaultWindow.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Typo in windowLevelFlagUpdate assigns defaultLevel_Jacobian to window",
+   "file": "DeformView/DeformView.py",
+   "line_start": 2763,
+   "line_end": 2765,
+   "evidence": "        elif flag == 1: #Jacobian\n            window = self.defaultLevel_Jacobian\n            level = self.defaultLevel_Jacobian",
+   "explanation": "In windowLevelFlagUpdate, when flag == 1 (Jacobian), window is assigned self.defaultLevel_Jacobian instead of self.defaultWindow_Jacobian. Additionally, in initializeWindowLevelControls (lines 2625-2628), level_jacobian and window_jacobian are hardcoded to 1.0 instead of centering at 0.0 with a symmetric window (2.0 * maxAbsValue, which is commented out).",
+   "suggestion": "Use self.defaultWindow_Jacobian for window, and verify whether defaultLevel_Jacobian should be 0.0 and defaultWindow_Jacobian should be 2.0 * maxAbsValue.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Orphan display node leaked into MRML scene on each volume load",
+   "file": "DeformView/DeformView.py",
+   "line_start": 2274,
+   "line_end": 2280,
+   "evidence": "        persistentDisplayNode = selectedVolume.GetDisplayNode()\n\n        internalDisplayNode = slicer.mrmlScene.AddNewNodeByClass(persistentDisplayNode.GetClassName())\n\n        #internalDisplayNode.Copy(persistentDisplayNode)\n        internalDisplayNode = persistentDisplayNode\n        selectedVolume.AddAndObserveDisplayNodeID(internalDisplayNode.GetID())",
+   "explanation": "Every time onLoadDisplacementVolume is called, AddNewNodeByClass creates an orphan display node in the MRML scene that is immediately overwritten by internalDisplayNode = persistentDisplayNode and never used or removed.",
+   "suggestion": "Remove the unused slicer.mrmlScene.AddNewNodeByClass(persistentDisplayNode.GetClassName()) call and the redundant AddAndObserveDisplayNodeID call.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "cleanup() removes all observers from shared vtkMRMLCrosshairNode singleton",
+   "file": "DeformView/DeformView.py",
+   "line_start": 1934,
+   "line_end": 1936,
+   "evidence": "        crosshairNode = slicer.mrmlScene.GetFirstNodeByClass('vtkMRMLCrosshairNode')\n        if crosshairNode:\n            crosshairNode.RemoveAllObservers()",
+   "explanation": "In cleanup(), calling crosshairNode.RemoveAllObservers() removes all observers on the shared singleton crosshair node, not just the observer added by DeformView (which was already removed on lines 1929-1932). This can break other modules or Slicer components observing the crosshair node.",
+   "suggestion": "Remove the crosshairNode.RemoveAllObservers() call and rely only on removing self.crosshairObserverTag.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Module setup resets and renames built-in Slicer color table nodes",
+   "file": "DeformView/DeformView.py",
+   "line_start": 593,
+   "line_end": 597,
+   "evidence": "        existing_node = slicer.mrmlScene.GetNodeByID(f'{node_ID}')\n        if existing_node:\n            existing_node.SetName(name_str)\n            # CRITICAL FIX: Set the attribute even on existing nodes\n            existing_node.SetAttribute(\"MyColourMaps\", \"1\")",
+   "explanation": "When DeformViewWidget.setup() runs, resetBuiltInColorNodes() removes and re-adds all default Slicer color nodes, and create_colour_node() renames built-in Slicer color table nodes (e.g. renaming 'vtkMRMLColorTableNodeFileColdToHotRainbow.txt' from 'ColdToHotRainbow' to 'Hot-To-Cold Rainbow'). Any code or user workflow relying on standard built-in color node names may be affected.",
+   "suggestion": "Avoid removing/re-adding default color nodes or renaming Slicer's built-in color nodes in-place; if custom display names are desired, either clone the color nodes or use their standard names.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Repository git history contains ~233 MB of data and unused pyuic5-generated file",
+   "file": "DeformView.json",
+   "line_start": 6,
+   "line_end": 7,
+   "evidence": "  \"scm_revision\": \"main\",\n  \"scm_url\": \"https://github.com/elisedl1/SlicerDeformView.git\",",
+   "explanation": "The automated repository scan notes that the git repository size is ~233 MB (exceeding the 100 MB guideline), although the working tree at commit 8260b331c57d7d692957482e80bcbb19b86f3eb9 is only ~9.7 MB, indicating large files were committed in earlier git history. Also, DeformView/Resources/UI/DeformView_ui.py (which imports PyQt5) and DeformView/DeformView_shift_check.py are unused files in the repository that are not installed by CMake.",
+   "suggestion": "Consider cleaning large historical blobs from git history if practical, and removing the unused DeformView/Resources/UI/DeformView_ui.py file.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Could not inspect exampleImages/main_UI.png (2 MB) and paper/figures/UI_overview.png (4 MB) contents directly, though they are documentation/screenshot PNG images not packaged into the extension binary.",
+  "Could not execute the build or run tests in a live 3D Slicer instance."
+ ],
+ "questions_for_author": [
+  "In DeformView.py line 456, enableVTKErrorTracking() replaces Slicer's global vtkOutputWindow with a bare vtkFileOutputWindow; can this debugging leftover be removed so Slicer's error log continues working?",
+  "In initializeWindowLevelControls (lines 2625-2628) and windowLevelFlagUpdate (line 2764), Jacobian default window and level are both set to 1.0 instead of level 0.0 and symmetric window 2*maxAbsValue; was that intentional?"
+ ]
+}

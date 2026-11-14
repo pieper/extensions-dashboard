@@ -1,0 +1,91 @@
+{
+ "purpose": "SPINEPS integrates an upstream AI pipeline into 3D Slicer to segment vertebrae and spinal subregions from MRI and CT volumes. It is intended for researchers and other Slicer users who need whole-spine segmentation.",
+ "summary": "The installer directly installs PyTorch using light-the-torch rather than the required PyTorch extension, affecting Slicer's shared environment. The registered tests also contain obsolete argument expectations, and failed inference can still yield loaded output. The extension code is Apache-2.0, but upstream weights and runtime dependencies could not be inspected; the source revision and catalog access could not be independently verified. 🔴 Do not merge yet: replace the direct PyTorch installation, and complete review of the upstream payloads, weight distribution terms, and catalog revision.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "unknown",
+   "rationale": "I inspected the local installer, process invocation, temporary-file handling, and README. The runtime-installed SPINEPS package and downloaded weights, including their download and deserialization behavior, were not available for inspection."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "InstallLogic.py directly invokes light-the-torch to install torch and torchvision instead of using the PyTorch extension, contrary to the security policy. It otherwise prompts before dependency installation and constrains several existing Slicer packages."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "The module CMake file lists the local Python library files and icon, and the root CMake declares no extension dependencies, matching the supplied entry. I could not independently resolve the source URL, moving main revision, or perform a build."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "LICENSE grants Apache-2.0 terms for the extension, and NOTICE identifies the adapted code. README explicitly says the downloaded weights have no separate published license; their upstream distribution terms could not be verified."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "I inspected the parameter construction, subprocess lifecycle, result selection, and registered tests. The tests expect old CLI flags and result selection can load a mask even after a nonzero exit."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents usage, sample data, model provenance, and a research-use disclaimer. The provided automated test suite contains assertions inconsistent with the current implementation."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "PyTorch is installed directly instead of through the PyTorch extension",
+   "file": "SlicerSPINEPS/SlicerSPINEPSLib/InstallLogic.py",
+   "line_start": 498,
+   "line_end": 507,
+   "evidence": "        if not self.isPackageInstalled(\"light-the-torch\"):\n            self._log(\"Installing light-the-torch (selects the right PyTorch build)...\")\n            self.pip_install(LIGHT_THE_TORCH_REQUIREMENT)",
+   "explanation": "On a fresh Slicer installation, accepting the dependency prompt invokes light-the-torch directly to install torch and torchvision into Slicer's shared Python environment. This bypasses the required PyTorch extension and can produce a build or version incompatible with other extensions.",
+   "suggestion": "Declare PyTorch in both EXTENSION_DEPENDS and catalog build_dependencies, and install or reuse torch through PyTorchUtils; prevent transitive dependencies from independently installing torch.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "A first run can download several large models without confirmation",
+   "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+   "line_start": 173,
+   "line_end": 180,
+   "evidence": "        if not models:\n            return (\n                f\"Model weights: none yet. The first segmentation downloads them \"\n                f\"(a few hundred MB per model) into {folder} and needs an internet \"\n                \"connection. To work offline, copy that folder from a machine that \"\n                \"already has them.\"\n            )\n        return f\"Model weights ({len(models)}) in {folder}: {', '.join(models)}\"",
+   "explanation": "The widget warns when the model folder is empty, but running inference initiates downloads without a confirmation. Once any model directory exists it only lists directories, so selecting a different model may silently trigger further downloads of hundreds of MB per model.",
+   "suggestion": "Check whether the selected model and its companion weights are available, and ask for confirmation before any substantial missing-weight download.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Registered test uses obsolete command-line flags",
+   "file": "SlicerSPINEPS/SlicerSPINEPS.py",
+   "line_start": 394,
+   "line_end": 398,
+   "evidence": "        self.assertIn(\"sample\", args)\n        self.assertIn(\"--model-semantic\", args)\n        self.assertEqual(args[args.index(\"--model-semantic\") + 1], \"t2w\")\n        self.assertIn(\"-cpu\", args)\n        self.assertEqual(parameter.inputFileName(), \"sub-spineps_acq-sag_T2w.nii.gz\")",
+   "explanation": "Parameter.asArgList emits --cpu, not -cpu, so this registered test fails deterministically. Its later CT assertions also expect old -model_instance and -model_labeling spellings rather than the current double-dash forms.",
+   "suggestion": "Update the assertions to match the current flags and run the registered Slicer test.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Result files are accepted before checking inference exit status",
+   "file": "SlicerSPINEPS/SlicerSPINEPSLib/SegmentationLogic.py",
+   "line_start": 121,
+   "line_end": 127,
+   "evidence": "    def _findOutputFile(self, pattern: str, description: str) -> Path:\n        # SPINEPS places results in a \"derivatives_seg\" folder whose exact location\n        # depends on how it resolves the BIDS path, so search the whole temp tree.\n        matches = sorted(Path(self._tmpDir.path()).rglob(pattern))\n        matches = [m for m in matches if not self._isIntermediateResult(m)]\n        if matches:\n            return matches[0]",
+   "explanation": "The process emits its finished signal for nonzero exits and cancellation as well as success. If a matching final file was written before failure or cancellation, this method returns it without consulting the exit code and the widget can load an incomplete or failed-run result.",
+   "suggestion": "Only signal successful completion and load outputs after confirming normal exit with code zero; report cancellation and failed runs separately.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No shell, Slicer runtime, build, automated test execution, or CI results were available.",
+  "The source checkout could not be independently resolved to commit 5f2d78ca91f413f2b9a10023b7c940d7d7019c05 or compared with catalog main; source content was provided in the review input.",
+  "Upstream SPINEPS, its transitive PyPI packages, model download endpoints and artifacts, and model weight distribution permissions could not be inspected.",
+  "No previous catalog entry or submission checklist was available for comparison."
+ ],
+ "questions_for_author": [
+  "Can you provide the upstream license or explicit distribution permission covering all model weights downloaded by SPINEPS?",
+  "Can the installer be revised to use the Slicer PyTorch extension and prompt before downloading missing model weights?"
+ ]
+}

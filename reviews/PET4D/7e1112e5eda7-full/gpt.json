@@ -1,0 +1,79 @@
+{
+ "purpose": "PET4D loads gated, dynamic and static PET DICOM series into Slicer and provides review, editing, motion correction, registration and kinetic modeling. It is intended for researchers working with PET images and time-activity data.",
+ "summary": "The modeling CSV export can silently overwrite an existing companion file, so it needs an overwrite check. Non-blocking modeling issues can also produce incorrect or incomplete results. CMake lists the scripts flagged by the automated scan. The source snapshot identifies the reviewed commit, but the moving catalog revision, remote access and copied third-party terms could not be independently verified. 🔴 Do not merge yet: fix the unintended file overwrite and complete revision and licensing verification.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected repository-wide dangerous-API searches, the modeling export and DICOM export. The companion CSV is overwritten without a separate confirmation; DICOM temporary-file deletion is confined to a newly created temporary directory."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Searched for pip, subprocess and download APIs and inspected module imports; no package installation was found. Module imports can prepend their directory to the process-wide Python path."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "Inspected catalog metadata and both CMake files: dependencies agree and the scripts flagged by the scan are listed in separate module macros. Remote repository accessibility, the current main revision and an actual build could not be verified."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "The repository LICENSE grants MIT terms, and sitkreg.py identifies its source as MIT by the same author. The terms and attribution for the color tables copied from Tarvos could not be independently checked."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected kinetic fitting, CSV output and user-interface paths. Missing target-frame values can bias SUVR, and fitting all segments with a plasma file unnecessarily excludes the selected reference segment."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README documents workflows and states the software is research-only, while the repository includes synthetic self-tests and separate tests. Tests and validation were not run."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Export silently overwrites a separate companion CSV",
+   "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+   "line_start": 394,
+   "line_end": 397,
+   "evidence": "                    curves[f\"{analysis.name(segmentId)} fit ({modelKey})\"] = result[\"fitted\"]\n            tacPath = os.path.splitext(path)[0] + \"_TACs.csv\"\n            with open(tacPath, \"w\", encoding=\"utf-8\", newline=\"\") as stream:\n                stream.write(kin.tacCsv(analysis.frames, curves, analysis.units))",
+   "explanation": "The save dialog selects the results filename, but exporting results.csv also truncates an existing results_TACs.csv without asking about that separate file. A user can lose unrelated existing data even when the selected results filename was new.",
+   "suggestion": "Check both output paths before writing and explicitly confirm replacement of each existing file, or let the user choose a non-conflicting companion filename.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Missing target-frame values are treated as zero in SUVR",
+   "file": "DICOMGatedDynamicPET/DICOMGatedDynamicPETLib/kinetics.py",
+   "line_start": 865,
+   "line_end": 867,
+   "evidence": "    target = float(np.nansum(w * tissue) / w.sum())\n    ref = float(np.nansum(w * reference.frameMeans()) / w.sum())\n    suvr = _ratio(target, ref)",
+   "explanation": "When a target segment has no voxels on some frame grids, segmentCurves records NaN for those frames, but this sum ignores the missing numerator while retaining its duration in the denominator. If the reference is present and the target exists in at least one frame, SUVR can be reported too low without a missing-data warning.",
+   "suggestion": "Reject incomplete curves or compute both target and reference on a common set of finite frames, with an explicit warning.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Fit all excludes a segment even when the input is a plasma file",
+   "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+   "line_start": 324,
+   "line_end": 329,
+   "evidence": "    def fitSegments(self, analysis, modelKey, referenceId=None, options=None, plasma=None, segmentIds=None,\n                    progress=None):\n        \"\"\"{segment ID: result} of every segment (but the reference) or of segmentIds; a segment that cannot be\n        fitted gets {\"error\": text}.\"\"\"\n        inputFunction, reference, blood = self.inputs(analysis, modelKey, referenceId, plasma)\n        ids = [s for s in (segmentIds or analysis.segments) if s != referenceId]",
+   "explanation": "The GUI always selects a reference segment, including for plasma-file models; this unconditional exclusion skips that segment in Fit all. With one target segment and a plasma curve, preview is allowed but Fit all produces no segment result.",
+   "suggestion": "Allow an optional whole-blood segment for plasma-file models and include the selected target in batch fitting when it is not actually being used as a reference input.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Cannot access GitHub or independently resolve main to the supplied commit 7e1112e5eda734cfa1c3e975a3e77c5416b1df12; exact snapshot identity and future branch contents are not verified.",
+  "Cannot run Slicer, build the extension, execute tests, or inspect CI results.",
+  "Could not independently verify the source license and required attribution for color tables copied from Tarvos, or verify the EasyReg source license beyond the local declaration.",
+  "No prior index revision, submission checklist, or PR diff was available for comparison.",
+  "Full numerical validation of PET quantification and registration and exhaustive review of all large source files were not performed."
+ ],
+ "questions_for_author": [
+  "Can you provide the applicable license and attribution for the Tarvos color tables, and confirm it permits their redistribution here?"
+ ]
+}

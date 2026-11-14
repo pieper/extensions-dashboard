@@ -1,0 +1,149 @@
+{
+ "purpose": "GliomaAI is a 3D Slicer extension for researchers to preprocess preoperative brain MRI volumes (T1-CE and FLAIR) and classify gliomas into low-grade (LGG) or high-grade (HGG) using pretrained 3D CNNs. It also provides Grad-CAM explainable AI (XAI) heatmaps as 2D slice overlays and 3D volume renderings.",
+ "summary": "GliomaAI provides a well-documented workflow for MRI preprocessing, 3D CNN glioma grading (LGG vs. HGG), and 3D Grad-CAM visualization under the MIT license. However, there are blocking packaging and environment issues that must be resolved before merging:\n1. `PreProcessing/model_manager.py` is missing from `MODULE_PYTHON_SCRIPTS` in `GliomaClassifier/CMakeLists.txt`, so it will not be installed in packaged builds.\n2. `apply_classification.py` installs PyTorch via `slicer.util.pip_install(\"torch\")` instead of `PyTorchUtils`, and installs `tensorflow==2.13.0` without user confirmation, which downgrades bundled `numpy`/`typing_extensions` and conflicts with Slicer's environment.\n\nNon-blocking soundness bugs (`UnboundLocalError` when `applyRAS` is unchecked, and duplicate `SlicerParameterName` bindings in the UI) should also be fixed.\n\n🔴 Do not merge yet: fix the missing `model_manager.py` CMake install rule and the `pip_install` of `torch` and `tensorflow==2.13.0`.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all Python files, CMake scripts, and UI definitions at commit 3ff5b4b649f46e36de1dac42eadc9349e09a9ff8. Processing and inference run locally; model downloads come from the project's GitHub releases and are verified with SHA-256 checksums via `slicer.util.downloadFile`, and no user data is transmitted externally."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "Inspected `GliomaClassifier/PreProcessing/apply_classification.py` and `apply_skull.py`. The module installs PyTorch directly via `slicer.util.pip_install(\"torch\")` instead of using `PyTorchUtils` from the `PyTorch` extension, and installs `tensorflow==2.13.0` without user confirmation, which pins `numpy<=1.24.3` and `typing-extensions<4.6.0`, downgrading Slicer's bundled packages and conflicting with PyTorch."
+  },
+  "packaging": {
+   "rating": "blocking",
+   "rationale": "Inspected `CMakeLists.txt`, `GliomaClassifier/CMakeLists.txt`, and all Python files. `PreProcessing/model_manager.py` is imported by `GliomaClassifier.py` during classification but is missing from `MODULE_PYTHON_SCRIPTS` in `GliomaClassifier/CMakeLists.txt`, so packaged builds will fail with an `ImportError`."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE.txt` and `README.md`. The repository is licensed under the MIT License (`LICENSE.txt`), permitting distribution. (`README.md` mentions `THIRD_PARTY_NOTICES.md` and `licenses/` which are not committed, noted as informational.)"
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected `GliomaClassifier/GliomaClassifier.py`, `Resources/UI/GliomaClassifier.ui`, and all `PreProcessing/*.py` modules. Found an `UnboundLocalError` for `suffix` in `logic.process()` whenever `applyRAS` is unchecked, duplicate `SlicerParameterName` (`inputVolume`) bindings across all three volume selectors in the `.ui` file, and an `UnboundLocalError` if 3D XAI rendering is checked without 2D XAI."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md` and module implementation. The extension is well-documented with clear usage instructions, architecture descriptions, a peer-reviewed publication citation, and explicit research-only disclaimers, though the built-in self-test is still the unmodified Slicer template."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "blocking",
+   "title": "Missing `PreProcessing/model_manager.py` in `MODULE_PYTHON_SCRIPTS` causes packaged builds to fail at runtime",
+   "file": "GliomaClassifier/CMakeLists.txt",
+   "line_start": 5,
+   "line_end": 18,
+   "evidence": "set(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n\n  PreProcessing/__init__.py\n  PreProcessing/apply_classification.py\n  PreProcessing/apply_n4.py\n  PreProcessing/apply_norm.py\n  PreProcessing/apply_skull.py\n  PreProcessing/apply_XAI.py\n  PreProcessing/densenet_model.py\n  PreProcessing/prepare_classification.py\n  PreProcessing/resnet_model.py\n\n  )",
+   "explanation": "`GliomaClassifier.py` imports `from PreProcessing import model_manager` (line 636) when running classification, and `model_manager.ensure_model` is used to download and verify the ResNet10, ResNet50, and DenseNet121 models. However, `PreProcessing/model_manager.py` is omitted from `MODULE_PYTHON_SCRIPTS` in `GliomaClassifier/CMakeLists.txt`, so it will not be installed in packaged builds and classification will fail with `ImportError: cannot import name 'model_manager' from 'PreProcessing'`.",
+   "suggestion": "Add `PreProcessing/model_manager.py` to `MODULE_PYTHON_SCRIPTS` in `GliomaClassifier/CMakeLists.txt`.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "PyTorch is installed directly via `pip_install(\"torch\")` instead of `PyTorchUtils`",
+   "file": "GliomaClassifier/PreProcessing/apply_classification.py",
+   "line_start": 40,
+   "line_end": 45,
+   "evidence": "    except ModuleNotFoundError:\n        logging.info(\"PyTorch not found. Installing...\")\n        slicer.util.pip_install(\"typing_extensions>=4.10.0\")\n        slicer.util.pip_install(\"torch\")\n        importlib.invalidate_caches()",
+   "explanation": "Instead of using the Slicer `PyTorch` extension (`PyTorchUtils`) to check and install PyTorch with hardware-appropriate wheels and user confirmation, `ensure_torch_installed()` directly calls `slicer.util.pip_install(\"torch\")` from PyPI without user confirmation. Additionally, `nipreps-synthstrip` (`apply_skull.py` line 16) also declares `torch` as a pip dependency and can pull PyPI `torch` if PyTorch is not yet installed. Per the Slicer Extensions Index review policy, PyTorch must be installed exclusively via `PyTorchUtils` from the `PyTorch` extension.",
+   "suggestion": "Use `PyTorchUtils.PyTorchUtilsLogic()` from the Slicer `PyTorch` extension to check for and install PyTorch (and ensure PyTorch is installed via `PyTorchUtils` before installing `nipreps-synthstrip`). Add `\"PyTorchUtils\"` to `self.parent.dependencies` in `GliomaClassifier`.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Unprompted installation of `tensorflow==2.13.0` downgrades bundled packages and conflicts with PyTorch dependencies",
+   "file": "GliomaClassifier/PreProcessing/apply_classification.py",
+   "line_start": 15,
+   "line_end": 20,
+   "evidence": "    except ModuleNotFoundError:\n        logging.info(\"TensorFlow not found. Installing...\")\n\n        # Recommended CPU version\n        slicer.util.pip_install(\"tensorflow==2.13.0\")",
+   "explanation": "When TensorFlow is not installed, `ensure_tensorflow_installed()` runs `slicer.util.pip_install(\"tensorflow==2.13.0\")` without asking the user for confirmation before downloading hundreds of megabytes. Furthermore, `tensorflow==2.13.0` strictly pins `numpy<=1.24.3` and `typing-extensions<4.6.0`, which downgrades Slicer's bundled `numpy` and conflicts with PyTorch's requirement (`typing_extensions>=4.10.0` in the same file at line 42), breaking Slicer's shared Python environment and Note: `tensorflow==2.13.0` also has no wheels for Python 3.12 (used in Slicer 5.9+).",
+   "suggestion": "Prompt the user via `slicer.util.confirmOkCancelDisplay` before installing large packages like TensorFlow or SynthStrip, avoid hard-pinning old TensorFlow versions (`tensorflow==2.13.0`) that downgrade Slicer's bundled `numpy` or conflict with `typing_extensions`, and ensure compatibility with Slicer's Python version.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "`UnboundLocalError` for `suffix` in `process()` when `applyRAS` is False",
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line_start": 1020,
+   "line_end": 1032,
+   "evidence": "        if applyRAS:\n            suffix = \"_RAS\"\n            \n        if applySkullStrip:\n            suffix += \"_Strip\"\n\n        if applyN4:\n            suffix += \"_N4\"\n\n        if applyNormalization:\n            suffix += \"_Norm\"\n\n        outputName = inputVolume.GetName() + suffix",
+   "explanation": "In `GliomaClassifierLogic.process()`, `suffix` is only initialized if `applyRAS` is `True`. If the user runs preprocessing with `applyRAS` unchecked (for example, selecting only Skull Stripping, N4, or Normalization, or none of them), accessing `suffix` raises `UnboundLocalError: cannot access local variable 'suffix' where it is not associated with a value`.",
+   "suggestion": "Initialize `suffix = \"\"` before `if applyRAS:`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "All three volume selectors in the UI bind to the same `inputVolume` parameter node property",
+   "file": "GliomaClassifier/Resources/UI/GliomaClassifier.ui",
+   "line_start": 348,
+   "line_end": 350,
+   "evidence": "              <property name=\"SlicerParameterName\" stdset=\"0\">\n               <string>inputVolume</string>\n              </property>",
+   "explanation": "In `GliomaClassifier.ui`, three distinct `qMRMLNodeComboBox` widgets (`inputSelector` on line 78, `inputSelector_1` on line 308, and `inputSelector_2` on line 349) all have `SlicerParameterName` set to `inputVolume`. When `self._parameterNode.connectGui(self.ui)` runs, all three selectors bind to the same `inputVolume` property on the parameter node, causing selecting a T1-CE volume (`inputSelector_1`) and a FLAIR volume (`inputSelector_2`) to overwrite each other.",
+   "suggestion": "Define separate fields on `GliomaClassifierParameterNode` (e.g., `inputVolume`, `t1cVolume`, `flairVolume`) or remove the duplicate `SlicerParameterName` dynamic properties from `inputSelector_1` and `inputSelector_2`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "`UnboundLocalError` when \"3D Render\" is checked without \"Generate XAI\"",
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line_start": 815,
+   "line_end": 817,
+   "evidence": "            if hasattr(self.ui, \"renderXAIin3DcheckBox\") and self.ui.renderXAIin3DcheckBox.checked:\n                if heatmap_kji is None or xaiNode is None:\n                    raise RuntimeError(\"Enable and run XAI heatmap generation before 3D XAI rendering.\")",
+   "explanation": "If the user checks `renderXAIin3DcheckBox` (\"3D Render\") without also checking `provideXAIcheckBox` (\"Generate XAI\"), `heatmap_kji` and `xaiNode` are never defined in `onApplyButton_1`, raising `UnboundLocalError` on line 816 instead of the intended `RuntimeError` or automatically enabling XAI generation as described in `README.md` line 101 (\"Optionally enable 3D Render. This also enables Grad-CAM generation.\").",
+   "suggestion": "Initialize `heatmap_kji = None` and `xaiNode = None` before the `if` block, or run XAI generation whenever `provideXAIcheckBox.checked or renderXAIin3DcheckBox.checked`.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "45 MB of model binaries committed to git and runtime downloads written to module install directory",
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line_start": 949,
+   "line_end": 954,
+   "evidence": "        self.synthStripModelPath = os.path.join(\n            moduleDir,\n            \"Resources\",\n            \"Models\",\n            \"synthstrip.1.pt\"\n        )",
+   "explanation": "The repository commits 45 MB of binary model weights directly into git (`GliomaClassifier/Resources/Models/proposed_model_final.h5` at 15 MB and `GliomaClassifier/Resources/Models/synthstrip.1.pt` at 30 MB). Furthermore, when optional models (`ResNet10`, `ResNet50`, `DenseNet121`) are downloaded at runtime via `model_manager.py`, they are written into `Resources/Models` inside the module installation directory, which may be read-only in system-wide Slicer installations.",
+   "suggestion": "Download model weights on demand into a user-writable cache directory (such as `slicer.app.cachePath`) rather than committing large binaries to the git repository or writing into the installed module folder.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Referenced `THIRD_PARTY_NOTICES.md` and `licenses/` directory are missing from the repository",
+   "file": "README.md",
+   "line_start": 167,
+   "line_end": 167,
+   "evidence": "GliomaAI source code and project-trained model files are distributed under the [MIT License](LICENSE.txt). Third-party components retain their respective licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the files in `licenses/`.",
+   "explanation": "`README.md` references `THIRD_PARTY_NOTICES.md` and `licenses/` for third-party components (such as the bundled `synthstrip.1.pt` model and ResNet/DenseNet architectures), but neither `THIRD_PARTY_NOTICES.md` nor the `licenses/` directory is present in the repository. Note that `LICENSE.txt` (MIT) is present at the root and permits distribution.",
+   "suggestion": "Commit the referenced `THIRD_PARTY_NOTICES.md` and `licenses/` files to the repository.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Self-test and module metadata still contain unmodified template code",
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line_start": 1293,
+   "line_end": 1295,
+   "evidence": "        # Test algorithm with non-inverted threshold\n        logic.process(inputVolume, outputVolume, threshold, True)",
+   "explanation": "`GliomaClassifierTest.test_GliomaClassifier1` is the unmodified Slicer module template test: it passes `(inputVolume, outputVolume, threshold, True)` to `logic.process()`, which does not match `process(inputVolume, applyRAS, applySkullStrip, applyN4, applyNormalization)` and references non-existent sample data icons (`GliomaClassifier1.png`). Additionally, `self.parent.categories` in `GliomaClassifier.__init__` is still set to `[\"Examples\"]` with template `helpText` instead of `\"Neuroimaging\"` or `\"Informatics\"`.",
+   "suggestion": "Update `GliomaClassifierTest`, `self.parent.categories`, and `self.parent.helpText` in `GliomaClassifier.py` to match the module's actual API and category.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Binary model files GliomaClassifier/Resources/Models/proposed_model_final.h5 (15 MB) and GliomaClassifier/Resources/Models/synthstrip.1.pt (30 MB) were not inspected directly.",
+  "Remote GitHub release assets for ResNet10, ResNet50, and DenseNet121 referenced in model_manager.py were not fetched."
+ ],
+ "questions_for_author": [
+  "Can you add `PreProcessing/model_manager.py` to `MODULE_PYTHON_SCRIPTS` in `GliomaClassifier/CMakeLists.txt` so it is installed in packaged builds?",
+  "Can you update `ensure_torch_installed()` to use `PyTorchUtils` from the Slicer `PyTorch` extension instead of `slicer.util.pip_install(\"torch\")`, and update `ensure_tensorflow_installed()` to prompt the user and avoid pinning `tensorflow==2.13.0`?"
+ ]
+}

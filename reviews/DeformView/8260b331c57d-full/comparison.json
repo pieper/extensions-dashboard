@@ -1,0 +1,1146 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Compute and incremental slider mutate shared input scene nodes",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 2065,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Compute and incremental slider mutate shared input scene nodes",
+     "file": "DeformView/DeformView.py",
+     "line_start": 2065,
+     "line_end": 2069,
+     "evidence": "            hoverWasEnabled = self.ui.enableHoverDisplayCheckbox.isChecked()\n            \n            #  NEW: Reset background volume to have no transform\n            if self._parameterNode.backgroundVolume:\n                self._parameterNode.backgroundVolume.SetAndObserveTransformNodeID(None)",
+     "explanation": "Compute discards the fixed/background volume's existing parent transform before calculations and later assigns the selected transform to it (line 2102), without restoring the prior relationship even if calculation fails. The slider also changes the shared input transform itself at lines 1262–1264, affecting any other nodes using it and potentially changing subsequently saved registration results.",
+     "suggestion": "Operate on module-owned copies or derived nodes, preserve the original parent transform, and avoid mutating the user-selected transform.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 2065
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "DeformView.py:2068-2069 clears the fixed volume's parent transform, and line 2102 assigns the selected transform to it. Line 1263 changes the transform's displacement scale, and 2110 resets it to 1. These are the module's intended visualization actions on the user-selected nodes. There is no data loss or exfiltration. Not a safety issue. At most it is a soundness or usability point, because the previous parent transform isn't restored."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:2067-2069 says `self._parameterNode.backgroundVolume.SetAndObserveTransformNodeID(None)` before the computations at 2073-2085; 2098-2105 assigns the selected transform instead of restoring the original, including on success. If computation fails in between, the original link is already lost. Lines 1222-1224 and 1262-1264 say `bsplineTransform.SetDisplacementScale(scale)` and `transformNode.Modified()`: for supported transforms the slider edits the shared input, not a copy. This can change other scene objects and saved registration state without adequate disclosure; use copies and preserve/restore input relationships."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py lines 2068-2070, onApplyButton calls `self._parameterNode.backgroundVolume.SetAndObserveTransformNodeID(None)` and later at line 2102 calls `self._parameterNode.backgroundVolume.SetAndObserveTransformNodeID(transformNode.GetID())`. Furthermore, at lines 1263-1264, `bsplineTransform.SetDisplacementScale(scale)` and `transformNode.Modified()` directly mutate the shared input transform node in the MRML scene. Under the rubric and AGENTS.md, mutating scene nodes selected by the user in a visualization module is a soundness/correctness issue (major), not a blocking malicious/safety vulnerability."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Opening the module deletes any scene node named JacobianMap",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 235,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Opening the module deletes any scene node named JacobianMap",
+     "file": "DeformView/DeformView.py",
+     "line_start": 235,
+     "line_end": 238,
+     "evidence": "        self.enableVTKErrorTracking()\n\n        self.cleanupDuplicateColorNodes(\"JacobianMap\")\n        self.removeAllNamedNode(\"JacobianMap\")",
+     "explanation": "During widget setup, removeAllNamedNode collects and removes every node with this name without checking its class, origin or ownership (lines 683–707). A user's existing volume, transform, markup or color node named JacobianMap is removed merely by opening the module, potentially losing unsaved scene data and references.",
+     "suggestion": "Keep references to extension-owned color nodes and remove only those created by this module; do not delete arbitrary nodes by name.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 235
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Line 238 calls removeAllNamedNode('JacobianMap'). Lines 683-707 remove every node with that name regardless of class. This is real, but the name is specific to this module's own colour node. A collision with a user node is unlikely, so it is a minor robustness bug and not a blocking safety issue."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:121-122 identifies setup as first module opening, and 237-238 calls `self.removeAllNamedNode(\"JacobianMap\")`. Lines 688 and 700-707 get all nodes by name and call `slicer.mrmlScene.RemoveNode(node)` on each without ownership or class filtering. An unrelated unsaved node with this exact name is removed just by opening the module, with possible loss of data and references; only remove nodes owned by the module."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py lines 237-238, `setup()` calls `self.cleanupDuplicateColorNodes(\"JacobianMap\")` followed immediately by `self.removeAllNamedNode(\"JacobianMap\")`. In `removeAllNamedNode` (lines 683-707), `slicer.mrmlScene.GetNodesByName(nodeName)` finds all nodes in the scene with that name regardless of node class and removes all of them (`slicer.mrmlScene.RemoveNode(node)`). Because \"JacobianMap\" is a specific internal name for its color table node (`createJacobianColorNode` at line 724), this is an ordinary bug in duplicate-color-node cleanup rather than a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Recomputing can overwrite an earlier or unrelated scene volume",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 2191,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Recomputing can overwrite an earlier or unrelated scene volume",
+     "file": "DeformView/DeformView.py",
+     "line_start": 2191,
+     "line_end": 2197,
+     "evidence": "        # Find the volume by suffix\n        scene = slicer.mrmlScene\n        for i in range(scene.GetNumberOfNodesByClass(\"vtkMRMLScalarVolumeNode\")):\n            node = scene.GetNthNodeByClass(i, \"vtkMRMLScalarVolumeNode\")\n            if node.GetName() and suffix in node.GetName():\n                selectedVolume = node\n                break",
+     "explanation": "Compute creates a new map and calls this loader, which instead picks the first scene volume whose name contains the suffix. Lines 2233–2253 then copy the latest computed arrays into that selected volume. Recomputing after changing inputs can silently overwrite the old map or an unrelated matching user volume; different array sizes can instead raise an error.",
+     "suggestion": "Load maps by the actual newly created node references or explicit user selection and never copy cached arrays into an independently selected node.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 2191
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 2191-2197 take the first scalar volume whose name contains the suffix. The module creates its outputs at lines 3246 and 3353 as referenceVolume name + suffix. After a recompute, the loader can pick an older output, and lines 2233-2253 then copy the new arrays into it. A size mismatch would raise an error, which tryWithErrorDisplay reports. This is a soundness bug, and it mostly affects module-generated volumes. It is not a safety issue."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:3246-3255 creates a new output, but onApplyButton calls `self.onLoadDisplacementVolume(flag=0)` at 2143-2145. At 2193-2197 the loader takes the first scalar volume for which `suffix in node.GetName()`, and at 2233-2239 writes `numpy_scalars[:] = self._fullDisplacementArray` into it. Thus an earlier output or unrelated matching volume with compatible array size is silently modified, and incompatible arrays may raise; Jacobian follows the same pattern at 2245-2251. Use the actual output node rather than a name search to avoid destroying unsaved voxel data."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py lines 3246-3250, `computeDisplacementMagnitude` always creates a new volume with `AddNewNodeByClass` ending in `_displacementMagnitude`. However, `onLoadDisplacementVolume` (lines 2191-2197) iterates over `vtkMRMLScalarVolumeNode` in the scene and picks the first one whose name contains `_displacementMagnitude` (or `_jacobianMagnitude`), and lines 2233-2255 overwrite that first matching volume's scalar array in-place (`numpy_scalars[:] = self._fullDisplacementArray`) with the newly computed array. If the user recomputes on a second volume, it overwrites the earlier volume's scalars (or raises a shape mismatch error). This is a major soundness bug, not a safety vulnerability."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Fixed image is transformed despite the UI describing it as stationary",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 779,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Fixed image is transformed despite the UI describing it as stationary",
+     "file": "DeformView/DeformView.py",
+     "line_start": 779,
+     "line_end": 786,
+     "evidence": "        inputLayout.addRow(\"Moving Image:\", self.ui.referenceVolume)\n        inputLayout.addRow(\"Fixed Image:\", self.ui.backgroundVolume)\n        inputLayout.addRow(\"Transformation:\", self.ui.transformNode)\n        self.ui.referenceVolume.setToolTip(\n            \"The volume that is warped by the deformation field to match the fixed image.\"\n        )\n        self.ui.backgroundVolume.setToolTip(\n            \"The reference volume that the moving image is registered to. Does not warp.\"",
+     "explanation": "The apply handler instead attaches the selected transform to backgroundVolume at line 2102 and displays it as the background. Thus the fixed image is moved even though the UI says it does not warp, potentially producing misleading overlays and interpretation.",
+     "suggestion": "Keep the fixed image in its original coordinate system and explicitly define and test the mapping grid and transform direction in an end-to-end GUI test.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 779
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "The tooltip at lines 785-787 says the fixed image 'Does not warp'. Line 2102 attaches the transform to backgroundVolume. This is a real inconsistency between the UI text and the behavior. It may be intended for visualization, so it is a documentation or soundness issue and not a safety one."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:779-786 labels `self.ui.backgroundVolume` Fixed Image and says `Does not warp.` Yet 2098-2105 executes `self._parameterNode.backgroundVolume.SetAndObserveTransformNodeID(transformNode.GetID())`, and 2136-2141 shows that volume as background. For nonidentity transforms the fixed image is moved, contrary to the UI, and overlays can be misleading. This is a serious correctness issue, separate from D1's destructive scene mutation; ordinary soundness feedback is non-blocking for admission."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py lines 779-787, `referenceVolume` is labeled \"Moving Image:\" (\"The volume that is warped by the deformation field to match the fixed image\") and `backgroundVolume` is labeled \"Fixed Image:\" (\"The reference volume that the moving image is registered to. Does not warp.\"). Yet in `onApplyButton` at line 2102, the transform is applied to `self._parameterNode.backgroundVolume.SetAndObserveTransformNodeID(transformNode.GetID())`, warping the Fixed Image in the slice views."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Hover sampling ignores the displayed volume's parent transform",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 1644,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Hover sampling ignores the displayed volume's parent transform",
+     "file": "DeformView/DeformView.py",
+     "line_start": 1644,
+     "line_end": 1649,
+     "evidence": "        # convert RAS to IJK\n        rasToIjk = vtk.vtkMatrix4x4()\n        displacementVolume.GetRASToIJKMatrix(rasToIjk)\n        ijk = [0.0, 0.0, 0.0, 1.0]\n        ras_hom = list(ras) + [1.0]\n        rasToIjk.MultiplyPoint(ras_hom, ijk)",
+     "explanation": "The cursor RAS position is in world coordinates, but the volume's local RAS-to-IJK matrix does not invert its parent transform. The apply handler assigns a transform to the displacement map at line 2105, so with a non-identity parent the hover value can come from the wrong voxel or be reported out of bounds.",
+     "suggestion": "Transform the cursor world position into the volume's local coordinates before applying RAS-to-IJK, or keep the output in world coordinates; test a translated and non-linear parent transform.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 1644
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 1644-1650 use the volume's local RAS-to-IJK matrix with a world-coordinate cursor position. Line 2105 assigns a parent transform to the displacement volume. The hover location is therefore offset by the local transform. The label can be slightly wrong, which is a soundness bug of limited impact."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:1627-1628 gets cursor RAS, while 1644-1649 uses `displacementVolume.GetRASToIJKMatrix(rasToIjk)` and directly multiplies the cursor position without converting world RAS into volume-local RAS. Lines 1652-1658 then bounds-check and sample the resulting index. The computed displacement volume is assigned the selected transform at 2104-2105, so nonidentity parent transforms can cause wrong hover values or blank labels. This is a serious non-blocking correctness issue."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py lines 1644-1650, hover sampling converts the crosshair world RAS coordinates to IJK using only `displacementVolume.GetRASToIJKMatrix(rasToIjk)`, without accounting for the parent transform that `onApplyButton` attaches to `displacementVolume` at line 2105 (`displacementVolume.SetAndObserveTransformNodeID(transformNode.GetID())`). When the parent transform is non-identity, world RAS does not match the volume's local RAS coordinates."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Module setup replaces Slicer's global vtkOutputWindow singleton",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 454,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Module setup replaces Slicer's global vtkOutputWindow singleton",
+     "file": "DeformView/DeformView.py",
+     "line_start": 454,
+     "line_end": 456,
+     "evidence": "        # Add observer to VTK output window\n        errorObserver = vtk.vtkFileOutputWindow()\n        vtk.vtkOutputWindow.SetInstance(errorObserver)",
+     "explanation": "When DeformViewWidget.setup() runs, enableVTKErrorTracking() replaces VTK's global singleton vtkOutputWindow with a new unconfigured vtkFileOutputWindow instance. This breaks Slicer's application-wide VTK error and warning logging for the rest of the session across all modules, and causes VTK to write a default output file in the current working directory. Note also that errorCallback defined in that method is never attached as an observer.",
+     "suggestion": "Remove enableVTKErrorTracking() and the call to vtk.vtkOutputWindow.SetInstance(), or use standard Slicer logging without replacing the global VTK output window singleton.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 454
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Module replaces the global VTK output window",
+     "file": "DeformView/DeformView.py",
+     "line_start": 454,
+     "line_end": 456,
+     "evidence": "        # Add observer to VTK output window\n        errorObserver = vtk.vtkFileOutputWindow()\n        vtk.vtkOutputWindow.SetInstance(errorObserver)",
+     "explanation": "Opening the module installs a process-wide file output window, replacing Slicer's existing VTK output handler for other modules; cleanup does not restore it. VTK diagnostics can be redirected away from the normal application handler for the remainder of the session.",
+     "suggestion": "Do not replace the global singleton; use scoped observers or preserve and restore the original output window.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 454
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Lines 455-456 create a vtkFileOutputWindow and call vtkOutputWindow.SetInstance on it. Line 235 calls this from setup(). The errorCallback returned at line 459 is never attached. This replaces the process-wide VTK output handler and is never restored. It happens when the module widget is opened, not at import. It is a real global side effect that can redirect VTK diagnostics for the rest of the session. It is a should-fix environment issue and not a safety block."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:235 calls tracking from setup; 442-459 defines `errorCallback` but creates `errorObserver = vtk.vtkFileOutputWindow()` and calls `vtk.vtkOutputWindow.SetInstance(errorObserver)` without attaching the callback. Cleanup at 1916-1941 and exit at 1965-1971 do not restore the previous output window. The process-wide replacement can redirect diagnostics from Slicer's usual handler for the rest of the session. A specific default output filename or write was not independently verified."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py lines 235 and 442-456, `setup()` calls `self.enableVTKErrorTracking()`, which executes `errorObserver = vtk.vtkFileOutputWindow()` and `vtk.vtkOutputWindow.SetInstance(errorObserver)`. This replaces Slicer's process-wide VTK output window singleton for the entire session when the module is opened."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Incremental slider is restricted to B-spline transforms",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 1238,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Incremental slider is restricted to B-spline transforms",
+     "file": "DeformView/DeformView.py",
+     "line_start": 1238,
+     "line_end": 1246,
+     "evidence": "        # Check if it has SetDisplacementScale method\n        if not hasattr(bsplineTransform, 'SetDisplacementScale'):\n            transformType = bsplineTransform.GetClassName()\n            \n            slicer.util.warningDisplay(\n                f\"Incremental Scaling Not Supported\\n\\n\"\n                f\"The current transform type ({transformType}) does not support incremental scaling.\\n\\n\"\n                f\"Incremental scaling is only available for B-spline transforms.\\n\\n\"\n                f\"The slider has been disabled.\"",
+     "explanation": "Grid, linear and other transforms can be used for maps but cannot use this advertised increment feature. README.md lines 76–79 describes the slider without this restriction, while the independent incremental logic tested in DeformViewTesting.py is not called by this slider.",
+     "suggestion": "Document the restriction or implement and test GUI incremental visualization for the other supported transform types.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 1238
+     }
+    }
+   ]
+  },
+  {
+   "title": "Module setup resets and renames built-in Slicer color table nodes",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 593,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Module setup resets and renames built-in Slicer color table nodes",
+     "file": "DeformView/DeformView.py",
+     "line_start": 593,
+     "line_end": 597,
+     "evidence": "        existing_node = slicer.mrmlScene.GetNodeByID(f'{node_ID}')\n        if existing_node:\n            existing_node.SetName(name_str)\n            # CRITICAL FIX: Set the attribute even on existing nodes\n            existing_node.SetAttribute(\"MyColourMaps\", \"1\")",
+     "explanation": "When DeformViewWidget.setup() runs, resetBuiltInColorNodes() removes and re-adds all default Slicer color nodes, and create_colour_node() renames built-in Slicer color table nodes (e.g. renaming 'vtkMRMLColorTableNodeFileColdToHotRainbow.txt' from 'ColdToHotRainbow' to 'Hot-To-Cold Rainbow'). Any code or user workflow relying on standard built-in color node names may be affected.",
+     "suggestion": "Avoid removing/re-adding default color nodes or renaming Slicer's built-in color nodes in-place; if custom display names are desired, either clone the color nodes or use their standard names.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 593
+     }
+    }
+   ]
+  },
+  {
+   "title": "Orphan display node leaked into MRML scene on each volume load",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 2274,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Orphan display node leaked into MRML scene on each volume load",
+     "file": "DeformView/DeformView.py",
+     "line_start": 2274,
+     "line_end": 2280,
+     "evidence": "        persistentDisplayNode = selectedVolume.GetDisplayNode()\n\n        internalDisplayNode = slicer.mrmlScene.AddNewNodeByClass(persistentDisplayNode.GetClassName())\n\n        #internalDisplayNode.Copy(persistentDisplayNode)\n        internalDisplayNode = persistentDisplayNode\n        selectedVolume.AddAndObserveDisplayNodeID(internalDisplayNode.GetID())",
+     "explanation": "Every time onLoadDisplacementVolume is called, AddNewNodeByClass creates an orphan display node in the MRML scene that is immediately overwritten by internalDisplayNode = persistentDisplayNode and never used or removed.",
+     "suggestion": "Remove the unused slicer.mrmlScene.AddNewNodeByClass(persistentDisplayNode.GetClassName()) call and the redundant AddAndObserveDisplayNodeID call.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 2274
+     }
+    }
+   ]
+  },
+  {
+   "title": "Reset Window/Level button handler has mismatched signature and uninitialized state attributes",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 300,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Reset Window/Level button handler has mismatched signature and uninitialized state attributes",
+     "file": "DeformView/DeformView.py",
+     "line_start": 300,
+     "line_end": 301,
+     "evidence": "        # Connect reset button\n        self.ui.resetWindowLevelButton.connect('clicked(bool)', self.onResetWindowLevel)",
+     "explanation": "The QPushButton clicked(bool) signal passes a boolean (the checked state, False) as the first argument to onResetWindowLevel(self, volumeNode). When self.defaultWindow and self.defaultLevel are set, onResetWindowLevel calls volumeNode.GetDisplayNode() on the bool argument, raising AttributeError: 'bool' object has no attribute 'GetDisplayNode'. Furthermore, self.defaultWindow and self.defaultLevel are initialized to None in setup() and never updated (initializeWindowLevelControls sets self.defaultWindow_DisplacementMag and self.defaultWindow_Jacobian instead), so clicking the button currently only re-runs initializeWindowLevelControls and returns early.",
+     "suggestion": "Accept clicked: bool = False in onResetWindowLevel, retrieve selectedVolume = self.ui.loadedTransformVolume.currentNode() inside the method, and check self.defaultWindow_DisplacementMag / self.defaultWindow_Jacobian instead of self.defaultWindow.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 300
+     }
+    }
+   ]
+  },
+  {
+   "title": "Typo in windowLevelFlagUpdate assigns defaultLevel_Jacobian to window",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 2763,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Typo in windowLevelFlagUpdate assigns defaultLevel_Jacobian to window",
+     "file": "DeformView/DeformView.py",
+     "line_start": 2763,
+     "line_end": 2765,
+     "evidence": "        elif flag == 1: #Jacobian\n            window = self.defaultLevel_Jacobian\n            level = self.defaultLevel_Jacobian",
+     "explanation": "In windowLevelFlagUpdate, when flag == 1 (Jacobian), window is assigned self.defaultLevel_Jacobian instead of self.defaultWindow_Jacobian. Additionally, in initializeWindowLevelControls (lines 2625-2628), level_jacobian and window_jacobian are hardcoded to 1.0 instead of centering at 0.0 with a symmetric window (2.0 * maxAbsValue, which is commented out).",
+     "suggestion": "Use self.defaultWindow_Jacobian for window, and verify whether defaultLevel_Jacobian should be 0.0 and defaultWindow_Jacobian should be 2.0 * maxAbsValue.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 2763
+     }
+    }
+   ]
+  },
+  {
+   "title": "cleanup() removes all observers from shared vtkMRMLCrosshairNode singleton",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 1934,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "cleanup() removes all observers from shared vtkMRMLCrosshairNode singleton",
+     "file": "DeformView/DeformView.py",
+     "line_start": 1934,
+     "line_end": 1936,
+     "evidence": "        crosshairNode = slicer.mrmlScene.GetFirstNodeByClass('vtkMRMLCrosshairNode')\n        if crosshairNode:\n            crosshairNode.RemoveAllObservers()",
+     "explanation": "In cleanup(), calling crosshairNode.RemoveAllObservers() removes all observers on the shared singleton crosshair node, not just the observer added by DeformView (which was already removed on lines 1929-1932). This can break other modules or Slicer components observing the crosshair node.",
+     "suggestion": "Remove the crosshairNode.RemoveAllObservers() call and rely only on removing self.crosshairObserverTag.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 1934
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Cleanup removes other modules' crosshair observers",
+     "file": "DeformView/DeformView.py",
+     "line_start": 1934,
+     "line_end": 1936,
+     "evidence": "        crosshairNode = slicer.mrmlScene.GetFirstNodeByClass('vtkMRMLCrosshairNode')\n        if crosshairNode:\n            crosshairNode.RemoveAllObservers()",
+     "explanation": "When this widget is cleaned up, all observers on the shared crosshair node are removed, including callbacks owned by Slicer or other extensions. Those features may stop reacting to cursor updates after a module reload or cleanup.",
+     "suggestion": "Remove only observer tags registered by DeformView.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 1934
+     }
+    }
+   ]
+  },
+  {
+   "title": "Repository git history contains ~233 MB of data and unused pyuic5-generated file",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "DeformView.json",
+   "line": 6,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Repository git history contains ~233 MB of data and unused pyuic5-generated file",
+     "file": "DeformView.json",
+     "line_start": 6,
+     "line_end": 7,
+     "evidence": "  \"scm_revision\": \"main\",\n  \"scm_url\": \"https://github.com/elisedl1/SlicerDeformView.git\",",
+     "explanation": "The automated repository scan notes that the git repository size is ~233 MB (exceeding the 100 MB guideline), although the working tree at commit 8260b331c57d7d692957482e80bcbb19b86f3eb9 is only ~9.7 MB, indicating large files were committed in earlier git history. Also, DeformView/Resources/UI/DeformView_ui.py (which imports PyQt5) and DeformView/DeformView_shift_check.py are unused files in the repository that are not installed by CMake.",
+     "suggestion": "Consider cleaning large historical blobs from git history if practical, and removing the unused DeformView/Resources/UI/DeformView_ui.py file.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView.json",
+      "line": 6
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Compute and incremental slider mutate shared input scene nodes",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 2065,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Compute and incremental slider mutate shared input scene nodes",
+     "file": "DeformView/DeformView.py",
+     "line_start": 2065,
+     "line_end": 2069,
+     "evidence": "            hoverWasEnabled = self.ui.enableHoverDisplayCheckbox.isChecked()\n            \n            #  NEW: Reset background volume to have no transform\n            if self._parameterNode.backgroundVolume:\n                self._parameterNode.backgroundVolume.SetAndObserveTransformNodeID(None)",
+     "explanation": "Compute discards the fixed/background volume's existing parent transform before calculations and later assigns the selected transform to it (line 2102), without restoring the prior relationship even if calculation fails. The slider also changes the shared input transform itself at lines 1262–1264, affecting any other nodes using it and potentially changing subsequently saved registration results.",
+     "suggestion": "Operate on module-owned copies or derived nodes, preserve the original parent transform, and avoid mutating the user-selected transform.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 2065
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "DeformView.py:2068-2069 clears the fixed volume's parent transform, and line 2102 assigns the selected transform to it. Line 1263 changes the transform's displacement scale, and 2110 resets it to 1. These are the module's intended visualization actions on the user-selected nodes. There is no data loss or exfiltration. Not a safety issue. At most it is a soundness or usability point, because the previous parent transform isn't restored."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:2067-2069 says `self._parameterNode.backgroundVolume.SetAndObserveTransformNodeID(None)` before the computations at 2073-2085; 2098-2105 assigns the selected transform instead of restoring the original, including on success. If computation fails in between, the original link is already lost. Lines 1222-1224 and 1262-1264 say `bsplineTransform.SetDisplacementScale(scale)` and `transformNode.Modified()`: for supported transforms the slider edits the shared input, not a copy. This can change other scene objects and saved registration state without adequate disclosure; use copies and preserve/restore input relationships."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py lines 2068-2070, onApplyButton calls `self._parameterNode.backgroundVolume.SetAndObserveTransformNodeID(None)` and later at line 2102 calls `self._parameterNode.backgroundVolume.SetAndObserveTransformNodeID(transformNode.GetID())`. Furthermore, at lines 1263-1264, `bsplineTransform.SetDisplacementScale(scale)` and `transformNode.Modified()` directly mutate the shared input transform node in the MRML scene. Under the rubric and AGENTS.md, mutating scene nodes selected by the user in a visualization module is a soundness/correctness issue (major), not a blocking malicious/safety vulnerability."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Opening the module deletes any scene node named JacobianMap",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 235,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Opening the module deletes any scene node named JacobianMap",
+     "file": "DeformView/DeformView.py",
+     "line_start": 235,
+     "line_end": 238,
+     "evidence": "        self.enableVTKErrorTracking()\n\n        self.cleanupDuplicateColorNodes(\"JacobianMap\")\n        self.removeAllNamedNode(\"JacobianMap\")",
+     "explanation": "During widget setup, removeAllNamedNode collects and removes every node with this name without checking its class, origin or ownership (lines 683–707). A user's existing volume, transform, markup or color node named JacobianMap is removed merely by opening the module, potentially losing unsaved scene data and references.",
+     "suggestion": "Keep references to extension-owned color nodes and remove only those created by this module; do not delete arbitrary nodes by name.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 235
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Line 238 calls removeAllNamedNode('JacobianMap'). Lines 683-707 remove every node with that name regardless of class. This is real, but the name is specific to this module's own colour node. A collision with a user node is unlikely, so it is a minor robustness bug and not a blocking safety issue."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:121-122 identifies setup as first module opening, and 237-238 calls `self.removeAllNamedNode(\"JacobianMap\")`. Lines 688 and 700-707 get all nodes by name and call `slicer.mrmlScene.RemoveNode(node)` on each without ownership or class filtering. An unrelated unsaved node with this exact name is removed just by opening the module, with possible loss of data and references; only remove nodes owned by the module."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py lines 237-238, `setup()` calls `self.cleanupDuplicateColorNodes(\"JacobianMap\")` followed immediately by `self.removeAllNamedNode(\"JacobianMap\")`. In `removeAllNamedNode` (lines 683-707), `slicer.mrmlScene.GetNodesByName(nodeName)` finds all nodes in the scene with that name regardless of node class and removes all of them (`slicer.mrmlScene.RemoveNode(node)`). Because \"JacobianMap\" is a specific internal name for its color table node (`createJacobianColorNode` at line 724), this is an ordinary bug in duplicate-color-node cleanup rather than a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Recomputing can overwrite an earlier or unrelated scene volume",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 2191,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Recomputing can overwrite an earlier or unrelated scene volume",
+     "file": "DeformView/DeformView.py",
+     "line_start": 2191,
+     "line_end": 2197,
+     "evidence": "        # Find the volume by suffix\n        scene = slicer.mrmlScene\n        for i in range(scene.GetNumberOfNodesByClass(\"vtkMRMLScalarVolumeNode\")):\n            node = scene.GetNthNodeByClass(i, \"vtkMRMLScalarVolumeNode\")\n            if node.GetName() and suffix in node.GetName():\n                selectedVolume = node\n                break",
+     "explanation": "Compute creates a new map and calls this loader, which instead picks the first scene volume whose name contains the suffix. Lines 2233–2253 then copy the latest computed arrays into that selected volume. Recomputing after changing inputs can silently overwrite the old map or an unrelated matching user volume; different array sizes can instead raise an error.",
+     "suggestion": "Load maps by the actual newly created node references or explicit user selection and never copy cached arrays into an independently selected node.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 2191
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 2191-2197 take the first scalar volume whose name contains the suffix. The module creates its outputs at lines 3246 and 3353 as referenceVolume name + suffix. After a recompute, the loader can pick an older output, and lines 2233-2253 then copy the new arrays into it. A size mismatch would raise an error, which tryWithErrorDisplay reports. This is a soundness bug, and it mostly affects module-generated volumes. It is not a safety issue."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:3246-3255 creates a new output, but onApplyButton calls `self.onLoadDisplacementVolume(flag=0)` at 2143-2145. At 2193-2197 the loader takes the first scalar volume for which `suffix in node.GetName()`, and at 2233-2239 writes `numpy_scalars[:] = self._fullDisplacementArray` into it. Thus an earlier output or unrelated matching volume with compatible array size is silently modified, and incompatible arrays may raise; Jacobian follows the same pattern at 2245-2251. Use the actual output node rather than a name search to avoid destroying unsaved voxel data."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py lines 3246-3250, `computeDisplacementMagnitude` always creates a new volume with `AddNewNodeByClass` ending in `_displacementMagnitude`. However, `onLoadDisplacementVolume` (lines 2191-2197) iterates over `vtkMRMLScalarVolumeNode` in the scene and picks the first one whose name contains `_displacementMagnitude` (or `_jacobianMagnitude`), and lines 2233-2255 overwrite that first matching volume's scalar array in-place (`numpy_scalars[:] = self._fullDisplacementArray`) with the newly computed array. If the user recomputes on a second volume, it overwrites the earlier volume's scalars (or raises a shape mismatch error). This is a major soundness bug, not a safety vulnerability."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Fixed image is transformed despite the UI describing it as stationary",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 779,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Fixed image is transformed despite the UI describing it as stationary",
+     "file": "DeformView/DeformView.py",
+     "line_start": 779,
+     "line_end": 786,
+     "evidence": "        inputLayout.addRow(\"Moving Image:\", self.ui.referenceVolume)\n        inputLayout.addRow(\"Fixed Image:\", self.ui.backgroundVolume)\n        inputLayout.addRow(\"Transformation:\", self.ui.transformNode)\n        self.ui.referenceVolume.setToolTip(\n            \"The volume that is warped by the deformation field to match the fixed image.\"\n        )\n        self.ui.backgroundVolume.setToolTip(\n            \"The reference volume that the moving image is registered to. Does not warp.\"",
+     "explanation": "The apply handler instead attaches the selected transform to backgroundVolume at line 2102 and displays it as the background. Thus the fixed image is moved even though the UI says it does not warp, potentially producing misleading overlays and interpretation.",
+     "suggestion": "Keep the fixed image in its original coordinate system and explicitly define and test the mapping grid and transform direction in an end-to-end GUI test.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 779
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "The tooltip at lines 785-787 says the fixed image 'Does not warp'. Line 2102 attaches the transform to backgroundVolume. This is a real inconsistency between the UI text and the behavior. It may be intended for visualization, so it is a documentation or soundness issue and not a safety one."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:779-786 labels `self.ui.backgroundVolume` Fixed Image and says `Does not warp.` Yet 2098-2105 executes `self._parameterNode.backgroundVolume.SetAndObserveTransformNodeID(transformNode.GetID())`, and 2136-2141 shows that volume as background. For nonidentity transforms the fixed image is moved, contrary to the UI, and overlays can be misleading. This is a serious correctness issue, separate from D1's destructive scene mutation; ordinary soundness feedback is non-blocking for admission."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py lines 779-787, `referenceVolume` is labeled \"Moving Image:\" (\"The volume that is warped by the deformation field to match the fixed image\") and `backgroundVolume` is labeled \"Fixed Image:\" (\"The reference volume that the moving image is registered to. Does not warp.\"). Yet in `onApplyButton` at line 2102, the transform is applied to `self._parameterNode.backgroundVolume.SetAndObserveTransformNodeID(transformNode.GetID())`, warping the Fixed Image in the slice views."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Hover sampling ignores the displayed volume's parent transform",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 1644,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Hover sampling ignores the displayed volume's parent transform",
+     "file": "DeformView/DeformView.py",
+     "line_start": 1644,
+     "line_end": 1649,
+     "evidence": "        # convert RAS to IJK\n        rasToIjk = vtk.vtkMatrix4x4()\n        displacementVolume.GetRASToIJKMatrix(rasToIjk)\n        ijk = [0.0, 0.0, 0.0, 1.0]\n        ras_hom = list(ras) + [1.0]\n        rasToIjk.MultiplyPoint(ras_hom, ijk)",
+     "explanation": "The cursor RAS position is in world coordinates, but the volume's local RAS-to-IJK matrix does not invert its parent transform. The apply handler assigns a transform to the displacement map at line 2105, so with a non-identity parent the hover value can come from the wrong voxel or be reported out of bounds.",
+     "suggestion": "Transform the cursor world position into the volume's local coordinates before applying RAS-to-IJK, or keep the output in world coordinates; test a translated and non-linear parent transform.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 1644
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 1644-1650 use the volume's local RAS-to-IJK matrix with a world-coordinate cursor position. Line 2105 assigns a parent transform to the displacement volume. The hover location is therefore offset by the local transform. The label can be slightly wrong, which is a soundness bug of limited impact."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:1627-1628 gets cursor RAS, while 1644-1649 uses `displacementVolume.GetRASToIJKMatrix(rasToIjk)` and directly multiplies the cursor position without converting world RAS into volume-local RAS. Lines 1652-1658 then bounds-check and sample the resulting index. The computed displacement volume is assigned the selected transform at 2104-2105, so nonidentity parent transforms can cause wrong hover values or blank labels. This is a serious non-blocking correctness issue."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py lines 1644-1650, hover sampling converts the crosshair world RAS coordinates to IJK using only `displacementVolume.GetRASToIJKMatrix(rasToIjk)`, without accounting for the parent transform that `onApplyButton` attaches to `displacementVolume` at line 2105 (`displacementVolume.SetAndObserveTransformNodeID(transformNode.GetID())`). When the parent transform is non-identity, world RAS does not match the volume's local RAS coordinates."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Module setup replaces Slicer's global vtkOutputWindow singleton",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 454,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Module setup replaces Slicer's global vtkOutputWindow singleton",
+     "file": "DeformView/DeformView.py",
+     "line_start": 454,
+     "line_end": 456,
+     "evidence": "        # Add observer to VTK output window\n        errorObserver = vtk.vtkFileOutputWindow()\n        vtk.vtkOutputWindow.SetInstance(errorObserver)",
+     "explanation": "When DeformViewWidget.setup() runs, enableVTKErrorTracking() replaces VTK's global singleton vtkOutputWindow with a new unconfigured vtkFileOutputWindow instance. This breaks Slicer's application-wide VTK error and warning logging for the rest of the session across all modules, and causes VTK to write a default output file in the current working directory. Note also that errorCallback defined in that method is never attached as an observer.",
+     "suggestion": "Remove enableVTKErrorTracking() and the call to vtk.vtkOutputWindow.SetInstance(), or use standard Slicer logging without replacing the global VTK output window singleton.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 454
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Module replaces the global VTK output window",
+     "file": "DeformView/DeformView.py",
+     "line_start": 454,
+     "line_end": 456,
+     "evidence": "        # Add observer to VTK output window\n        errorObserver = vtk.vtkFileOutputWindow()\n        vtk.vtkOutputWindow.SetInstance(errorObserver)",
+     "explanation": "Opening the module installs a process-wide file output window, replacing Slicer's existing VTK output handler for other modules; cleanup does not restore it. VTK diagnostics can be redirected away from the normal application handler for the remainder of the session.",
+     "suggestion": "Do not replace the global singleton; use scoped observers or preserve and restore the original output window.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 454
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Lines 455-456 create a vtkFileOutputWindow and call vtkOutputWindow.SetInstance on it. Line 235 calls this from setup(). The errorCallback returned at line 459 is never attached. This replaces the process-wide VTK output handler and is never restored. It happens when the module widget is opened, not at import. It is a real global side effect that can redirect VTK diagnostics for the rest of the session. It is a should-fix environment issue and not a safety block."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:235 calls tracking from setup; 442-459 defines `errorCallback` but creates `errorObserver = vtk.vtkFileOutputWindow()` and calls `vtk.vtkOutputWindow.SetInstance(errorObserver)` without attaching the callback. Cleanup at 1916-1941 and exit at 1965-1971 do not restore the previous output window. The process-wide replacement can redirect diagnostics from Slicer's usual handler for the rest of the session. A specific default output filename or write was not independently verified."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py lines 235 and 442-456, `setup()` calls `self.enableVTKErrorTracking()`, which executes `errorObserver = vtk.vtkFileOutputWindow()` and `vtk.vtkOutputWindow.SetInstance(errorObserver)`. This replaces Slicer's process-wide VTK output window singleton for the entire session when the module is opened."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (blocking, ok)",
+   "positions": {
+    "claude": {
+     "item": "D7",
+     "real": "no",
+     "severity": "info",
+     "rating": null,
+     "reason": "I found no network access, pip installs, subprocess calls, downloads, unsafe deserialization or credentials in the code. The only exec( hit is in DeformView_shift_check.py:5, which looks like a stand-alone helper script. The items raised are ordinary bugs and side effects, with no concrete path to harm. My rating for safety is ok."
+    },
+    "gpt": {
+     "item": "D7",
+     "real": "yes",
+     "severity": null,
+     "rating": "blocking",
+     "reason": "Safety is blocking because DeformView/DeformView.py:237-238 calls `self.removeAllNamedNode(\"JacobianMap\")`, whose implementation removes every name match at 688-707, risking loss of unrelated unsaved data. Independent destructive paths are the input transform changes at 2067-2069 and 2098-2105, and the array overwrite at 2193-2197 and 2233-2239. I inspected those paths, setup, cleanup, relevant calculation and output code, and searched the available repository for downloads, process execution, and removal APIs; this is not a complete execution or dependency audit. The supplied snapshot is identified as 8260b331c57d, but its revision and remote catalog source could not be independently verified with these tools. 🔴 Do not merge yet: fix unintended scene-data deletion and overwriting."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Checked DeformView/DeformView.py for safety issues. Temp file handling in `computeDisplacementMagnitude` / `computeJacobianMagnitude` uses `tempfile.NamedTemporaryFile(suffix=\".h5\", delete=False)` and removes it (lines 3216-3225). There are no network calls, unsafe deserialization, command execution, or malicious behaviors. The issues flagged by gpt under safety (D1, D2, D3) are ordinary MRML scene state management / correctness bugs, which AGENTS.md explicitly notes should not be labeled as blocking safety issues."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "concern",
+   "gpt": "concern"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "minor issues",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 7,
+  "single": 11,
+  "unverified": 0,
+  "total": 13,
+  "open_disputes": 1
+ }
+}
