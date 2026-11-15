@@ -1,0 +1,125 @@
+{
+ "purpose": "GastricConduit is a Slicer scripted module that runs a Dataset003 fold-5 nnU-Net model (through the NNUNet extension) to segment the post-esophagectomy gastric conduit on chest CT, and reports the mask volume in cm³. It is aimed at research users and downloads its model weights from the author's GitHub Releases on first use.",
+ "summary": "Small, readable MIT-licensed module. The catalog entry is consistent (NNUNet in build_dependencies and EXTENSION_DEPENDS), all Python files are listed in CMake, and there is no PyTorch/pip installation at import. The main concerns are the unverified weight download (no checksum or signature), extraction of the downloaded zip with extractall and no member-path check, a weight-license gap, and a Slicer test that does nothing useful. None is a demonstrated malicious behavior. Needs fixes before listing.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Read all Python under GastricConduit/GastricConduitLib and the top-level files. No network calls beyond the GitHub API and release download in download.py, and no telemetry. Concerns: the weight zip is extracted with extractall without member checks, the download has no integrity check, and nnU-Net checkpoints (.pth) are loaded by SlicerNNUNet, which may use pickle."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Nothing is installed at import or startup. Python requirements are installed only on Apply through SlicerNNUNet's InstallLogic (widget.py line 558-562), and PyTorch comes from the NNUNet dependency. The module does not pin or downgrade packages."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "GastricConduit/CMakeLists.txt lists every .py file under GastricConduitLib and Testing, plus Resources/Icons/GastricConduit.png. Root CMakeLists EXTENSION_DEPENDS 'NNUNet' matches the catalog build_dependencies. The catalog scm_revision is the branch 'main', which is not a pinned revision; I did not resolve it."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "LICENSE.txt is MIT and covers the code. The model weights downloaded from the author's release (Dataset003_GastricConduit_fold5.zip) have no stated license in the repository, so redistribution and use terms for the weights are unclear."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Logic in volume.py, device.py, speed.py and postprocess.py is simple and consistent. Weight download and extraction run on the GUI thread (download.py and widget.py _ensure_weights). Tests in Testing/ are pure-Python pytest files outside Slicer, and GastricConduitTest.runTest only shows a message (GastricConduit.py lines 54-58)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README gives install steps, expected layout, offline weight instructions, and a research-use disclaimer. Missing: model provenance and validation metrics, sample data, and a tutorial. The 'Store listing (later)' section is a note, not a finished entry."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Downloaded weight zip extracted with extractall and no member-path validation or integrity check",
+   "file": "GastricConduit/GastricConduitLib/download.py",
+   "line_start": 84,
+   "line_end": 88,
+   "evidence": "        with zipfile.ZipFile(zip_path, \"r\") as zf:\n            zf.extractall(dest)\n        zip_path.unlink(missing_ok=True)\n        write_download_info(dest, url)",
+   "explanation": "download_weights() downloads a zip from a URL chosen at runtime (the first asset of the GitHub 'latest' release, or a hardcoded default) and calls zf.extractall(dest) with no check on member names or checksum. A crafted or tampered archive could write files outside Resources/ML (zip-slip). The download is also not verified against any published hash or signature. Because the first asset of the latest release is trusted with no check, a compromised release or a hijacked repository could deliver a malicious checkpoint, and nnU-Net then loads the .pth file, which can execute code if deserialized with pickle.",
+   "suggestion": "Validate each ZipInfo name resolves inside dest before extracting (or use a safe extraction helper). Pin an expected SHA-256 for the weight asset in the code and verify it before extraction. Restrict the asset URL to the expected github.com repo path. Document how checkpoints are loaded and whether weights_only loading is used.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Release asset URL taken from the GitHub API without a host check",
+   "file": "GastricConduit/GastricConduitLib/download.py",
+   "line_start": 63,
+   "line_end": 66,
+   "evidence": "    assets = payload.get(\"assets\") or []\n    if not assets:\n        return None\n    return assets[0].get(\"browser_download_url\")",
+   "explanation": "latest_release_asset_url() returns assets[0]['browser_download_url'] from the API payload without checking that the host is github.com or that the asset is the intended zip. Any first asset on the latest release is downloaded and extracted.",
+   "suggestion": "Select the asset by exact expected name and verify the URL prefix and a checksum; otherwise fall back to the pinned default URL.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "No license or redistribution terms for the downloaded model weights",
+   "file": "README.md",
+   "line_start": 33,
+   "line_end": 34,
+   "evidence": "First Apply downloads the weights (`Dataset003_GastricConduit_fold5.zip`) from this repo's GitHub Releases into `GastricConduit/Resources/ML/`.",
+   "explanation": "The extension's MIT license covers only the code. The weights (Dataset003 fold-5 checkpoint, trained on the author's data, presumably with nnU-Net) are fetched from GitHub Releases, and the repository gives no terms for them, nor any statement about the training-data license or whether the weights may be used clinically or commercially. Users cannot tell what they are allowed to do with the model.",
+   "suggestion": "Add a LICENSE or model-card section for the weights stating the terms, the training-data source and its license, and any use restrictions.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Weight download and extraction run on the GUI thread",
+   "file": "GastricConduit/GastricConduitLib/widget.py",
+   "line_start": 382,
+   "line_end": 388,
+   "evidence": "    def _download(self, url: str) -> bool:\n        try:\n            download_weights(nnunet_folder(), url=url, progress=self._log)",
+   "explanation": "_download() calls download_weights() synchronously from the button handler. urllib reads up to a 60 s timeout per read and a multi-hundred-MB zip, so the Slicer UI freezes except for processEvents calls in _log. Failures are reported only after the blocking call returns.",
+   "suggestion": "Run the download in a worker thread or use Slicer's download helpers with progress, and keep the UI responsive.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Test entry point does nothing useful inside Slicer",
+   "file": "GastricConduit/GastricConduit.py",
+   "line_start": 54,
+   "line_end": 58,
+   "evidence": "        slicer.util.delayDisplay(\"GastricConduit module loaded. CLI tests: pytest GastricConduit/Testing -q\")",
+   "explanation": "GastricConduitTest.runTest only calls delayDisplay with a message and never checks behavior. The real unit tests in Testing/ are plain pytest files that need numpy/scipy outside Slicer, so the Slicer test suite (BUILD_TESTING) passes without exercising any code.",
+   "suggestion": "Make runTest assert something meaningful (for example, call volume_cm3 and resolve_device with known inputs), or run the pure-Python tests inside Slicer's test harness.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Bare exception swallowing hides errors",
+   "file": "GastricConduit/GastricConduitLib/widget.py",
+   "line_start": 259,
+   "line_end": 271,
+   "evidence": "        try:\n            self._observe_segmentation(self.get_segmentation_node())\n        except Exception:\n            pass",
+   "explanation": "Several handlers use 'except Exception: pass' (for example _on_segmentation_changed and _load_results). Failures in observer setup, segment-editor sync, or the Islands effect are silently dropped, so the user sees no error and the volume may be stale or the largest-island step skipped without notice.",
+   "suggestion": "Log the exception (logging.exception or self._log) at minimum, and surface failures that affect the displayed volume.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Catalog scm_revision is a branch name",
+   "file": "README.md",
+   "line_start": 62,
+   "line_end": 69,
+   "evidence": "    \"scm_revision\": \"main\",",
+   "explanation": "The catalog entry uses scm_revision 'main', so the index builds whatever is on main at build time. Per index policy this is not itself a finding, but the reviewed source is only the commit named in the request, and later changes will not be reviewed.",
+   "suggestion": "Consider pinning to a reviewed commit SHA for the listing.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The GitHub repository and release were not accessed; the weight zip, its contents, and its checkpoint format (pickle vs safetensors) are unverified.",
+  "The SlicerNNUNet/NNUNet extension behavior (InstallLogic, how checkpoints are loaded, device handling) was not inspected.",
+  "No tests or the module were executed; Slicer runtime behavior and UI were not tested.",
+  "Screenshot content (Screenshots/1.png) was not viewed.",
+  "Icon file contents were not inspected beyond its presence."
+ ],
+ "questions_for_author": []
+}

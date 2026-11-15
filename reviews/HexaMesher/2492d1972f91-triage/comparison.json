@@ -1,0 +1,1112 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Boolean result selector deletes the node the user selected there",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "HexaMesher/HexaMesher.py",
+   "line": 875,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Boolean result selector deletes the node the user selected there",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 874,
+     "line_end": 880,
+     "evidence": "            existingNode = self.ui.booleanOutputSelector.currentNode()\n            if existingNode:\n                uniqueName = existingNode.GetName()\n                # Delete existing node — logic will create a new one with correct data\n                slicer.mrmlScene.RemoveNode(existingNode)",
+     "explanation": "booleanOutputSelector is a qMRMLNodeComboBox listing all vtkMRMLModelNode instances (HexaMesher.ui:513-540), so a user can select any model in the scene as the 'Result model' — including Model A or Model B, or an unrelated model. Pressing 'Apply Boolean Operation' then removes that node from the scene without confirmation, so the user's model disappears from the scene (and from any later save). The result is created as a new node, so the deletion is not needed to produce the output.",
+     "suggestion": "Only delete nodes that this module created and that are empty, or refuse to use a node that already has geometry as the boolean result target; at minimum ask for confirmation before removing a node with data.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 875
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "User-selected output node deleted during Boolean apply",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 876,
+     "line_end": 880,
+     "evidence": "                if existingNode:\n                    uniqueName = existingNode.GetName()\n                    # Delete existing node — logic will create a new one with correct data\n                    slicer.mrmlScene.RemoveNode(existingNode)",
+     "explanation": "If the user has picked a node in the boolean output selector, it is removed from the scene before the new result is computed. If the computation then fails (for example, an empty result raises ValueError), the node the user chose is already gone.",
+     "suggestion": "Compute the result first, then replace the old node only on success.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 618
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Heavy voxelization runs on the GUI thread without progress or cancel",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "HexaMesher/HexaMesher.py",
+   "line": 561,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Heavy voxelization runs on the GUI thread without progress or cancel",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 561,
+     "line_end": 568,
+     "evidence": "            # Warn for very small pitch values — computation grows as pitch^-3\n            if pitch < 1.0:\n                msg = (\n                    f\"Edge size {pitch:.2f} mm is very small and may cause a long computation \"\n                    f\"or freeze the application. Do you want to proceed?\"",
+     "explanation": "onVoxelButton() calls voxelizeModelToModel() directly on the GUI thread; with threshold > 0 it builds 64 sample points per voxel and runs vtkSelectEnclosedPoints (logicUtils.py:159-184), which for a typical volume-scale model can block Slicer for minutes with only a wait cursor and no progress bar or cancel. The same applies to the boolean operation, which only warns above 50000 vertices (HexaMesher.py:849-855). Users cannot interrupt the operation and may believe Slicer has hung.",
+     "suggestion": "Run the voxelization in a worker thread (e.g. a Slicer CLI or a QThread with progress reporting) or at least show a progress dialog with a cancel option, and estimate the voxel count before starting.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 561
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Method bodies spliced together in HexaMesher.py (stray docstrings and misplaced calls)",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "HexaMesher/HexaMesher.py",
+   "line": 254,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Method bodies spliced together in HexaMesher.py (stray docstrings and misplaced calls)",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 247,
+     "line_end": 281,
+     "evidence": "            slicer.mrmlScene.RemoveNode(node)\n    ...\n        \"\"\"Called whenever the Model/Segmentation radio changes.\"\"\"\n        self._updateInputVisibility()\n        self._checkCanApply()",
+     "explanation": "In _cleanupPendingOutputNode, the Model/Segmentation docstring and the calls to _updateInputVisibility() and _checkCanApply() sit after the method's logic, so they run on every cleanup. The same happens in _updateResolutionLabel. The onInputTypeToggled method is a separate definition. This is a sign of a broken edit. It can cause unexpected UI refreshes and makes the code hard to maintain. It is not a safety issue.",
+     "suggestion": "Remove the orphaned docstrings and the misplaced calls so each method contains only its own logic. Delete the duplicate _initMetricsTable (line 937) too.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 254
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "OFF export advertised but not implemented",
+   "category": "utility",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "HexaMesher/HexaMesherLib/UI/utils.py",
+   "line": 40,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "OFF export advertised but not implemented",
+     "file": "HexaMesher/HexaMesherLib/UI/utils.py",
+     "line_start": 40,
+     "line_end": 40,
+     "evidence": "<li>Export in VTK, STL, OBJ, MSH, PLY, OFF formats</li>",
+     "explanation": "The README and the help dialog say OFF export is available, but the export UI and export_map only offer VTK, STL, OBJ, MSH and PLY. A user following the documentation cannot export OFF.",
+     "suggestion": "Either implement OFF export or remove OFF from the README and the help text. The README (line 46-51) also needs the same correction.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesherLib/UI/utils.py",
+      "line": 40
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Output selector silently renames and overwrites any selected model node",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "HexaMesher/HexaMesher.py",
+   "line": 618,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Output selector silently renames and overwrites any selected model node",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 618,
+     "line_end": 627,
+     "evidence": "            if existingNode:\n                # User has selected a node — always use it regardless of content\n                existingName = existingNode.GetName()\n                if not existingName.endswith(\"_vox\"):\n                    uniqueName = makeUniqueName(f\"{existingName}_vox\", existingNode)\n                    existingNode.SetName(uniqueName)",
+     "explanation": "outputSelectorModel lists every vtkMRMLModelNode in the scene. If the user picks an existing model (for example their original anatomical surface, or even the input model itself) as the output, the code renames it to '<name>_vox' and then voxelizeModelToModel() calls outputModel.SetAndObservePolyData(...) (logicUtils.py:217), replacing that node's geometry. The user's original mesh is lost from the scene with no confirmation and no backup.",
+     "suggestion": "Create a new output node unless the selected node is empty or was created by this module; warn before overwriting a node that already has geometry, and never allow the input model to be used as the output.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 618
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Unpinned pip_install of trimesh/meshio into Slicer's Python plus forced restart",
+   "category": "environment",
+   "severity": "major",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major",
+    "info"
+   ],
+   "file": "HexaMesher/HexaMesher.py",
+   "line": 141,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Unpinned pip_install of trimesh/meshio into Slicer's Python plus forced restart",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 141,
+     "line_end": 146,
+     "evidence": "            try:\n                for dep in self.requiredDeps:\n                    print(f\"Installing {dep}...\")\n                    slicer.util.pip_install(dep)\n                print(\"All dependencies installed successfully.\")\n                slicer.app.restart()",
+     "explanation": "Opening the module panel (setup() -> checkDependencies(), HexaMesher.py:226) installs the latest trimesh and meshio with no version constraints into Slicer's shared Python environment, which every other extension and Slicer itself use. Unpinned installs can pull a newer numpy than Slicer bundles (both packages depend on numpy), breaking other modules for users who never open HexaMesher. The immediate `slicer.app.restart()` also discards the current session without any save prompt, so unsaved scene work can be lost.",
+     "suggestion": "Pin compatible versions (and constrain numpy to Slicer's bundled version), or ship the dependencies via the extension's own mechanism; do not restart Slicer — invalidate import caches and import the modules instead, or at least prompt the user to save the scene first.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 141
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "info",
+     "title": "Runtime installation of trimesh and meshio",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 121,
+     "line_end": 149,
+     "evidence": "self.requiredDeps = [\"trimesh\", \"meshio\"]  # Python packages required at runtime\n...\nslicer.util.pip_install(dep)",
+     "explanation": "",
+     "suggestion": "Declare optional or required dependencies in the catalog entry or extension metadata where appropriate, though runtime pip installation with user confirmation is acceptable.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 113
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Unpinned runtime pip installs of trimesh and meshio into Slicer's Python",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 141,
+     "line_end": 146,
+     "evidence": "                for dep in self.requiredDeps:\n                    print(f\"Installing {dep}...\")\n                    slicer.util.pip_install(dep)\n                print(\"All dependencies installed successfully.\")\n                slicer.app.restart()",
+     "explanation": "On widget setup, the module installs packages with no version constraint and then forces an application restart. The dependency tree of these packages (for example numpy) could upgrade or replace packages that Slicer bundles, affecting other extensions. The user is asked to confirm, which reduces the risk, but the effect is not checked or limited.",
+     "suggestion": "Pin tested versions or use constraints that do not change Slicer's bundled numpy and others. Check whether an install is needed before calling restart. Consider documenting the packages that are installed.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 142
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "Apache-2.0 appendix still has template placeholders",
+   "category": "license",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "LICENSE.txt",
+   "line": 189,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Apache-2.0 appendix copyright placeholder left unfilled",
+     "file": "LICENSE.txt",
+     "line_start": 189,
+     "line_end": 189,
+     "evidence": "   Copyright [yyyy] [name of copyright owner]",
+     "explanation": "The license text is the unmodified Apache-2.0 boilerplate with the placeholder copyright line, so no copyright holder is named in the repository. This does not remove the distribution permission granted by Apache-2.0, but it leaves attribution ambiguous.",
+     "suggestion": "Add a NOTICE or fill in the copyright holder (e.g. the KIT institute and authors) in the repository.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "LICENSE.txt",
+      "line": 189
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Apache-2.0 appendix still has template placeholders",
+     "file": "LICENSE.txt",
+     "line_start": 189,
+     "line_end": 189,
+     "evidence": "    Copyright [yyyy] [name of copyright owner]",
+     "explanation": "The copyright line in the license file is unfilled, so the copyright holder is not named. Distribution is still permitted by the Apache terms.",
+     "suggestion": "Fill in the copyright year and holder.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "LICENSE.txt",
+      "line": 189
+     }
+    }
+   ]
+  },
+  {
+   "title": "Cancelling the dependency dialog raises out of setup()",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "HexaMesher/HexaMesher.py",
+   "line": 130,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Cancelling the dependency dialog raises out of setup()",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 130,
+     "line_end": 136,
+     "evidence": "        if not allPresent:\n            if not slicer.util.confirmOkCancelDisplay(\n                \"The dependencies needed for the extension will be installed. \"\n                \"The operation may take a few minutes. A Slicer restart will be necessary.\",\n                \"Press OK to install and restart.\",\n            ):\n                raise ValueError(\"Missing dependencies.\")",
+     "explanation": "checkDependencies() is called at the end of setup() (line 226). If the user declines the install, a ValueError propagates out of the widget's setup(), leaving the module panel partially initialised and producing an unhandled-exception traceback instead of a clean 'module unavailable' state.",
+     "suggestion": "Disable the Apply/Export buttons and show an explanatory label instead of raising, so the module panel stays usable.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 130
+     }
+    }
+   ]
+  },
+  {
+   "title": "Compiled __pycache__ artifacts committed to the repository",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "HexaMesher/__pycache__/HexaMesher.cpython-312.pyc",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Compiled __pycache__ artifacts committed to the repository",
+     "file": "HexaMesher/__pycache__/HexaMesher.cpython-312.pyc",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "",
+     "explanation": "HexaMesher/__pycache__/HexaMesher.cpython-312.pyc (71 KB) and HexaMesher/HexaMesherLib/__pycache__/logicUtils.cpython-312.pyc (16 KB) are committed binaries. They are not installed by CMake and are not used by Python when the .py source is present, but they bloat the repository, can drift from the source, and are a common vector for confusing or stale bytecode.",
+     "suggestion": "Remove the __pycache__ directories from the repository and add them to .gitignore.",
+     "confidence": "high",
+     "verification": {
+      "status": "no quote",
+      "file": null,
+      "line": null
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Compiled bytecode committed to the repository",
+     "file": "HexaMesher/__pycache__/HexaMesher.cpython-312.pyc",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "HexaMesher/__pycache__/HexaMesher.cpython-312.pyc  (71269 bytes, binary)",
+     "explanation": "__pycache__ .pyc files are in the repository (HexaMesher/__pycache__/HexaMesher.cpython-312.pyc and HexaMesherLib/__pycache__). These are build artifacts, are tied to one Python version, and can mask source changes.",
+     "suggestion": "Remove the __pycache__ directories from the repository and add them to .gitignore.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Duplicated method definition and dead code after docstrings",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "HexaMesher/HexaMesher.py",
+   "line": 916,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Duplicated method definition and dead code after docstrings",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 916,
+     "line_end": 937,
+     "evidence": "    def _initMetricsTable(self):\n        \"\"\"Populate the table with row labels and N/A values.\"\"\"\n        import qt\n        t = self.ui.metricsTable",
+     "explanation": "_initMetricsTable is defined twice (lines 916 and 937); the second definition silently replaces the first, so edits to the first copy have no effect. Similarly, _cleanupPendingOutputNode (lines 259-261) and _updateResolutionLabel (lines 279-281) contain stray string literals and calls to _updateInputVisibility()/_checkCanApply() after the docstring, which are dead or unintended side effects.",
+     "suggestion": "Remove the duplicate definition and the stray code blocks left over from copy/paste.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 916
+     }
+    }
+   ]
+  },
+  {
+   "title": "HardenTransform() mutates the user's input model node in place",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "HexaMesher/HexaMesherLib/logicUtils.py",
+   "line": 69,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "HardenTransform() mutates the user's input model node in place",
+     "file": "HexaMesher/HexaMesherLib/logicUtils.py",
+     "line_start": 69,
+     "line_end": 72,
+     "evidence": "def rasterizeModelToVolume(modelNode, referenceVolume):\n    import numpy as np\n\n    modelNode.HardenTransform()",
+     "explanation": "Both rasterizeModelToVolume() (line 72) and getVoxelizedModel() (line 141) call HardenTransform() on the node passed in, which is the user's input model (or the temporary segment model). This permanently applies and removes the node's transform in the scene as a side effect of pressing Apply, changing the user's data and any downstream modules that relied on the transform node.",
+     "suggestion": "Work on a copy of the polydata (e.g. vtkTransformPolyDataFilter with the node's transform) instead of hardening the scene node.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesherLib/logicUtils.py",
+      "line": 69
+     }
+    }
+   ]
+  },
+  {
+   "title": "No automated tests and no sample data; documentation advertises an unimplemented format",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "HexaMesher/Testing/Python/CMakeLists.txt",
+   "line": 2,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No automated tests and no sample data; documentation advertises an unimplemented format",
+     "file": "HexaMesher/Testing/Python/CMakeLists.txt",
+     "line_start": 1,
+     "line_end": 2,
+     "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+     "explanation": "The only test registration is commented out, and although HexaMesher/CMakeLists.txt:31 registers `slicer_add_python_unittest(SCRIPT ${MODULE_NAME}.py)`, HexaMesher.py contains no unittest class, so the registered test cannot exercise the voxelization logic. README.md:52 and HexaMesherLib/UI/utils.py:40 advertise OFF export, but the export format combo (HexaMesher.ui:682-688) only offers VTK/STL/OBJ/MSH/PLY. There is no sample dataset and no statement about non-clinical use.",
+     "suggestion": "Add a small unittest (e.g. voxelize a synthetic cube and check voxel count/volume) and a sample scene, fix the OFF claim, and add a research-use disclaimer.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/Testing/Python/CMakeLists.txt",
+      "line": 2
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "No automated tests; test registration disabled",
+     "file": "HexaMesher/Testing/Python/CMakeLists.txt",
+     "line_start": 2,
+     "line_end": 2,
+     "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+     "explanation": "The only test hook is commented out (Testing/Python/CMakeLists.txt), and the test for HexaMesher.py depends on a test class that I did not find in the file. Core numerical behaviour (voxelization, boolean operations, metrics) is untested.",
+     "suggestion": "Add a unit test for voxelization and boolean operations on a small synthetic cube, and enable it in CMake.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/Testing/Python/CMakeLists.txt",
+      "line": 2
+     }
+    }
+   ]
+  },
+  {
+   "title": "Pitch units documented as cm³ but the code uses mm",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "HexaMesher/HexaMesherLib/UI/utils.py",
+   "line": 47,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Pitch units documented as cm³ but the code uses mm",
+     "file": "HexaMesher/HexaMesherLib/UI/utils.py",
+     "line_start": 47,
+     "line_end": 47,
+     "evidence": "<li>Select the input, reference volume, pitch [cm³] and threshold</li>",
+     "explanation": "The help and README describe pitch as cm³, but pitch is used as a voxel edge length in mm (trimesh pitch, and the volume metrics divide by 1000 from mm³). A user could enter the wrong value.",
+     "suggestion": "Correct the unit to mm in the help text and in README line 77.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesherLib/UI/utils.py",
+      "line": 47
+     }
+    }
+   ]
+  },
+  {
+   "title": "sys.path modification at module import",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "HexaMesher/HexaMesher.py",
+   "line": 5,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "sys.path modification at module import",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 5,
+     "line_end": 8,
+     "evidence": "# Ensure the module directory is in sys.path so HexaMesherLib can be imported\n_moduleDir = os.path.dirname(os.path.abspath(__file__))\nif _moduleDir not in sys.path:\n    sys.path.insert(0, _moduleDir)",
+     "explanation": "The module mutates the global sys.path at import time to make the top-level package name 'HexaMesherLib' importable. This is a global side effect executed for every Slicer session that loads the module, and the generic top-level package name can collide with other extensions' packages.",
+     "suggestion": "Rely on Slicer's own module-directory handling or use a uniquely named package with relative imports instead of inserting into sys.path.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 5
+     }
+    }
+   ]
+  },
+  {
+   "title": "Contributor lists differ between files",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "HexaMesher/HexaMesherLib/UI/utils.py",
+   "line": 4,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Contributor lists differ between files",
+     "file": "HexaMesher/HexaMesherLib/UI/utils.py",
+     "line_start": 4,
+     "line_end": 9,
+     "evidence": "CONTRIBUTORS = [\n    \"Laura Lichtlein (Karlsruhe Institute of Technology, Germany)\",",
+     "explanation": "CMakeLists.txt lists Maria Francesca Spadea, and README lists her too. UI/utils.py omits her, and the affiliations differ. This is descriptive metadata only.",
+     "suggestion": "Make the contributor lists consistent.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesherLib/UI/utils.py",
+      "line": 4
+     }
+    }
+   ]
+  },
+  {
+   "title": "Screenshot URL and unused icon resource",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 12,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Screenshot URL and unused icon resource",
+     "file": "CMakeLists.txt",
+     "line_start": 12,
+     "line_end": 12,
+     "evidence": "set(EXTENSION_SCREENSHOTURLS \"https://raw.githubusercontent.com/DomenicoRiggio/SlicerHexaMesher/main/HexaMesher/Resources/Icons/Examples.png\")",
+     "explanation": "The repository listing for this commit shows only HexaMesher.png and book.png under HexaMesher/Resources/Icons, so the screenshot URL may 404 in the extension catalog (the automated scan reported an 8 MB Examples.png that I could not read, so this is uncertain). HexaMesher/Resources/Icons/book.png is committed but neither installed by HexaMesher/CMakeLists.txt nor referenced by any code.",
+     "suggestion": "Verify that Examples.png exists at the referenced path (or commit it), and remove or install book.png.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 12
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Boolean result selector deletes the node the user selected there",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "HexaMesher/HexaMesher.py",
+   "line": 875,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Boolean result selector deletes the node the user selected there",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 874,
+     "line_end": 880,
+     "evidence": "            existingNode = self.ui.booleanOutputSelector.currentNode()\n            if existingNode:\n                uniqueName = existingNode.GetName()\n                # Delete existing node — logic will create a new one with correct data\n                slicer.mrmlScene.RemoveNode(existingNode)",
+     "explanation": "booleanOutputSelector is a qMRMLNodeComboBox listing all vtkMRMLModelNode instances (HexaMesher.ui:513-540), so a user can select any model in the scene as the 'Result model' — including Model A or Model B, or an unrelated model. Pressing 'Apply Boolean Operation' then removes that node from the scene without confirmation, so the user's model disappears from the scene (and from any later save). The result is created as a new node, so the deletion is not needed to produce the output.",
+     "suggestion": "Only delete nodes that this module created and that are empty, or refuse to use a node that already has geometry as the boolean result target; at minimum ask for confirmation before removing a node with data.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 875
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "User-selected output node deleted during Boolean apply",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 876,
+     "line_end": 880,
+     "evidence": "                if existingNode:\n                    uniqueName = existingNode.GetName()\n                    # Delete existing node — logic will create a new one with correct data\n                    slicer.mrmlScene.RemoveNode(existingNode)",
+     "explanation": "If the user has picked a node in the boolean output selector, it is removed from the scene before the new result is computed. If the computation then fails (for example, an empty result raises ValueError), the node the user chose is already gone.",
+     "suggestion": "Compute the result first, then replace the old node only on success.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 618
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Heavy voxelization runs on the GUI thread without progress or cancel",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "HexaMesher/HexaMesher.py",
+   "line": 561,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Heavy voxelization runs on the GUI thread without progress or cancel",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 561,
+     "line_end": 568,
+     "evidence": "            # Warn for very small pitch values — computation grows as pitch^-3\n            if pitch < 1.0:\n                msg = (\n                    f\"Edge size {pitch:.2f} mm is very small and may cause a long computation \"\n                    f\"or freeze the application. Do you want to proceed?\"",
+     "explanation": "onVoxelButton() calls voxelizeModelToModel() directly on the GUI thread; with threshold > 0 it builds 64 sample points per voxel and runs vtkSelectEnclosedPoints (logicUtils.py:159-184), which for a typical volume-scale model can block Slicer for minutes with only a wait cursor and no progress bar or cancel. The same applies to the boolean operation, which only warns above 50000 vertices (HexaMesher.py:849-855). Users cannot interrupt the operation and may believe Slicer has hung.",
+     "suggestion": "Run the voxelization in a worker thread (e.g. a Slicer CLI or a QThread with progress reporting) or at least show a progress dialog with a cancel option, and estimate the voxel count before starting.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 561
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Method bodies spliced together in HexaMesher.py (stray docstrings and misplaced calls)",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "HexaMesher/HexaMesher.py",
+   "line": 254,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Method bodies spliced together in HexaMesher.py (stray docstrings and misplaced calls)",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 247,
+     "line_end": 281,
+     "evidence": "            slicer.mrmlScene.RemoveNode(node)\n    ...\n        \"\"\"Called whenever the Model/Segmentation radio changes.\"\"\"\n        self._updateInputVisibility()\n        self._checkCanApply()",
+     "explanation": "In _cleanupPendingOutputNode, the Model/Segmentation docstring and the calls to _updateInputVisibility() and _checkCanApply() sit after the method's logic, so they run on every cleanup. The same happens in _updateResolutionLabel. The onInputTypeToggled method is a separate definition. This is a sign of a broken edit. It can cause unexpected UI refreshes and makes the code hard to maintain. It is not a safety issue.",
+     "suggestion": "Remove the orphaned docstrings and the misplaced calls so each method contains only its own logic. Delete the duplicate _initMetricsTable (line 937) too.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 254
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "OFF export advertised but not implemented",
+   "category": "utility",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "HexaMesher/HexaMesherLib/UI/utils.py",
+   "line": 40,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "OFF export advertised but not implemented",
+     "file": "HexaMesher/HexaMesherLib/UI/utils.py",
+     "line_start": 40,
+     "line_end": 40,
+     "evidence": "<li>Export in VTK, STL, OBJ, MSH, PLY, OFF formats</li>",
+     "explanation": "The README and the help dialog say OFF export is available, but the export UI and export_map only offer VTK, STL, OBJ, MSH and PLY. A user following the documentation cannot export OFF.",
+     "suggestion": "Either implement OFF export or remove OFF from the README and the help text. The README (line 46-51) also needs the same correction.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesherLib/UI/utils.py",
+      "line": 40
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Output selector silently renames and overwrites any selected model node",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "HexaMesher/HexaMesher.py",
+   "line": 618,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Output selector silently renames and overwrites any selected model node",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 618,
+     "line_end": 627,
+     "evidence": "            if existingNode:\n                # User has selected a node — always use it regardless of content\n                existingName = existingNode.GetName()\n                if not existingName.endswith(\"_vox\"):\n                    uniqueName = makeUniqueName(f\"{existingName}_vox\", existingNode)\n                    existingNode.SetName(uniqueName)",
+     "explanation": "outputSelectorModel lists every vtkMRMLModelNode in the scene. If the user picks an existing model (for example their original anatomical surface, or even the input model itself) as the output, the code renames it to '<name>_vox' and then voxelizeModelToModel() calls outputModel.SetAndObservePolyData(...) (logicUtils.py:217), replacing that node's geometry. The user's original mesh is lost from the scene with no confirmation and no backup.",
+     "suggestion": "Create a new output node unless the selected node is empty or was created by this module; warn before overwriting a node that already has geometry, and never allow the input model to be used as the output.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 618
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Unpinned pip_install of trimesh/meshio into Slicer's Python plus forced restart",
+   "category": "environment",
+   "severity": "major",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major",
+    "info"
+   ],
+   "file": "HexaMesher/HexaMesher.py",
+   "line": 141,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Unpinned pip_install of trimesh/meshio into Slicer's Python plus forced restart",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 141,
+     "line_end": 146,
+     "evidence": "            try:\n                for dep in self.requiredDeps:\n                    print(f\"Installing {dep}...\")\n                    slicer.util.pip_install(dep)\n                print(\"All dependencies installed successfully.\")\n                slicer.app.restart()",
+     "explanation": "Opening the module panel (setup() -> checkDependencies(), HexaMesher.py:226) installs the latest trimesh and meshio with no version constraints into Slicer's shared Python environment, which every other extension and Slicer itself use. Unpinned installs can pull a newer numpy than Slicer bundles (both packages depend on numpy), breaking other modules for users who never open HexaMesher. The immediate `slicer.app.restart()` also discards the current session without any save prompt, so unsaved scene work can be lost.",
+     "suggestion": "Pin compatible versions (and constrain numpy to Slicer's bundled version), or ship the dependencies via the extension's own mechanism; do not restart Slicer — invalidate import caches and import the modules instead, or at least prompt the user to save the scene first.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 141
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "info",
+     "title": "Runtime installation of trimesh and meshio",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 121,
+     "line_end": 149,
+     "evidence": "self.requiredDeps = [\"trimesh\", \"meshio\"]  # Python packages required at runtime\n...\nslicer.util.pip_install(dep)",
+     "explanation": "",
+     "suggestion": "Declare optional or required dependencies in the catalog entry or extension metadata where appropriate, though runtime pip installation with user confirmation is acceptable.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 113
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Unpinned runtime pip installs of trimesh and meshio into Slicer's Python",
+     "file": "HexaMesher/HexaMesher.py",
+     "line_start": 141,
+     "line_end": 146,
+     "evidence": "                for dep in self.requiredDeps:\n                    print(f\"Installing {dep}...\")\n                    slicer.util.pip_install(dep)\n                print(\"All dependencies installed successfully.\")\n                slicer.app.restart()",
+     "explanation": "On widget setup, the module installs packages with no version constraint and then forces an application restart. The dependency tree of these packages (for example numpy) could upgrade or replace packages that Slicer bundles, affecting other extensions. The user is asked to confirm, which reduces the risk, but the effect is not checked or limited.",
+     "suggestion": "Pin tested versions or use constraints that do not change Slicer's bundled numpy and others. Check whether an install is needed before calling restart. Consider documenting the packages that are installed.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "HexaMesher/HexaMesher.py",
+      "line": 142
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "ok"
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D8",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D9",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of utility",
+   "category": "utility",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D10",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8",
+  "D9",
+  "D10"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 10,
+  "single": 11,
+  "unverified": 1,
+  "total": 16
+ }
+}

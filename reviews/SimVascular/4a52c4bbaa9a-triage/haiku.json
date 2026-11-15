@@ -1,0 +1,120 @@
+{
+ "purpose": "SimVascular is a bundle of seven scripted 3D Slicer modules (SDFStent, PaintModel, FaceAwareRemesh, SimVascularMeshPrep, SeqSeg, SimVascularROM, SimVascularMultiPhysics) for vascular modeling, meshing, and 0D/3D simulation setup, aimed at researchers using Slicer. It is a multi-module extension whose modules install packages from PyPI at runtime and download pretrained weights and test data.",
+ "summary": "I reviewed a partial sample: the catalog entry, top-level CMake/LICENSE/THIRD_PARTY_NOTICES, and grep-level hits for pip installs, downloads, and sys.path edits in SDFStent.py, SeqSeg/seqseg.py, SimVascularROM.py, and svromsetup/testing_data.py. I did not read the full modules or the Docs. The main concerns are that SeqSeg installs torch 2.2.2 and downgrades NumPy into Slicer's shared Python, and that SDFStent pip-installs svmorph without a PyTorch-extension path. Both are environment issues the index policy asks me to flag. The licence picture is mixed (BSD at top level, Apache-2.0 for SeqSeg, Boost for remesh ports) and looks clear. I could not verify the pinned revision, so this is not a full approval.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Runtime pip installs and URL downloads of weights (Zenodo, GitHub) happen after confirmation dialogs (SeqSeg/seqseg.py ~2245-2330, urllib.request.urlretrieve and zipfile extractall). I did not find obvious malicious code in the sampled lines, but I did not read the full modules, and zip extraction is not path-checked in what I saw."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "SeqSeg/seqseg.py ~2516-2537 and 2835-2843 pins torch==2.2.2, torchvision==0.17.2 and numpy<2 into Slicer's Python, and uses light-the-torch from a GitHub zip. SDFStent/SDFStent.py:425 runs slicer.util.pip_install(\"svmorph\") and sys.path.insert at line 1082. The index policy forbids PyTorch installs outside the PyTorchUtils extension and NumPy downgrades; SeqSeg does have an extension-preferred path, but it still falls back to pip."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "The CMakeLists.txt files list the module scripts and resources, and the root sets EXTENSION_DEPENDS to NA with build_dependencies empty in the catalog. I did not verify that every imported Python file is installed by CMake, or that the revision 'main' exists. Docs/PaintModel*.png (about 1 MB each) were not inspected."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Root LICENSE.txt is BSD-style; SeqSeg/LICENSE.txt is Apache-2.0; THIRD_PARTY_NOTICES.txt lists Boost for FaceAwareRemesh ports. These are distribution-permissive, but the root BSD text refers to an external Copyright-SimVascular.txt that is not in the repository."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "PaintModel.py was read in full and is reasonably structured with observers removed in cleanup. Heavy work in SeqSeg and SDFStent runs with progress dialogs. I did not check SDFStent worker threading or error paths in the other modules."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "There are per-module docs under Docs/, a README, and tests directories with Testing/Python folders. Several module tests are commented out in CMake (SDFStent, PaintModel, SeqSeg)."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "SeqSeg pins torch and downgrades NumPy in Slicer's shared Python",
+   "file": "SeqSeg/seqseg.py",
+   "line_start": 2835,
+   "line_end": 2843,
+   "evidence": "# torch 2.2.2 is built against NumPy 1.x; NumPy 2.x fails import with _ARRAY_API not found.\n...self._pipInstall(\"numpy<2\")",
+   "explanation": "Slicer's own numpy is downgraded and torch 2.2.2 is installed into Slicer's Python for all users, including those who never open SeqSeg. The index policy requires PyTorch to go through the PyTorchUtils extension and forbids downgrading bundled packages. Other extensions can break after the downgrade.",
+   "suggestion": "",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "SDFStent installs svmorph into Slicer's Python at run time",
+   "file": "SDFStent/SDFStent.py",
+   "line_start": 422,
+   "line_end": 425,
+   "evidence": "self._appendLog(_(\"svmorph is not installed. Installing svmorph...\"))\n...\n slicer.util.pip_install(\"svmorph\")",
+   "explanation": "Packages are installed into the shared Slicer environment on first run without a separate confirmation dialog. Its transitive dependencies are not controlled, so NumPy/SimpleITK pins may be affected. The intended dependency set is not visible in the sampled code.",
+   "suggestion": "",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "SDFStent mutates sys.path with a generic module directory",
+   "file": "SDFStent/SDFStent.py",
+   "line_start": 1079,
+   "line_end": 1082,
+   "evidence": "import sys\nmoduleDir = os.path.dirname(__file__)\nif moduleDir not in sys.path:\n    sys.path.insert(0, moduleDir)",
+   "explanation": "Inserting the module directory at position 0 can shadow other top-level packages imported later in the session. The effect is global to the process.",
+   "suggestion": "",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Weights archive downloaded and extracted without path checks",
+   "file": "SeqSeg/seqseg.py",
+   "line_start": 2304,
+   "line_end": 2310,
+   "evidence": "urllib.request.urlretrieve(profile[\"url\"], zip_file, show_progress)\n...\nwith zipfile.ZipFile(zip_file, \"r\") as zip_ref:\n    zip_ref.extractall(extract_target)",
+   "explanation": "The archive comes from Zenodo over HTTPS after a user confirm, with no checksum verification and no member path validation before extractall. A malicious archive could write outside the target folder. The risk is limited by the trusted hosts, but integrity is not checked.",
+   "suggestion": "",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Remote light-the-torch installed from GitHub zip",
+   "file": "SeqSeg/seqseg.py",
+   "line_start": 2617,
+   "line_end": 2618,
+   "evidence": "slicer.util.pip_install(\"https://github.com/Slicer/light-the-torch/archive/main.zip\")",
+   "explanation": "An unpinned branch archive is installed into Slicer's Python to choose a torch wheel. It is a mutable reference, so the code that runs can change without notice.",
+   "suggestion": "",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Revision is 'main' and was not resolved",
+   "file": "SimVascular",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "\"scm_revision\": \"main\",",
+   "explanation": "A branch reference is not a security finding by itself, but the reviewed commit could not be confirmed. The 4a52c4bb commit in the review header was not resolved against the entry.",
+   "suggestion": "",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Full contents of SDFStent.py, seqseg.py, SimVascularROM.py, SimVascularMeshPrep, SimVascularMultiPhysics, FaceAwareRemesh modules, and the svromsetup/svmpsetup/svmeshcomplete packages (only grep-level hits and a few excerpts were read).",
+  "Whether every imported Python file is listed in CMake, and whether EXTENSION_DEPENDS matches the catalog build_dependencies.",
+  "Whether revision 'main' or commit 4a52c4bb exists and matches what was reviewed.",
+  "Docs/*.png and Docs/*.jpg binaries (large-file hint) and SimVascular.png.",
+  "Testing folders and any CI results.",
+  "Copyright-SimVascular.txt referenced by the root LICENSE was not present in the file list.",
+  "Network endpoints actually used at runtime (testing data URLs in svromsetup/testing_data.py beyond its header)."
+ ],
+ "questions_for_author": [
+  "Can SeqSeg rely on the PyTorchUtils extension and NNUNet extension exclusively rather than pip-installing torch and downgrading numpy into Slicer?",
+  "Should SDFStent's svmorph install ask for confirmation before pip installing, and what are its full transitive dependencies?",
+  "Can the light-the-torch install be pinned to a release or commit instead of main.zip?",
+  "Can the weights archive be checked against a SHA-256 and its members validated before extraction?"
+ ]
+}

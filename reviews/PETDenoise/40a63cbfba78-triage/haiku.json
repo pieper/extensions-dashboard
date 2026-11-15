@@ -1,0 +1,126 @@
+{
+ "purpose": "Belenos PET Denoise and Volume Comparator, two scripted Slicer modules under the Nuclear Medicine category. They run PyTorch/MONAI denoising networks (UNET/SwinUNETR) on PET volumes and compute image-similarity metrics between two volumes, for research use.",
+ "summary": "I read the catalog entry, CMake files, both module scripts and the LICENSE. I found no malicious or concealed behaviour and no unsafe deserialization: model weights are loaded with weights_only=True, sidecar values are parsed with literal_eval, and downloads are checked by size and SHA-256. Remaining issues are minor: a floating scm_revision of \"main\", a committed __pycache__ .pyc, a einops pin, a model-folder overwrite path, and unstated model-weight licensing. Nothing is blocking. I could not run anything or inspect the pinned revision or the 9 MB banner files.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "PETDenoise.py loads .pth with torch.load(..., weights_only=True) (line 1137), parses sidecars via ast.literal_eval (line 86), and downloads only from github.com release URLs after explicit user click, with size and SHA-256 verification (lines 966-993). No telemetry, no eval/exec, no hidden network calls beyond the GitHub release-list API."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Packages are installed only after a confirmation dialog (lines 614-620), and PyTorch is routed through PyTorchUtils as required. However einops is pinned exactly to 0.6.1 (line 25), which may conflict with other extensions in the shared Slicer Python environment."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "EXTENSION_DEPENDS \"PyTorch\" (CMakeLists.txt line 13) matches build_dependencies, and the scripted modules are installed by slicerMacroBuildScriptedModule. A compiled PETDenoise/__pycache__/PETDenoise.cpython-313.pyc is committed, and scm_revision is the branch name 'main' rather than a commit, so the build is not reproducible."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE is MIT (Copyright 2025 Burak Demir), which permits distribution of the code. The pretrained .pth weights on the GitHub Models releases have no stated license terms in the repository, so redistribution rights for the models are unclear."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "The modules are structured as ScriptedLoadableModule, write outputs only to new nodes, and remove scratch nodes in finally blocks (lines 1267-1276). Minor issues: downloads overwrite an existing same-named model file of a different size (line 993, os.replace), the widget has no observer cleanup, and the run is synchronous on the GUI thread with only processEvents for progress."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents installation, usage, and metrics, and the UI carries a 'NOT a medical device. Research use only' disclaimer. There are no automated tests (Testing/Python CMake lines are commented out), and model validation is limited to a reference paper."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "scm_revision points to a moving branch ('main')",
+   "file": "PETDenoise.json",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "\"scm_revision\": \"main\",",
+   "explanation": "The catalog entry pins no commit, so the index builds whatever is on main at build time. The reviewed source (commit 40a63cbf...) can change without any review. This is not a security defect, but it weakens reproducibility and the basis of this review.",
+   "suggestion": "Pin scm_revision to the reviewed commit SHA, or accept that updates need a new review.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Compiled bytecode committed to the repository",
+   "file": "PETDenoise/__pycache__/PETDenoise.cpython-313.pyc",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "PETDenoise/__pycache__/PETDenoise.cpython-313.pyc  (93384 bytes, binary)",
+   "explanation": "PETDenoise/__pycache__/PETDenoise.cpython-313.pyc (93 KB) is a build artifact from a developer machine. It is not needed for the extension, may not match the source, and should not be in the source tree.",
+   "suggestion": "Remove __pycache__ from the repository and add it to .gitignore.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "einops pinned to an exact old version in the shared Python environment",
+   "file": "PETDenoise/PETDenoise.py",
+   "line_start": 25,
+   "line_end": 25,
+   "evidence": "EINOPS_REQUIREMENT = \"einops==0.6.1\"",
+   "explanation": "When the user accepts the install prompt, the module runs pip install einops==0.6.1 into Slicer's shared environment. This can downgrade einops for other extensions or conflict with newer packages that need a later version. The prompt does not mention the version downgrade.",
+   "suggestion": "Use a lower-bound requirement (for example einops>=0.6.1) or document the pin and its reason in the prompt; avoid exact pins in shared environments.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Model download silently overwrites a same-named file of different size",
+   "file": "PETDenoise/PETDenoise.py",
+   "line_start": 989,
+   "line_end": 993,
+   "evidence": "os.replace(partPath, destination)",
+   "explanation": "isCompleteModelFile returns False for an existing file of a different size, so the download path is taken and os.replace() overwrites the file in the user's model folder. A user-supplied model with the same name, or a partially edited file, is replaced without confirmation. The data loss is limited to model files, but it is unannounced.",
+   "suggestion": "Ask for confirmation before replacing an existing file, or download into a separate folder and report the conflict.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Terms for the downloadable pretrained model weights are not stated",
+   "file": "LICENSE",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "MIT License\n\nCopyright (c) 2025 Burak Demir",
+   "explanation": "The module downloads .pth weights from the GitHub release 'Models' and 'SuperRes_Models'. The repository MIT license covers the code only. Users and redistributors have no stated terms for the weights, so the permission to distribute or use them for any purpose is unclear.",
+   "suggestion": "State the license or terms for the published models in the release notes or README.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "Automatic GitHub API request when the download section is opened",
+   "file": "PETDenoise/PETDenoise.py",
+   "line_start": 755,
+   "line_end": 758,
+   "evidence": "if not collapsed:\n            self.updatePublishedModelCatalog(force=False)",
+   "explanation": "Opening 'Download Published Models' sends an HTTP request to api.github.com (at most once a day) with a fixed User-Agent. No user data is sent, and the request is not a telemetry channel, but it is network access the user does not explicitly start.",
+   "suggestion": "Mention the GitHub check in the documentation, or make it manual-only.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No automated tests are active",
+   "file": "PETDenoise/Testing/Python/CMakeLists.txt",
+   "line_start": 2,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The module Testing/Python CMake files only contain a commented-out test line, so the generic tests and the unit test are not registered. Changes to the parsing, metric, and sliding-window logic are not covered by automated checks.",
+   "suggestion": "Add unit tests for parseSidecar, parseSequence, and mergePublishedModelCatalog, which are pure functions.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The pinned revision is not verified: scm_revision is 'main', so I reviewed the code as provided in the review bundle, not a fixed commit.",
+  "PETDenoise/Resources/banner.png and VolumeComparator/Resources/banner.png (9 MB each) were not readable; the directory listing does not show them, and the code tolerates their absence.",
+  "The .ui files and icon PNGs were not read; they could hide widget wiring issues.",
+  "No code was executed. The behaviour of the GitHub release assets, their checksums, and the model weights was not inspected.",
+  "The PyTorch and MONAI version interactions (including the swinExtra img_size logic) were not validated against a running Slicer.",
+  "Whether Slicer's shared environment already has einops and whether the pin conflicts with other extensions could not be checked."
+ ],
+ "questions_for_author": []
+}

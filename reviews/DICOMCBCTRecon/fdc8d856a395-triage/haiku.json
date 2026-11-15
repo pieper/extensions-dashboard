@@ -1,0 +1,78 @@
+{
+ "purpose": "Adds a hidden DICOM plugin and reconstruction window to 3D Slicer that turns rotational C-arm XA/XRF runs (multi-frame DICOM) into cone-beam CT volumes using FDK and SART, with PyTorch from Slicer's PyTorch extension. It is for researchers and clinicians working with C-arm 3D/DynaCT-style data.",
+ "summary": "I read the catalog entry, CMake files, main module, dialog, xadata, display, README and LICENSE, and searched all files for network, install, pickle, eval and subprocess calls. I found none. Torch is obtained only through the PyTorch extension, after user confirmation. The MIT license is present. CMake installs all eight Lib Python files. The points that remain are a sys.path insert at import, scm_revision pinned to a branch, and the absence of a research-use disclaimer. None block admission. Coverage is partial: gecalib.py, geometry.py, phantom.py, most of reconstruction.py and the test file were not read.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read DICOMCBCTRecon.py, dialog.py, xadata.py, display.py and the first 60 lines plus the FOV section of reconstruction.py. No network, telemetry, subprocess, eval, pickle or torch.load calls were found. Only the user's own DICOM files are read, and the only writes are to a mkdtemp preview folder that is removed on cleanup."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "PyTorch is installed only via PyTorchUtils after an OK prompt (DICOMCBCTRecon.py lines 359-366), which matches policy. Line 43-44 inserts the module folder at the front of sys.path at import, a generic side effect on Slicer's import path, though the folder contains only this extension's own modules."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMakeLists.txt line 13 sets EXTENSION_DEPENDS PyTorch, which matches build_dependencies in the catalog entry. DICOMCBCTRecon/CMakeLists.txt lists all eight Python files under DICOMCBCTReconLib plus the main script, and the listed files exist in the file list. The 594 KB screenshot.jpg is committed but is not a code artifact."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is a standard MIT license, Copyright (c) 2026 Burak Demir, which permits distribution. The README cites literature methods but bundles no third-party weights or code."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "The reconstruction runs in a non-GUI-threaded modal dialog with a progress callback and a Stop path. OOM falls back to CPU (dialog.py lines 791-796). Errors are shown with errorDisplay. Observers are removed on cleanup. Possible issues: broad except blocks swallow some errors (display.py, DICOMCBCTRecon.py line 152), and the reconstruction runs on the GUI thread during Reconstruct."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README gives usage steps, geometry conventions, a method description and a synthetic-data test. It has no clinical or research-use disclaimer for HU-scaled volumes, and sample data is not provided. The module is hidden and reached through the DICOM browser."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Module folder inserted at the front of sys.path at import time",
+   "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+   "line_start": 42,
+   "line_end": 44,
+   "evidence": "if globals().get(\"__file__\") and _MODULE_DIR not in sys.path:\n    sys.path.insert(0, _MODULE_DIR)",
+   "explanation": "On import the module inserts its own folder at index 0 of sys.path. This is a global side effect in the shared Slicer Python process and affects every later import, including for users who never open the module. The folder contains only this extension's files, so the risk is low, but the insert is not needed when the extension is loaded through Slicer's module paths.",
+   "suggestion": "Append rather than prepend, or rely on Slicer's module loader, which already adds the module folder when the module is loaded through the CMake build.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No research-use or clinical disclaimer for HU-scaled reconstructions",
+   "file": "README.md",
+   "line_start": 8,
+   "line_end": 9,
+   "evidence": "Author: Burak Demir, MD, FEBNM",
+   "explanation": "The module produces Hounsfield-like values from C-arm rotational data, which are only approximate. The README states the DISP caveat and the calibration caveat, but nowhere says that the output is for research and not for diagnosis. Users could take the values as clinically calibrated.",
+   "suggestion": "Add a short research-use-only statement to the README and the module help text, noting that HU values are approximate and depend on the water value chosen.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "catalog scm_revision is a branch name (main), not a fixed commit",
+   "file": "",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "\"scm_revision\": \"main\"",
+   "explanation": "The catalog entry pins scm_revision to \"main\", so the built code can change without a catalog update. The reviewed source is commit fdc8d856a39562bd282e1d204896297b070ec05f per the request, but the index will build whatever main points to. Policy accepts branch references, so this is informational only.",
+   "suggestion": "Pin scm_revision to the reviewed commit hash in future updates so that approvals cover the exact code.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "gecalib.py, geometry.py, phantom.py and roughly two thirds of reconstruction.py were not read in full. Only the imports, torchDevice, fovMask and the FDK return path were inspected.",
+  "The test file DICOMCBCTRecon/Testing/Python/test_cbct_reconstruction.py was not read.",
+  "The live scm_url and scm_revision were not resolved. I did not confirm that commit fdc8d856 exists or matches the file contents shown.",
+  "No CI or build reports were available, so loading in Slicer, the CMake build and the in-Slicer self test were not verified.",
+  "The screenshot and icon binaries were not inspected.",
+  "Behaviour of PyTorchUtils.installTorch and the Slicer DICOM plugin API was not checked against upstream Slicer sources."
+ ],
+ "questions_for_author": []
+}

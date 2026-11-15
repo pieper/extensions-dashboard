@@ -1,0 +1,239 @@
+{
+ "purpose": "A Slicer scripted module that runs a bundled nnU-Net v2 (Dataset003, fold 5) model through the NNUNet extension to segment the post-esophagectomy gastric conduit on chest CT and shows the mask volume in cm³. It targets clinicians/researchers reviewing conduit volume after esophagectomy, with an English/Chinese panel.",
+ "summary": "No malicious or concealed behavior: no telemetry, no eval/exec/pickle of local files, network use limited to GitHub for the model weights after a confirmation dialog, and no pip installs of its own (it delegates to the NNUNet extension's installer). Code is MIT and the catalog entry is mechanically consistent (EXTENSION_DEPENDS NNUNet matches build_dependencies, all imported Python files are installed). Main gaps: the downloaded model weights have no stated license or data provenance, weights are written into the extension install directory, and several unguarded paths can leave the panel stuck or overwrite an existing segmentation. 🔴 Do not merge yet: weight licensing/provenance must be stated.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Read all GastricConduitLib modules and GastricConduit.py: no telemetry, no eval/exec/pickle of local data, no credentials, no listening sockets; the only network use is GitHub API/release download in download.py, gated by slicer.util.confirmYesNoDisplay in widget.py:370. Minor items: the download URL is the unpinned first asset of the 'latest' release and the extracted checkpoint is later deserialized by nnU-Net via torch.load with no hash check."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Module import only pulls qt/slicer; torch and SlicerNNUNetLib are imported inside functions (device.py:44, widget.py:391, 553). No pip_install, no torch pin, no sys.path or env changes. widget.py:558-562 calls the NNUNet extension's InstallLogic.setupPythonRequirements() on Apply without a confirmation dialog, which can install packages into Slicer's Python."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt:11 EXTENSION_DEPENDS \"NNUNet\" matches the entry's build_dependencies; GastricConduit/CMakeLists.txt lists every imported module and the icon exists; Resources/ML holds only .gitkeep and weights are downloaded on demand. Minor: Testing/__init__.py is not in MODULE_PYTHON_SCRIPTS, and the Slicer unittest hook runs a runTest that only shows a dialog."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "LICENSE.txt is MIT and README.md:74-76 says 'MIT', which covers the code. The model weights downloaded from the author's GitHub release (download.py:14-17) have no stated license or terms, and the training data (Dataset003, post-esophagectomy CT) provenance is not described anywhere I read."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read widget.py, download.py, model_layout.py, observe.py, progress.py, postprocess.py and the tests. Structure follows ScriptedLoadableModule conventions and the observer is removed on scene close, but weights are written into the extension install directory (model_layout.py:11-13), on_apply has no exception guard around _run_segmentation, and _load_results overwrites the user-selected segmentation node."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents purpose, install, expected weight layout, CPU/GPU advice and a research-use disclaimer (README.md:19), and there is a screenshot plus 9 pytest files for the pure-Python helpers. Missing: any validation/accuracy numbers for the model, sample data, and tests that actually run in Slicer's harness."
+  }
+ },
+ "findings": [
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "Model weights have no stated license or data provenance",
+   "file": "README.md",
+   "line_start": 74,
+   "line_end": 76,
+   "evidence": "## License\n\nMIT.",
+   "explanation": "The MIT license covers the repository code, but the extension's core asset is the Dataset003 fold-5 nnU-Net checkpoint downloaded from the author's GitHub release (download.py:14-17). Neither README nor any file I read states the terms under which those weights may be redistributed or used, nor the source/consent basis of the post-esophagectomy CT training data. Users and the index therefore have no evidence that distributing the weights is permitted, and hospitals cannot judge whether the derived model carries research-only or data-use restrictions.",
+   "suggestion": "Add an explicit license/terms statement for the weight zip (e.g. CC-BY-NC-4.0, or MIT if intended) and a short data-provenance note (institution, ethics approval/consent, de-identification) in README and next to the release asset.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Weights are downloaded into the extension install directory",
+   "file": "GastricConduit/GastricConduitLib/model_layout.py",
+   "line_start": 11,
+   "line_end": 13,
+   "evidence": "def nnunet_folder() -> Path:\n    \"\"\"Default extract location: ``GastricConduit/Resources/ML``.\"\"\"\n    return Path(__file__).resolve().parent.parent / \"Resources\" / \"ML\"",
+   "explanation": "download_weights() extracts a multi-hundred-MB zip into the installed extension folder (widget.py:366-367 also mkdirs it). On Windows/macOS installs under Program Files or the .app bundle this path is typically not writable, so the first Apply fails with a permission error; where it is writable, the weights are silently deleted on the next extension upgrade or reinstall, forcing a re-download. Slicer convention is a user-writable location (e.g. slicer.util.getUserResourceDirectory() or a user-chosen folder).",
+   "suggestion": "Store weights under the Slicer user settings/resource directory (or ask the user for a folder) and keep the install tree read-only.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Unguarded exception in _run_segmentation leaves the panel permanently busy",
+   "file": "GastricConduit/GastricConduitLib/widget.py",
+   "line_start": 402,
+   "line_end": 408,
+   "evidence": "step = step_size_for_mode(self._speed_preference())\n        parameter = Parameter(\n            folds=FOLD,\n            modelPath=nnunet_folder(),\n            device=choice.device,\n            stepSize=step,\n        )",
+   "explanation": "on_apply (widget.py:334-344) calls _set_busy(True) and then _run_segmentation() with no try/except. If Parameter() or startSegmentation() raises — e.g. after a SlicerNNUNetLib API change, a bad model path, or a CUDA init error — the exception escapes to the console, _set_busy(False) is never called, and the user is left with the Apply row hidden and the Stop row shown, with no error dialog. The only recovery is to press Stop or restart Slicer.",
+   "suggestion": "Wrap the body of on_apply/_run_segmentation in try/except, report via slicer.util.errorDisplay, and always call _set_busy(False) in a finally block.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Existing segmentation node is overwritten without confirmation",
+   "file": "GastricConduit/GastricConduitLib/widget.py",
+   "line_start": 436,
+   "line_end": 441,
+   "evidence": "if existing is not None:\n            name = existing.GetName()\n            existing.Copy(node)\n            existing.SetName(name)\n            slicer.mrmlScene.RemoveNode(node)",
+   "explanation": "If the user has an existing segmentation node selected in the Segmentation selector (the selector allows selecting any node, not only a newly created one), Apply replaces its entire content with the inference result via Copy(). Any segments the user had in that node — including manual edits — are destroyed with no warning, and the volume label then reports the new mask. The panel text 'Create new segmentation on Apply' suggests a new node, so this behavior is not what the UI implies.",
+   "suggestion": "Either always create a new segmentation node, or ask for confirmation before overwriting a non-empty selected node.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Weight download is unpinned and unverified before torch.load",
+   "file": "GastricConduit/GastricConduitLib/download.py",
+   "line_start": 63,
+   "line_end": 66,
+   "evidence": "assets = payload.get(\"assets\") or []\n    if not assets:\n        return None\n    return assets[0].get(\"browser_download_url\")",
+   "explanation": "The URL actually used is whatever asset happens to be first on the repository's latest GitHub release (widget.py:368), not the pinned DEFAULT_RELEASE_ASSET, and the downloaded zip is extracted and later loaded by nnU-Net as checkpoint_final.pth (a torch.load/pickle deserialization). There is no hash or signature check, so a renamed or replaced release asset would be deserialized as code. The risk is bounded by HTTPS from the author's own repository and the user's confirmation dialog, but the pinning intent expressed in version.py ('Weight zip stays on the v0.1.0 GitHub Release') is not enforced.",
+   "suggestion": "Download the pinned release asset by name and verify a published SHA-256 before extraction; treat the 'latest release' lookup as an optional update check only.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Zip extracted without size or member validation",
+   "file": "GastricConduit/GastricConduitLib/download.py",
+   "line_start": 85,
+   "line_end": 87,
+   "evidence": "with zipfile.ZipFile(zip_path, \"r\") as zf:\n            zf.extractall(dest)\n        zip_path.unlink(missing_ok=True)",
+   "explanation": "extractall() writes every member of the downloaded archive into the extension folder with no uncompressed-size limit and no member-name check. CPython's zipfile strips absolute paths and '..' components, so classic zip-slip is mitigated, but a tampered or unexpectedly large archive could still fill the disk or scatter files inside the install tree.",
+   "suggestion": "Validate member names and total uncompressed size before extracting, and extract only the expected Dataset003 subtree.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "NNUNet dependency installer runs on Apply without a confirmation dialog",
+   "file": "GastricConduit/GastricConduitLib/widget.py",
+   "line_start": 558,
+   "line_end": 562,
+   "evidence": "def _install_nnunet(self) -> bool:\n        from SlicerNNUNetLib import InstallLogic\n        logic = InstallLogic()\n        logic.progressInfo.connect(self._log)\n        return bool(logic.setupPythonRequirements())",
+   "explanation": "Every Apply calls the NNUNet extension's setupPythonRequirements(), which can install nnunetv2 and PyTorch into Slicer's shared Python. Delegating to the NNUNet extension is the sanctioned path (no pip_install or torch pin here), but the user is never told that pressing Apply may install packages or download hundreds of MB; the panel only shows 'Checking Python dependencies…'.",
+   "suggestion": "Show a confirmYesNoDisplay before the first dependency install, stating what will be installed and roughly how large it is.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Dependency-install failure is silent",
+   "file": "GastricConduit/GastricConduitLib/widget.py",
+   "line_start": 337,
+   "line_end": 339,
+   "evidence": "if not self._install_nnunet():\n            self._set_busy(False)\n            return",
+   "explanation": "When setupPythonRequirements() returns False the panel simply returns to idle; no errorDisplay is shown, so the user sees the Apply button reappear with no explanation of why nothing ran (the reason, if any, only reaches the log widget).",
+   "suggestion": "Report the failure with slicer.util.errorDisplay and point to the NNUNet extension's installer.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Stop blocks the GUI thread while waiting for inference",
+   "file": "GastricConduit/GastricConduitLib/widget.py",
+   "line_start": 349,
+   "line_end": 352,
+   "evidence": "self.is_stopping = True\n        self.logic.stopSegmentation()\n        self.logic.waitForSegmentationFinished()\n        slicer.app.processEvents()",
+   "explanation": "waitForSegmentationFinished() is called directly in the button slot, so Slicer's UI freezes until the worker thread actually exits (which can take seconds while a sliding-window tile finishes). processEvents() afterwards does not help during the wait.",
+   "suggestion": "Poll for completion with a QTimer, or disable the Stop button and re-enable the panel from the inferenceFinished/error signal.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "processEvents() called from a progress slot",
+   "file": "GastricConduit/GastricConduitLib/widget.py",
+   "line_start": 544,
+   "line_end": 548,
+   "evidence": "else:\n            text = (msg or \"\").strip()\n            if text:\n                self.logEdit.append(text)\n        slicer.app.processEvents()",
+   "explanation": "_log is connected to logic.progressInfo (widget.py:573) and to InstallLogic.progressInfo. If PythonQt delivers those signals with a direct connection from the inference worker thread, processEvents() runs off the GUI thread, which is not supported by Qt and can crash Slicer; even on the GUI thread it re-enters the event loop during inference callbacks.",
+   "suggestion": "Use a queued connection (or a Qt signal on the widget) and drop processEvents() from the log path.",
+   "confidence": "low"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Network call on the GUI thread before the download prompt",
+   "file": "GastricConduit/GastricConduitLib/widget.py",
+   "line_start": 366,
+   "line_end": 368,
+   "evidence": "dest = nnunet_folder()\n        dest.mkdir(parents=True, exist_ok=True)\n        expected = latest_release_asset_url() or DEFAULT_RELEASE_ASSET",
+   "explanation": "latest_release_asset_url() performs a blocking HTTPS request with a 10 s timeout (download.py:51-62) inside the Apply handler, before any dialog. On a slow or firewalled hospital network the panel freezes for up to 10 s with no feedback, and the request to api.github.com happens even for users who already have valid weights.",
+   "suggestion": "Skip the release lookup when weights already validate, and run it off the GUI thread or with a shorter timeout plus a status message.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Offline installs are prompted to re-download on every Apply",
+   "file": "GastricConduit/GastricConduitLib/download.py",
+   "line_start": 44,
+   "line_end": 48,
+   "evidence": "def are_weights_outdated(folder: Path, expected_url: str) -> bool:\n    stored = read_download_url(folder)\n    if stored is None:\n        return True\n    return stored != expected_url",
+   "explanation": "Users who follow the documented offline path (README.md:34, extract the zip manually) have no download_info.json, so are_weights_outdated() is always True and widget.py:373-375 shows 'A newer model is available. Download it now?' on every Apply. Declining works, but the prompt is misleading and repeated.",
+   "suggestion": "Treat a valid model tree without download_info.json as up to date, or record the URL when the tree validates.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Selecting an input volume resets the user's slice views",
+   "file": "GastricConduit/GastricConduitLib/widget.py",
+   "line_start": 254,
+   "line_end": 256,
+   "evidence": "if volume is not None:\n            slicer.util.setSliceViewerLayers(background=volume)\n            slicer.util.resetSliceViews()",
+   "explanation": "Every input-node change (including the initial on_input_changed() in __init__) replaces the background volume and resets slice views, discarding the user's current slice offsets/zoom in all views. This is a side effect on shared scene state that the module does not need in order to run inference.",
+   "suggestion": "Only set the background volume, or make the view reset an explicit user action.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Slicer test hook runs a placeholder test; Testing/__init__.py not installed",
+   "file": "GastricConduit/GastricConduit.py",
+   "line_start": 54,
+   "line_end": 58,
+   "evidence": "class GastricConduitTest(ScriptedLoadableModuleTest):\n    def runTest(self):\n        # Slicer's embedded Python has no pytest. Run tests from a normal env:\n        #   pytest GastricConduit/Testing -q\n        slicer.util.delayDisplay(\"GastricConduit module loaded. CLI tests: pytest GastricConduit/Testing -q\")",
+   "explanation": "GastricConduit/CMakeLists.txt:39-41 registers this file with slicer_add_python_unittest, so the extension's automated test reports success while asserting nothing; the real pytest suite is never exercised by the Slicer build. Separately, GastricConduit/Testing/__init__.py exists in the repository but is absent from MODULE_PYTHON_SCRIPTS (CMakeLists.txt:17-25), so the installed Testing directory is not a package.",
+   "suggestion": "Add at least one real assertion to runTest (e.g. import GastricConduitLib and check volume_cm3), and add Testing/__init__.py to MODULE_PYTHON_SCRIPTS.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No model validation or accuracy information",
+   "file": "README.md",
+   "line_start": 11,
+   "line_end": 19,
+   "evidence": "This is for research. A clinician should review the mask before using the volume.",
+   "explanation": "The research-use disclaimer is present, which is good, but nothing in the README states how the Dataset003 fold-5 model was trained or validated (case count, Dice/HD, external test set), and there is no sample data or tutorial beyond the screenshot. Users cannot judge whether the conduit volume is trustworthy for their population.",
+   "suggestion": "Add a short validation section (dataset size, fold-5 metrics, any external test) and a small sample CT or link to public data.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Catalog entry tracks the moving 'main' branch",
+   "file": "README.md",
+   "line_start": 62,
+   "line_end": 69,
+   "evidence": "\"scm_url\": \"https://github.com/dhnihaoya/SlicerGastricConduit\",\n    \"scm_revision\": \"main\",",
+   "explanation": "The entry uses scm_revision \"main\", so the code built by the index can drift from the commit reviewed here (9f024f6). This is supported by the index policy and not a defect, but it means this review covers only the commit examined.",
+   "suggestion": "Optionally pin scm_revision to a tag or commit for reproducible builds.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The SlicerNNUNet extension source (SlicerNNUNetLib Parameter/SegmentationLogic/InstallLogic) was not available, so the exact behavior of startSegmentation, waitForSegmentationFinished, setupPythonRequirements and whether checkpoint_final.pth is loaded with torch.load could not be verified.",
+  "The GitHub release asset Dataset003_GastricConduit_fold5.zip was not downloaded or inspected: its size, contents, license file and checksum are unknown.",
+  "The training dataset (Dataset003) and the referenced training-repo pipeline (volume_analysis.py) were not accessible, so the volume formula and largest-connected-component rule could not be compared against the original.",
+  "No Slicer installation was available, so the module was not loaded and the panel, observer behavior and Segment Editor 'Islands' effect call were not executed.",
+  "The pytest suite was not run; only read.",
+  "Screenshots/1.png and the icon PNG were not visually inspected."
+ ],
+ "questions_for_author": [
+  "What license and terms apply to the Dataset003_GastricConduit_fold5.zip weights, and what is the provenance/consent basis of the training CT data?",
+  "Why are weights extracted into the extension install directory rather than a user-writable Slicer resource directory, and what happens on a read-only install or after an extension upgrade?",
+  "Should Apply overwrite an existing selected segmentation node, or always create a new one?",
+  "Why does the download use the first asset of the 'latest' release instead of the pinned v0.1.0 asset, and can a SHA-256 be published for verification?"
+ ]
+}

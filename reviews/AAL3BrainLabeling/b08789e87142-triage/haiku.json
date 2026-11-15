@@ -1,0 +1,129 @@
+{
+ "purpose": "An extension that runs an AAL3 atlas-based morphometry pipeline on a user's MRI in 3D Slicer: N4 bias correction, Elastix registration of an MNI152 template, atlas mapping, SegmentStatistics volumes and intensities, asymmetry indices, and a centroid distance matrix. It is intended for neuroimaging researchers, and it depends on SlicerElastix.",
+ "summary": "I read the module code, CMakeLists, README, LICENSE, the color table and the label CSV. I found no network access, telemetry, pickle/eval, or package installation, so no safety finding. The main problems are packaging and distribution: CMake and the code require Resources/Templates/MNI152_T1_1mm.nii.gz, which is absent from the file listing I could see. The MIT license covers only the code, not the bundled AAL3 atlas or the MNI template. Registration failures are swallowed, and there are soundness issues with transform direction and output location. Overall: needs fixes.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read AAL3BrainLabeling.py in full. It has no network calls, no telemetry, no pickle/eval/exec, and no package installs. Its only file writes go to the user-chosen or temp output folder, with fixed CSV names."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "No pip installs or global monkey-patching. The only sys.path change is an append of the Elastix module directory at line 217-218, which is minor. Nothing runs at import time beyond class definitions."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "CMakeLists.txt line 35 lists Resources/Templates/MNI152_T1_1mm.nii.gz, and the code at line 201 loads it. That file does not appear in the repository file listing, which shows only the Atlas and Labels resources, so the RESOURCES install may fail at build time. The automated scan hint describes a 10 MB file at that path, so the snapshot may be inconsistent and this needs confirmation. EXTENSION_DEPENDS SlicerElastix matches build_dependencies."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "LICENSE.txt is MIT and covers the author's code. It does not address the AAL3 atlas (Resources/Atlas/AAL3v1_1mm.nii.gz) or the MNI152 template that the extension bundles and redistributes. Redistribution terms for those third-party materials are not shown."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The registration at lines 212-259 catches all exceptions and prints them, then returns a None transform, and pipeline() returns None at line 177. The GUI does not report this clearly to the user. Batch processing also leaks volN4 when registration fails (line 388 only cleans up when result is truthy). The transform direction is also unverified: the code registers volume as fixed and template as moving (line 252), and it then hardens that transform onto the template-space atlas (line 280) without inverting it."
+  },
+  "utility": {
+   "rating": "concern",
+   "rationale": "There are no tests, no sample data, no clinical-use disclaimer, and no model or atlas validation. The README describes a 'Run FULL Pipeline' button and a 'Batch Process Folder' button that do not match the UI labels in the code ('PROCESS SINGLE VOLUME' and 'PROCESS EXTERNAL FOLDER'). It also claims 10,000 spatial samples, but the code uses 15000 (line 242)."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Bundled MNI152 template is referenced by CMake and code but missing from the repository listing",
+   "file": "CMakeLists.txt",
+   "line_start": 31,
+   "line_end": 37,
+   "evidence": "Resources/Templates/MNI152_T1_1mm.nii.gz",
+   "explanation": "CMakeLists.txt line 35 passes Resources/Templates/MNI152_T1_1mm.nii.gz to slicerMacroBuildScriptedModule, and the code loads it at line 201. The repository listing shows no Resources/Templates directory. If the file is truly absent, the build fails, or the module installs without the template and every registration fails with the 'Template missing' error. The automated scan hint reports the file as 10 MB, so the snapshot may be inconsistent; this must be confirmed.",
+   "suggestion": "Confirm the template is committed on the revision in question (or downloaded at build time with a checksum). Otherwise remove it from RESOURCES and document the setup.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "Redistribution terms for the bundled AAL3 atlas and MNI152 template are not stated",
+   "file": "LICENSE.txt",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "MIT License\n Copyright (c) 2026 Mustafa Sakci, Niyazi Acer",
+   "explanation": "The MIT license covers the author's code only. The AAL3 atlas labelmap and color table, and the MNI152 template, are third-party data that the extension ships. No notice or terms for them are in the repository, so the permission to redistribute them is unclear. The README's citation request is not a license.",
+   "suggestion": "Add a third-party notice listing the source and license of the AAL3 atlas and MNI152 template, and confirm that redistribution is permitted, or have users fetch these files themselves.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Registration failures are swallowed and reported only through console output",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 253,
+   "line_end": 256,
+   "evidence": "except Exception as e:\n                print(f\"Elastix Error: {str(e)}\")\n                slicer.mrmlScene.RemoveNode(transformNode)\n                transformNode = None",
+   "explanation": "Any Elastix exception is caught, printed, and turned into transformNode=None. pipeline() then calls updateUI with an error and returns None. In batch mode, the next volume continues, and volN4 from the failed run is never removed, so nodes accumulate in the scene. Users may not notice that a run produced no output.",
+   "suggestion": "Surface the error with slicer.util.errorDisplay or a logged message, and remove volN4 when registration fails in pipeline().",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Transform direction may be wrong when the atlas is hardened onto the template-space labelmap",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 252,
+   "line_end": 252,
+   "evidence": "logic.registerVolumes(volume, templateNode, parameterFilenames=paths, outputTransformNode=transformNode)",
+   "explanation": "The code registers the subject volume as fixed and the template as moving (line 252). The atlas is in template space, but the resulting transform is hardened onto the atlas at line 280 without inversion. If the output transform maps subject to template coordinates, the atlas is warped in the wrong direction, and the regional volumes and centroids would be wrong without any error. I did not run this and could not check the SlicerElastix output convention from the repository alone.",
+   "suggestion": "Verify the transform direction against SlicerElastix conventions using a known test case, and invert the transform if needed. Add a validation step, for example by overlaying the warped atlas on the subject.",
+   "confidence": "low"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Output defaults to the temporary folder and CSVs are silently overwritten",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 77,
+   "line_end": 77,
+   "evidence": "self.outputPath = slicer.app.temporaryPath",
+   "explanation": "self.outputPath is initialized to slicer.app.temporaryPath (line 77), which is cleared on Slicer exit, so results can be lost unless the user chooses a folder. Output names are fixed per volume name (lines 320, 368), so re-running overwrites earlier results with no warning.",
+   "suggestion": "Default to a persistent user folder, require the user to choose a folder before running, and warn before overwriting.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "README does not match the UI and the code",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 242,
+   "line_end": 242,
+   "evidence": "'(NumberOfSpatialSamples 15000)\\n'",
+   "explanation": "The README describes a 'Run FULL Pipeline' button and a 'Batch Process Folder' button. The code uses 'PROCESS SINGLE VOLUME' and 'PROCESS EXTERNAL FOLDER' (lines 80, 84). The README also says 10,000 spatial samples, while the code sets 15000 (line 242). The repository structure section also omits the closing code fence.",
+   "suggestion": "Align the README with the actual UI labels and parameters.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No clinical-use disclaimer or validation for a research pipeline that produces morphometric values",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 34,
+   "line_end": 34,
+   "evidence": "\"Developed for publication-quality biophysics and neuroimaging research.\"",
+   "explanation": "The module reports volumes, intensities, asymmetry indices, and connectomes, and the help text calls the output 'publication-quality' and 'clinical'. There is no statement that the outputs are research-only, no validation data, and no tests or sample data to check the pipeline.",
+   "suggestion": "Add a research-use-only disclaimer, a sample dataset or test, and a short validation note.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "I could not run the build, Slicer, SlicerElastix, or the pipeline, and I did not verify the registration result.",
+  "I did not read the binary atlas (Resources/Atlas/AAL3v1_1mm.nii.gz) or the color table beyond its first 8 lines, so I did not check that the label IDs match the atlas.",
+  "I did not check the MNI152 template file itself, since it is not in the listing.",
+  "I did not fetch the scm_url or the revision 'main', so the source at the pinned revision is unverified; the catalog entry pins 'main' rather than a commit.",
+  "I did not check the screenshot or the icon content."
+ ],
+ "questions_for_author": [
+  "Is Resources/Templates/MNI152_T1_1mm.nii.gz committed on the revision that will be indexed? If so, what are its source and license?",
+  "What are the source and license terms for the AAL3 atlas labelmap and color table?",
+  "Was the transform direction from registerVolumes(volume, template) checked against the atlas placement? Please show a validation result on a test subject."
+ ]
+}

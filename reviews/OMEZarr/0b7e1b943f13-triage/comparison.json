@@ -1,0 +1,354 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Class-level multiscales cache is never bounded or invalidated on store change",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "OMEZarr/OMEZarr.py",
+   "line": 380,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Class-level multiscales cache is never bounded or invalidated on store change",
+     "file": "OMEZarr/OMEZarr.py",
+     "line_start": 380,
+     "line_end": 380,
+     "evidence": "    _multiscalesCache = {}",
+     "explanation": "Every opened store (and every scene image, line 1053) is kept in a process-wide dict of lazy dask-backed multiscales for the lifetime of the Slicer session; clearCache() exists but I found no call to it in the code I read. Opening many large stores in one session accumulates metadata and open store handles.",
+     "suggestion": "Bound the cache (e.g. keep the last few stores) or clear it on scene close.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "OMEZarr/OMEZarr.py",
+      "line": 380
+     }
+    }
+   ]
+  },
+  {
+   "title": "Loading runs in a worker thread while the GUI thread pumps events",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "OMEZarr/OMEZarr.py",
+   "line": 284,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Loading runs in a worker thread while the GUI thread pumps events",
+     "file": "OMEZarr/OMEZarr.py",
+     "line_start": 284,
+     "line_end": 291,
+     "evidence": "    thread = threading.Thread(target=target, name=\"OMEZarr\", daemon=True)\n    thread.start()\n    while thread.is_alive():\n        slicer.app.processEvents()",
+     "explanation": "runResponsive keeps the UI responsive by calling processEvents in a loop, which lets the user trigger other actions (closing the scene, deleting nodes, starting another load) while a volume is being written into a preallocated VTK buffer. This is a pragmatic pattern rather than a defect, but re-entrancy during a load is not guarded.",
+     "suggestion": "Disable the module panel and the load actions while a load is in progress, or document the re-entrancy assumption.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "OMEZarr/OMEZarr.py",
+      "line": 284
+     }
+    }
+   ]
+  },
+  {
+   "title": "ngff-zarr is pip-installed into Slicer's Python on first use, silently when no GUI confirmation is possible",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "OMEZarr/OMEZarr.py",
+   "line": 386,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "ngff-zarr is pip-installed into Slicer's Python on first use, silently when no GUI confirmation is possible",
+     "file": "OMEZarr/OMEZarr.py",
+     "line_start": 386,
+     "line_end": 394,
+     "evidence": "        requirement = \"ngff-zarr[remote]>=0.52.0\"\n        if not slicer.packaging.pip_check(requirement):\n            interactive = slicer.util.mainWindow() and not slicer.app.testingEnabled()\n            if interactive and not slicer.util.confirmOkCancelDisplay(",
+     "explanation": "The dependency is installed into Slicer's shared Python environment the first time any OME-Zarr store is opened (including via slicer.util.loadNodeFromFile or drag-and-drop). When there is no main window or testing is enabled, `interactive` is false and pip_install runs with no confirmation at all, so a scripted or headless session modifies the shared environment without asking. In the GUI the confirmation is present, which is the acceptable path; the non-interactive path is the gap.",
+     "suggestion": "Refuse to install (and raise a clear error telling the user to install ngff-zarr) when no interactive confirmation is possible, or gate the silent install behind an explicit opt-in setting.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "OMEZarr/OMEZarr.py",
+      "line": 386
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Runtime pip install of ngff-zarr pulls transitive dependencies into Slicer's Python",
+     "file": "OMEZarr/OMEZarr.py",
+     "line_start": 386,
+     "line_end": 394,
+     "evidence": "requirement = \"ngff-zarr[remote]>=0.52.0\"\n        if not slicer.packaging.pip_check(requirement):\n            interactive = slicer.util.mainWindow() and not slicer.app.testingEnabled()",
+     "explanation": "OMEZarr.py:386-394 installs 'ngff-zarr[remote]>=0.52.0' into Slicer's shared Python when a store is opened. The install is confirmed interactively but not in testing mode. Transitive dependencies could downgrade or conflict with packages Slicer bundles (for example numpy or requests). I did not verify the resolved dependency set, so the risk is unverified.",
+     "suggestion": "Document the resolved dependency set. Confirm the install does not downgrade Slicer-bundled packages, and state the install in the extension description.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "OMEZarr/OMEZarr.py",
+      "line": 386
+     }
+    }
+   ]
+  },
+  {
+   "title": "5 MB tutorial video committed to the repository",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "README.md",
+   "line": 34,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "5 MB tutorial video committed to the repository",
+     "file": "README.md",
+     "line_start": 34,
+     "line_end": 34,
+     "evidence": "**[Watch the walkthrough video](Screenshots/SlicerOMEZarr-tutorial.mp4)** (1 min, with captions), recorded on",
+     "explanation": "Screenshots/SlicerOMEZarr-tutorial.mp4 (about 5 MB) is committed rather than hosted externally. It is small enough not to break the build, but it grows the repository permanently and is not needed to build or run the extension.",
+     "suggestion": "Host the video externally (as the README already does for the user-attachments link on line 32) or keep it out of the source tree.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 34
+     }
+    }
+   ]
+  },
+  {
+   "title": "Could not confirm the settings-panel editingFinished lambda",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "OMEZarr/OMEZarr.py",
+   "line": 2311,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Could not confirm the settings-panel editingFinished lambda",
+     "file": "OMEZarr/OMEZarr.py",
+     "line_start": 2311,
+     "line_end": 2313,
+     "evidence": "self.storageOptionsEdit.connect(\n            \"editingFinished()\", lambda: Settings.set(Settings.STORAGE_OPTIONS, self.storageOptionsEdit.text)",
+     "explanation": "OMEZarr.py:2312 passes self.storageOptionsEdit.text as a value to Settings.set. I did not check whether the Qt binding exposes this as a property or a method, so the stored value may be wrong. This is a minor, unverified bug candidate, not a safety issue.",
+     "suggestion": "Confirm the attribute access works in Slicer's Qt bindings, or use .text() and test that the setting persists.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "OMEZarr/OMEZarr.py",
+      "line": 2311
+     }
+    }
+   ]
+  },
+  {
+   "title": "Dependency requirement is a lower bound only; effect on Slicer-bundled packages not verifiable here",
+   "category": "environment",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "OMEZarr/OMEZarr.py",
+   "line": 386,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Dependency requirement is a lower bound only; effect on Slicer-bundled packages not verifiable here",
+     "file": "OMEZarr/OMEZarr.py",
+     "line_start": 386,
+     "line_end": 386,
+     "evidence": "        requirement = \"ngff-zarr[remote]>=0.52.0\"",
+     "explanation": "The requirement is not an exact pin, which is good, but pip may still resolve transitive requirements that upgrade or downgrade packages Slicer bundles (numpy, dask, zarr). I could not inspect ngff-zarr's metadata from this environment, so whether a downgrade of a Slicer-bundled package can occur is unverified rather than established.",
+     "suggestion": "State in the README which packages ngff-zarr[remote] pulls in, and consider passing --no-deps or a constraints file if any bundled package can be replaced.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "OMEZarr/OMEZarr.py",
+      "line": 386
+     }
+    }
+   ]
+  },
+  {
+   "title": "Display-units setting mutates the global application length unit node",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "OMEZarr/OMEZarr.py",
+   "line": 1607,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Display-units setting mutates the global application length unit node",
+     "file": "OMEZarr/OMEZarr.py",
+     "line_start": 1607,
+     "line_end": 1611,
+     "evidence": "        unitNode = slicer.mrmlScene.GetNodeByID(\"vtkMRMLUnitNodeApplicationLength\")\n        if unitNode is None:\n            return\n        unitNode.SetDisplayCoefficient(1.0 / LENGTH_UNIT_TO_MM[lengthUnit])\n        unitNode.SetSuffix(symbol)",
+     "explanation": "When the optional 'display units' setting is on, loading a store changes Slicer's application-wide length unit, which affects rulers and measurements in every module until resetDisplayUnits() is called. It is opt-in and reversible, so this is informational.",
+     "suggestion": "Mention in the setting's tooltip that it changes Slicer's global length unit for the session.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "OMEZarr/OMEZarr.py",
+      "line": 1607
+     }
+    }
+   ]
+  },
+  {
+   "title": "Module state is kept in QSettings rather than a parameter node",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "OMEZarr/OMEZarr.py",
+   "line": 78,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Module state is kept in QSettings rather than a parameter node",
+     "file": "OMEZarr/OMEZarr.py",
+     "line_start": 78,
+     "line_end": 89,
+     "evidence": "class Settings:\n    \"\"\"QSettings keys. Values are read on each use so the module panel takes effect immediately.\"\"\"",
+     "explanation": "Slicer convention is to store module state in a parameter node so it is saved with the scene and can be set from Python. Here the memory budget, orientation assumption, label/time options and storage options are global QSettings values, so they are not scene-specific and are not captured in a saved scene.",
+     "suggestion": "Consider a parameter node for per-scene options, keeping QSettings only for user preferences.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "OMEZarr/OMEZarr.py",
+      "line": 78
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [],
+ "disputes": [],
+ "matrix": {
+  "safety": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "environment": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "packaging": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "utility": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  }
+ },
+ "overall": {
+  "deepseek": "minor issues",
+  "flash-lite": "no concerns",
+  "haiku": "minor issues"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 0,
+  "single": 7,
+  "unverified": 0,
+  "total": 8
+ }
+}

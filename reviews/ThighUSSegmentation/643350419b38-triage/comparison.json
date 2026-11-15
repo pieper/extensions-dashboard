@@ -1,0 +1,825 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Multi-minute inference runs synchronously on the GUI thread",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+   "line": 767,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Multi-minute inference runs synchronously on the GUI thread",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 767,
+     "line_end": 775,
+     "evidence": "with contextlib.redirect_stdout(\n            logWriter\n        ), contextlib.redirect_stderr(logWriter):\n            result = run_full_pipeline(\n                input_image_path=str(inputMhaPath),",
+     "explanation": "`onApply` calls `self.logic.run(...)` directly from the button handler (lines 261-270); the only `slicer.app.processEvents()` calls are in `appendLog` (line 230) and around the call (lines 259, 318). During nnU-Net inference Slicer's window is unresponsive, there is no progress bar and no cancel, and the global stdout/stderr redirect (lines 767-769) captures output from any other code that prints during that window.",
+     "suggestion": "Run the pipeline in a `slicer.util.ProgressDialog`/`qSlicerCLIProgressBar`-style worker (e.g. a `qt.QTimer`-driven or thread-based worker) and keep the GUI responsive; scope the stdout redirect to the worker.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 767
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Long inference pipeline runs synchronously on the GUI thread",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 767,
+     "line_end": 775,
+     "evidence": "result = run_full_pipeline(",
+     "explanation": "The run_full_pipeline call (preprocessing, nnU-Net inference, and analysis) runs on the Qt main thread. Segmenting a volume with nnU-Net can take minutes and will freeze the Slicer window. The log uses processEvents, which is only a partial mitigation. Users may think Slicer has hung, and the dialog cannot be cancelled.",
+     "suggestion": "Run the pipeline in a worker thread or a separate process with progress reporting and cancellation, and update the log via signals from the main thread.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 770
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "pip_install of the wrapper package pulls nnU-Net (and its torch dependency) into Slicer's shared Python",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+   "line": 636,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "pip_install of the wrapper package pulls nnU-Net (and its torch dependency) into Slicer's shared Python",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 636,
+     "line_end": 637,
+     "evidence": "self.log(f\"Installing {self.PACKAGE_SPEC} with slicer.util.pip_install...\")\n        slicer.util.pip_install(self.PACKAGE_SPEC)",
+     "explanation": "`PACKAGE_SPEC = \"thigh-us-segmentation>=0.2.9\"` (line 353) is installed into Slicer's shared Python. README line 91 lists `nnU-Net v2 >= 2.6` as a requirement and the code adds `nnUNetv2_predict_from_modelfolder` to PATH (line 466), so nnunetv2 is resolved from PyPI as a dependency. nnunetv2 declares a torch requirement, so pip may upgrade/downgrade the shared torch that PyTorchUtils installed (e.g. to a CPU wheel or to 2.9.x, which this extension itself excludes at line 518) and thereby break other extensions for users who never open this module. The index policy explicitly names nnunetv2 as a package that must use the NNUNet extension's install logic instead. I could not inspect the package's dependency metadata, so the exact resolution is unverified.",
+     "suggestion": "Do not let pip resolve nnU-Net/torch: either depend on the NNUNet extension and reuse its installed nnU-Net, or install the wrapper with `--no-deps` plus an explicit, reviewed list of dependencies, and re-verify torch/opencv versions after installation.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 636
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Unpinned pip install of thigh-us-segmentation may pull PyTorch from PyPI through nnU-Net",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 634,
+     "line_end": 637,
+     "evidence": "slicer.util.pip_install(self.PACKAGE_SPEC)",
+     "explanation": "The module guards torch itself (ensure_compatible_torch, lines 513-556), but then runs pip_install on thigh-us-segmentation>=0.2.9 with no constraints. The README says nnU-Net v2 is installed as a dependency. Installing nnunetv2 can make pip replace or pull torch from PyPI if the installed torch does not match its declared requirement. This bypasses the PyTorchUtils path that the module otherwise relies on, and can change the shared PyTorch for users who never open this module. The package's dependency tree was not in the repo and could not be checked.",
+     "suggestion": "Install nnU-Net and torch-dependent packages through the NNUNet extension's install logic, or pass pip constraints that pin torch to the installed version (or use --no-deps followed by an explicit list of non-torch dependencies). Document the exact transitive dependencies, and test a clean install with PyTorch already present to confirm torch is not reinstalled.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 637
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "1.7 MB PNG committed twice",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ThighUSSegmentation/CMakeLists.txt",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "1.7 MB PNG committed twice",
+     "file": "ThighUSSegmentation/CMakeLists.txt",
+     "line_start": 9,
+     "line_end": 11,
+     "evidence": "set(MODULE_PYTHON_RESOURCES\n    Resources/Icons/${MODULE_NAME}.png\n  )",
+     "explanation": "`ThighUSSegmentation.png` (1,756,998 bytes) exists both at the repository root (used only as the catalog icon URL) and at `ThighUSSegmentation/Resources/Icons/ThighUSSegmentation.png` with the identical size, so roughly 3.5 MB of binary is committed for one icon. This is not a load failure, but a module icon of that size is unnecessary.",
+     "suggestion": "Downscale the icon (e.g. 128x128) and keep a single copy, or reference the root file from CMake.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/CMakeLists.txt",
+      "line": 9
+     }
+    }
+   ]
+  },
+  {
+   "title": "Case ID can resolve to a parent directory ('..' or '.')",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+   "line": 239,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Case ID can resolve to a parent directory ('..' or '.')",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 239,
+     "line_end": 245,
+     "evidence": "caseId = self.sanitizeCaseId(self.caseIdEdit.text)",
+     "explanation": "sanitizeCaseId (lines 150-166) replaces slashes and similar characters but does not reject '.' or '..'. The case ID is used as a path component at line 745 (caseDir = outputRoot / caseId), so '..' writes outputs (the input MHA, the CSV, and the segmentation) into the parent of the chosen output folder. The inputMhaPath.unlink() at lines 750-751 also targets a file in that location. The impact is limited to user-typed input, but it does write outside the selected folder.",
+     "suggestion": "Reject case IDs equal to '.' or '..' (or that start with '.') in sanitizeCaseId, and verify after joining that caseDir resolves inside outputRoot.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 239
+     }
+    }
+   ]
+  },
+  {
+   "title": "Executed pipeline is unpinned and outside the reviewed repository",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+   "line": 352,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Executed pipeline is unpinned and outside the reviewed repository",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 352,
+     "line_end": 355,
+     "evidence": "PACKAGE_MIN_VERSION = \"0.2.9\"\n    PACKAGE_SPEC = f\"thigh-us-segmentation>={PACKAGE_MIN_VERSION}\"\n    PACKAGE_DISTRIBUTION_NAME = \"thigh-us-segmentation\"\n    PACKAGE_IMPORT_NAME = \"ThighUSSegmentation\"",
+     "explanation": "The repository contains only the GUI; all image processing, inference and the Zenodo download/extraction happen in whatever `thigh-us-segmentation` release is newest at install time (no upper bound, no hash). A future release of that package runs with full user privileges inside Slicer without any further review, and the model archive is loaded by nnU-Net (torch checkpoint loading) from a network download. Nothing malicious was found in the reviewed code, but the reviewed code is not what actually processes the images.",
+     "suggestion": "Pin an exact reviewed version (or a narrow range) and document the reviewed package version and model archive checksum in the README.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 352
+     }
+    }
+   ]
+  },
+  {
+   "title": "Misleading warning when no femur is detected",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+   "line": 292,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Misleading warning when no femur is detected",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 284,
+     "line_end": 297,
+     "evidence": "The femur was not detected.",
+     "explanation": "distancesWereCalculated is only false when df_results is empty. The message always says the femur was not detected, which may not be the actual failure (for example, a failed nnU-Net run that returns no results). Users may draw the wrong conclusion from the warning.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 292
+     }
+    }
+   ]
+  },
+  {
+   "title": "Model download integrity is not verified in the module",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+   "line": 678,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Model download integrity is not verified in the module",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 675,
+     "line_end": 680,
+     "evidence": "The model archive will be downloaded from Zenodo and extracted.",
+     "explanation": "The consent dialog correctly asks before downloading. The download and extraction occur inside the external library (not in this repo), and no checksum or signature check is visible in this module. A corrupted or tampered archive would be accepted silently. This could not be verified in the repo.",
+     "suggestion": "Ask the library to verify a published SHA-256 for the Zenodo archive before extracting, and document the checksum in the README.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 678
+     }
+    }
+   ]
+  },
+  {
+   "title": "Model-presence check requires all five folds, so the download prompt can repeat every run",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+   "line": 661,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Model-presence check requires all five folds, so the download prompt can repeat every run",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 661,
+     "line_end": 669,
+     "evidence": "for candidate in model_root.glob(\"Dataset*/nnUNetTrainer*\"):\n                required = [candidate / \"dataset.json\", candidate / \"plans.json\"]\n                required.extend(\n                    candidate / f\"fold_{fold}\" / \"checkpoint_best.pth\"\n                    for fold in range(5)\n                )",
+     "explanation": "A model is only considered present if `fold_0`..`fold_4` checkpoints all exist. If the Zenodo archive ships a single fold (common for nnU-Net releases), the extension asks the user to authorise a multi-GB download on every Apply, and the library may re-download each time. I could not inspect the archive contents to confirm which folds it contains.",
+     "suggestion": "Treat the model as present when the folds actually used by the pipeline exist (or when the library reports the model as available), and remember the user's authorisation.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 661
+     }
+    }
+   ]
+  },
+  {
+   "title": "No automated tests and no test class",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+   "line": 27,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No automated tests and no test class",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 27,
+     "line_end": 27,
+     "evidence": "class ThighUSSegmentation(ScriptedLoadableModule):",
+     "explanation": "The repository has no `ThighUSSegmentationTest` class, no `Testing/` directory and no CI workflow (only 9 files total), so the extension's own logic (case-ID sanitising, markup ordering, dependency checks) is untested and regressions would only surface at runtime for users.",
+     "suggestion": "Add a `ScriptedLoadableModuleTest` covering `sanitizeCaseId`, `sort_markups_loading_order` and the dependency checks, plus a minimal CI workflow.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 27
+     }
+    }
+   ]
+  },
+  {
+   "title": "No clinical-use disclaimer for a quantitative measurement tool",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 231,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No clinical-use disclaimer for a quantitative measurement tool",
+     "file": "README.md",
+     "line_start": 229,
+     "line_end": 235,
+     "evidence": "The pipeline calculates quantitative anatomical measurements, including muscle and tissue thickness measurements.",
+     "explanation": "The extension outputs muscle/tissue thickness measurements from ultrasound that a clinician could read as diagnostic; the README and module help text contain no statement that it is a research tool and not a medical device, and no accuracy/validation figures for the model are reported.",
+     "suggestion": "Add a short research-use-only disclaimer and, if available, the model's validation dataset and performance metrics.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 231
+     }
+    }
+   ]
+  },
+  {
+   "title": "Process-wide PATH mutation persists for the whole Slicer session",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+   "line": 496,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Process-wide PATH mutation persists for the whole Slicer session",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 496,
+     "line_end": 500,
+     "evidence": "for scriptsDir in existingDirs:\n            if scriptsDir not in pathParts:\n                pathParts.insert(0, scriptsDir)\n\n        os.environ[\"PATH\"] = os.pathsep.join(pathParts)",
+     "explanation": "Every Apply prepends Slicer's Python script directories to the global `PATH`, which affects subprocesses launched by any other module or extension for the rest of the session. It is not restored on completion or module close.",
+     "suggestion": "Pass the resolved executable path directly to the pipeline (or set PATH only for the duration of the call and restore it afterwards).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 496
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "PATH is modified process-wide with Slicer's executable directories",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 493,
+     "line_end": 500,
+     "evidence": "os.environ[\"PATH\"] = os.pathsep.join(pathParts)",
+     "explanation": "The module prepends several directories (including the Slicer bin dir and possibly generic Scripts or bin folders) to PATH for the whole Slicer process. This is not undone and affects every subprocess that Slicer or other extensions launch, and can shadow other executables. This is a global side effect that persists after the module is used.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 500
+     }
+    }
+   ]
+  },
+  {
+   "title": "Silent overwrite/delete of files in the user-chosen output folder",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+   "line": 744,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Silent overwrite/delete of files in the user-chosen output folder",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 744,
+     "line_end": 751,
+     "evidence": "outputRoot = Path(outputRoot)\n        caseDir = outputRoot / caseId\n        caseDir.mkdir(parents=True, exist_ok=True)\n\n        inputMhaPath = caseDir / f\"{caseId}_slicer_input.mha\"\n\n        if inputMhaPath.exists():\n            inputMhaPath.unlink()",
+     "explanation": "The case directory is created with `exist_ok=True` and an existing `<caseId>_slicer_input.mha` is deleted without asking; the results CSV (line 794-797) and the library's outputs are then written into the same directory, overwriting previous results for a reused Case ID. The Case ID is sanitised (lines 150-166), so this is confined to the folder the user picked, but a user reusing a Case ID loses earlier results silently.",
+     "suggestion": "Warn (or refuse) when the case directory already contains results, or write into a fresh timestamped subdirectory.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 744
+     }
+    }
+   ]
+  },
+  {
+   "title": "Downloads and installs are gated by explicit confirmation dialogs",
+   "category": "safety",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+   "line": 622,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Downloads and installs are gated by explicit confirmation dialogs",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 622,
+     "line_end": 632,
+     "evidence": "accepted = slicer.util.confirmOkCancelDisplay(\n            f\"Thigh US Segmentation needs to {description} the Python package \"",
+     "explanation": "Both the pip install (lines 622-632) and the model download (lines 675-684) require an explicit OK, and declining raises `DependencySetupCancelled` which is reported to the user (lines 299-301). No telemetry, no upload of images or identifiers, no credentials and no obfuscated code were found anywhere in the repository.",
+     "suggestion": "No change needed; keep this behaviour if the dependency handling is reworked.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 622
+     }
+    }
+   ]
+  },
+  {
+   "title": "README points to a LICENSE file that does not exist under that name",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "README.md",
+   "line": 318,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "README points to a LICENSE file that does not exist under that name",
+     "file": "README.md",
+     "line_start": 318,
+     "line_end": 318,
+     "evidence": "See the `LICENSE` file for the license covering the extension source code.",
+     "explanation": "The repository ships `LICENSE.txt`, not `LICENSE`; the reference is cosmetic but makes the license harder to locate for packagers.",
+     "suggestion": "Update the README reference to `LICENSE.txt`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 318
+     }
+    }
+   ]
+  },
+  {
+   "title": "UI label and README disagree; no tests or sample data",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "README.md",
+   "line": 161,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "UI label and README disagree; no tests or sample data",
+     "file": "README.md",
+     "line_start": 161,
+     "line_end": 161,
+     "evidence": "Choose the ultrasound image from the **Input volume** selector.",
+     "explanation": "The UI label at ThighUSSegmentation/ThighUSSegmentation.py line 126 is 'Input image:'. The README also lacks sample data and tests, which makes validation harder for users and maintainers. These are non-blocking documentation and maturity items.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 161
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Multi-minute inference runs synchronously on the GUI thread",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+   "line": 767,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Multi-minute inference runs synchronously on the GUI thread",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 767,
+     "line_end": 775,
+     "evidence": "with contextlib.redirect_stdout(\n            logWriter\n        ), contextlib.redirect_stderr(logWriter):\n            result = run_full_pipeline(\n                input_image_path=str(inputMhaPath),",
+     "explanation": "`onApply` calls `self.logic.run(...)` directly from the button handler (lines 261-270); the only `slicer.app.processEvents()` calls are in `appendLog` (line 230) and around the call (lines 259, 318). During nnU-Net inference Slicer's window is unresponsive, there is no progress bar and no cancel, and the global stdout/stderr redirect (lines 767-769) captures output from any other code that prints during that window.",
+     "suggestion": "Run the pipeline in a `slicer.util.ProgressDialog`/`qSlicerCLIProgressBar`-style worker (e.g. a `qt.QTimer`-driven or thread-based worker) and keep the GUI responsive; scope the stdout redirect to the worker.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 767
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Long inference pipeline runs synchronously on the GUI thread",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 767,
+     "line_end": 775,
+     "evidence": "result = run_full_pipeline(",
+     "explanation": "The run_full_pipeline call (preprocessing, nnU-Net inference, and analysis) runs on the Qt main thread. Segmenting a volume with nnU-Net can take minutes and will freeze the Slicer window. The log uses processEvents, which is only a partial mitigation. Users may think Slicer has hung, and the dialog cannot be cancelled.",
+     "suggestion": "Run the pipeline in a worker thread or a separate process with progress reporting and cancellation, and update the log via signals from the main thread.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 770
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "pip_install of the wrapper package pulls nnU-Net (and its torch dependency) into Slicer's shared Python",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+   "line": 636,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "pip_install of the wrapper package pulls nnU-Net (and its torch dependency) into Slicer's shared Python",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 636,
+     "line_end": 637,
+     "evidence": "self.log(f\"Installing {self.PACKAGE_SPEC} with slicer.util.pip_install...\")\n        slicer.util.pip_install(self.PACKAGE_SPEC)",
+     "explanation": "`PACKAGE_SPEC = \"thigh-us-segmentation>=0.2.9\"` (line 353) is installed into Slicer's shared Python. README line 91 lists `nnU-Net v2 >= 2.6` as a requirement and the code adds `nnUNetv2_predict_from_modelfolder` to PATH (line 466), so nnunetv2 is resolved from PyPI as a dependency. nnunetv2 declares a torch requirement, so pip may upgrade/downgrade the shared torch that PyTorchUtils installed (e.g. to a CPU wheel or to 2.9.x, which this extension itself excludes at line 518) and thereby break other extensions for users who never open this module. The index policy explicitly names nnunetv2 as a package that must use the NNUNet extension's install logic instead. I could not inspect the package's dependency metadata, so the exact resolution is unverified.",
+     "suggestion": "Do not let pip resolve nnU-Net/torch: either depend on the NNUNet extension and reuse its installed nnU-Net, or install the wrapper with `--no-deps` plus an explicit, reviewed list of dependencies, and re-verify torch/opencv versions after installation.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 636
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Unpinned pip install of thigh-us-segmentation may pull PyTorch from PyPI through nnU-Net",
+     "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+     "line_start": 634,
+     "line_end": 637,
+     "evidence": "slicer.util.pip_install(self.PACKAGE_SPEC)",
+     "explanation": "The module guards torch itself (ensure_compatible_torch, lines 513-556), but then runs pip_install on thigh-us-segmentation>=0.2.9 with no constraints. The README says nnU-Net v2 is installed as a dependency. Installing nnunetv2 can make pip replace or pull torch from PyPI if the installed torch does not match its declared requirement. This bypasses the PyTorchUtils path that the module otherwise relies on, and can change the shared PyTorch for users who never open this module. The package's dependency tree was not in the repo and could not be checked.",
+     "suggestion": "Install nnU-Net and torch-dependent packages through the NNUNet extension's install logic, or pass pip constraints that pin torch to the installed version (or use --no-deps followed by an explicit list of non-torch dependencies). Document the exact transitive dependencies, and test a clean install with PyTorch already present to confirm torch is not reinstalled.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ThighUSSegmentation/ThighUSSegmentation.py",
+      "line": 637
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D3",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 5,
+  "single": 12,
+  "unverified": 0,
+  "total": 15
+ }
+}

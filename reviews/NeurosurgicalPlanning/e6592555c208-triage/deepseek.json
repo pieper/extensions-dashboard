@@ -1,0 +1,130 @@
+{
+ "purpose": "NeurosurgicalPlanning (module name SurgicalPlanning) is a scripted 3D Slicer module for preoperative neurosurgical planning: MRI/CT registration (BRAINSFit, optional Elastix/ANTs), skull/brain extraction (optional HD-BET, Wrap Solidify), tumor/ventricle/vessel segmentation, vesselness filtering (optional SlicerVMTK) and interactive 3D planning views. It targets neurosurgeons and researchers preparing multimodal neuroimaging.",
+ "summary": "I read the catalog entry, CMake files, README, DEPENDENCIES.md, docs/EXTENSION_SUBMISSION.md, LICENSE/NOTICE and large parts of the 24k-line SurgicalPlanning.py, and searched it for network, subprocess, deserialization, pip-install and sys.path patterns. I found no network access, no telemetry, no subprocess/eval/pickle, no package installation by this extension (PyTorch is only imported, and HD-BET setup is delegated to the HDBrainExtraction extension on an explicit button press), and temp files are written to Slicer's temp directory and removed. Licensing is Apache-2.0 with NOTICE. Main issues are non-blocking: long HD-BET/vesselness work runs on the GUI thread with processEvents, no tests, and the README asserts the extension is already accepted into the index.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Searched SurgicalPlanning.py for subprocess/os.system/eval/exec/pickle/urllib/requests/socket/pip_install and found none; the only file writes are to slicer.util.tempDirectory() (lines 13421-13424) with cleanup in a finally block (13511-13516). No data leaves the machine and no credentials or obfuscated code were found."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Module-level imports are limited to vtk/qt/ctk/slicer/numpy-free stdlib (lines 1-20); numpy, scipy, torch and HD_BET are imported inside functions. No sys.path, os.environ, warnings/logging global changes or monkey-patching were found; PyTorch is only imported (13389, 13587) and HD-BET dependency setup is delegated to HDBrainExtractionToolLogic.setupPythonRequirements() (13379-13381)."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Root CMakeLists.txt and SurgicalPlanning/CMakeLists.txt install SurgicalPlanning.py plus Resources/UI/SurgicalPlanning.ui, and EXTENSION_DEPENDS is \"NA\" matching build_dependencies []. However the author's own docs/EXTENSION_SUBMISSION.md line 21 states a real CMake/CPack build has not yet been performed, and ~3.5 MB of PNG screenshots are committed."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE and LICENSE.txt both contain the full Apache License 2.0 text ending with 'Copyright 2026 Dimitrios Giakoumettis', and NOTICE is present; README line 89 states 'Licensed under the **Apache License 2.0**'. Optional dependencies are not redistributed (DEPENDENCIES.md lines 14-15)."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The module is a single 1 MB / 24k-line file with no ScriptedLoadableModuleTest, and long-running work such as HD-BET (13375-13450) and vesselness runs synchronously in the widget handler while calling slicer.app.processEvents(), which risks UI re-entrancy. Error handling is generally good (slicer.util.errorDisplay at 13503, logging.exception)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents installation, workflow, dependencies and a clinical-use disclaimer (lines 83-85), and the module help text states research-only intent (52-58). There are no automated tests, no sample data, and the README asserts the extension is already accepted into the index (line 22), which cannot be verified from this repository."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "HD-BET and vesselness run synchronously on the GUI thread with processEvents",
+   "file": "SurgicalPlanning/SurgicalPlanning.py",
+   "line_start": 13375,
+   "line_end": 13450,
+   "evidence": "slicer.app.setOverrideCursor(qt.Qt.WaitCursor)\n            slicer.app.processEvents()",
+   "explanation": "run_hd_bet(...) is called directly from the button handler (line 13439) and can take minutes on CPU. Because processEvents() is pumped before the call, the UI stays interactive and the user can trigger other module actions (segmentation edits, scene changes) while the input volume is being written and read back, which can produce inconsistent results or re-entrant state. The same pattern applies to the vesselness and Wrap Solidify paths.",
+   "suggestion": "Move HD-BET and full-volume vesselness into a slicer.util.ProgressDialog / CLI-style worker or a background thread, disable the relevant controls while running, and report progress instead of pumping the event loop.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "No automated tests in the extension",
+   "file": "SurgicalPlanning/SurgicalPlanning.py",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "",
+   "explanation": "A search for 'ScriptedLoadableModuleTest' and 'def runTest' over the repository returned no matches, so none of the registration, segmentation or 3D-view logic is covered by Slicer's extension test harness. Regressions in a 24k-line single file will only be caught manually.",
+   "suggestion": "Add a minimal ScriptedLoadableModuleTest that loads the module, creates a synthetic volume and exercises at least one non-optional workflow.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "README asserts the extension is already accepted into the Extensions Index",
+   "file": "README.md",
+   "line_start": 22,
+   "line_end": 22,
+   "evidence": "The extension was accepted into the official [3D Slicer Extensions Index](https://github.com/Slicer/ExtensionsIndex/blob/main/NeurosurgicalPlanning.json) when [PR #2413](https://github.com/Slicer/ExtensionsIndex/pull/2413) was merged on **October 16, 2026**.",
+   "explanation": "The README tells users the extension is already published and installable from the Extension Manager, which pre-empts the outcome of this review and cannot be verified from the repository. If the entry is not merged, users following the installation instructions will not find the package.",
+   "suggestion": "Reword to describe the submission as pending until the catalog entry is actually merged, or state the claim only after merge.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Author's own checklist states a real CMake/CPack build has not been performed",
+   "file": "docs/EXTENSION_SUBMISSION.md",
+   "line_start": 21,
+   "line_end": 21,
+   "evidence": "1. Perform a **real** CMake extension configuration, build and CPack packaging using an installed matching Slicer SDK/build tree or the Slicer extension build infrastructure. The mock configuration does **not** prove that Slicer can build and package this extension.",
+   "explanation": "The committed CMake files look conventional (slicerMacroBuildScriptedModule with the .py and .ui listed), but the author documents that only a mock configuration was run, so it is unverified that the package builds and that the module loads from the installed package.",
+   "suggestion": "Confirm a successful extension build/package (or CI build) before merge and update the checklist accordingly.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "info",
+   "title": "HD-BET dependency setup is delegated to the HDBrainExtraction extension on user action",
+   "file": "SurgicalPlanning/SurgicalPlanning.py",
+   "line_start": 13379,
+   "line_end": 13386,
+   "evidence": "from HDBrainExtractionTool import HDBrainExtractionToolLogic\n                dependencyLogic = HDBrainExtractionToolLogic()\n                dependencyLogic.setupPythonRequirements()",
+   "explanation": "This call can install Python packages (including PyTorch via that extension's PyTorchUtils path) into Slicer's environment. It is only reached when the user presses the HD-BET button and the installation logic belongs to the HDBrainExtraction extension, so it is not a violation of the PyTorch policy, but users should be told that pressing the button may install packages.",
+   "suggestion": "Mention in the UI/README that the first HD-BET run may install Python packages through the HDBrainExtraction extension.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Large binary screenshots committed to the repository",
+   "file": "Documentation/Images/NeurosurgicalPlanning_Workflow.png",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "",
+   "explanation": "Three PNGs of roughly 0.45-1.6 MB each (~3.5 MB total) are committed. This is acceptable for documentation but inflates every clone of the extension source.",
+   "suggestion": "Optionally downscale the screenshots or host them outside the source tree.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Single 1 MB / 24k-line module file",
+   "file": "SurgicalPlanning/SurgicalPlanning.py",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "",
+   "explanation": "All logic, UI wiring and algorithms live in one file of 24357 lines, which makes review, testing and maintenance difficult and increases the chance that unrelated workflows break together.",
+   "suggestion": "Consider splitting logic into separate modules (registration, segmentation, vesselness, 3D view) in a future release.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The exact filename of the single file under SurgicalPlanning/Resources/UI/ was not listed; I could not confirm it is SurgicalPlanning.ui as referenced by SurgicalPlanning/CMakeLists.txt line 8.",
+  "I did not read the whole 24357-line SurgicalPlanning.py; roughly the first 120 lines, lines 13020-13760 and 23260-23360 were read in full, plus targeted regex searches for network, subprocess, deserialization, pip, sys.path and file-write patterns.",
+  "Observer removal in cleanup()/onClose() and parameter-node GUI observer handling were not verified line by line.",
+  "The referenced commit e6592555c208e4a7eff545008263c1ad95edc4c8 and the upstream repository state (including whether PR #2413 was merged) could not be verified; the catalog entry pins scm_revision 'main', so the reviewed source is the snapshot provided here.",
+  "No build, packaging or runtime test was performed; the extension was not loaded in Slicer.",
+  "The three PNG screenshots were not inspected for embedded patient metadata (binary files not readable with the available tools)."
+ ],
+ "questions_for_author": [
+  "Can you confirm a successful real CMake/CPack build of the extension (not only the mock configuration) and that the module loads from the installed package?",
+  "Is the README statement that the extension is already accepted into the Extensions Index accurate at the time of this review?",
+  "Would you consider moving HD-BET and full-volume vesselness off the GUI thread to avoid re-entrancy during long runs?"
+ ]
+}

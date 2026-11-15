@@ -1,0 +1,380 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Long pipelines run on the GUI thread with processEvents pumping and no re-entrancy guard",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MorphoWeaveAtlasBuilder/MorphoWeaveAtlasBuilder.py",
+   "line": 256,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Long pipelines run on the GUI thread with processEvents pumping and no re-entrancy guard",
+     "file": "MorphoWeaveAtlasBuilder/MorphoWeaveAtlasBuilder.py",
+     "line_start": 1005,
+     "line_end": 1008,
+     "evidence": "        now = time.monotonic()\n        if done == total or (now - last_ui_pump >= 0.10):\n          qt.QApplication.processEvents()\n          last_ui_pump = now",
+     "explanation": "Atlas Builder alignment/export and Model Library ingest (MorphoWeaveModelLibrary.py:589) run synchronously on the GUI thread and call processEvents to keep the UI alive. Because the Run button is not disabled during the run (self.runBtn is only enabled/disabled by _reeval, line 308), a second click during a pumped event loop can start a second pipeline that writes into the same output/library folders, and there is no cancel path for long runs. This is a usability/robustness issue, not a data-safety one, since outputs go to timestamped folders.",
+     "suggestion": "Disable the Run/Ingest buttons for the duration of the pipeline (or move the work to a slicer.util.ProgressDialog / CLI-style worker) and add a cancellation check between specimens.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "MorphoWeaveAtlasBuilder/MorphoWeaveAtlasBuilder.py",
+      "line": 256
+     }
+    }
+   ]
+  },
+  {
+   "title": "Model Library ingest does not validate the database name (path traversal / writes outside library root)",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MorphoWeaveModelLibrary/MorphoWeaveModelLibrary.py",
+   "line": 573,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Model Library ingest does not validate the database name (path traversal / writes outside library root)",
+     "file": "MorphoWeaveModelLibrary/MorphoWeaveModelLibrary.py",
+     "line_start": 573,
+     "line_end": 579,
+     "evidence": "    dbName = self.ssmNameEditor.text or Path(self.ssmTemplateModelSelector.currentPath).stem\n    dbRootPath = self.databasePathSelector.currentPath\n    db_path = os.path.join(dbRootPath, dbName)\n\n    if os.path.exists(db_path):",
+     "explanation": "The name typed in 'New Database Name' is joined to the library root without any check, so a name such as '../atlas' or 'a/b' makes ingestSSMDatabase create directories and copy files outside the configured library folder. The same unvalidated path is later passed to removeSSMDatabase, which calls shutil.rmtree(dbPath) (line 199) after a single confirmation dialog, so a mis-typed or crafted name can delete a directory the user did not intend. Atlas Builder already implements the correct guard (isSafeLibraryName, MorphoWeaveAtlasBuilder.py:536-545) but Model Library does not reuse it.",
+     "suggestion": "Reuse MorphoWeaveAtlasBuilderLogic.isSafeLibraryName (or an equivalent check) in onIngestButton and in Atlas Builder's _saveSsmToLibrary path, and refuse names containing separators, '..' or reserved characters before creating or deleting anything.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MorphoWeaveModelLibrary/MorphoWeaveModelLibrary.py",
+      "line": 573
+     }
+    }
+   ]
+  },
+  {
+   "title": "README and EXTENSION_ICONURL reference logo.png and Docs/Media/morphoweave.gif that are not in the file listing",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 10,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "README and EXTENSION_ICONURL reference logo.png and Docs/Media/morphoweave.gif that are not in the file listing",
+     "file": "CMakeLists.txt",
+     "line_start": 10,
+     "line_end": 11,
+     "evidence": "set(EXTENSION_ICONURL \"https://raw.githubusercontent.com/agporto/SlicerMorphoWeave/main/logo.png\")\nset(EXTENSION_SCREENSHOTURLS \"https://raw.githubusercontent.com/agporto/SlicerMorphoWeave/main/tutorial/images/20.png\")",
+     "explanation": "The repository listing at this revision contains Docs/Images/nsf-logo.png and tutorial/images/*.png but no root logo.png and no Docs/Media directory, while README.md:2 uses <img src=\"logo.png\"> and README.md:22 uses Docs/Media/morphoweave.gif. If those files are genuinely absent, the catalog icon URL 404s and the README renders broken images. The automated scan reported these two files as present but unreadable, so this may be a tooling limitation rather than a defect; it should be confirmed against the commit.",
+     "suggestion": "Confirm logo.png and Docs/Media/morphoweave.gif exist at the reviewed commit (or add them / point EXTENSION_ICONURL at an existing file such as Docs/Images/nsf-logo.png).",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 10
+     }
+    }
+   ]
+  },
+  {
+   "title": "pip_uninstall of tiny3d/tiny3d-rs modifies Slicer's shared Python environment",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "MorphoWeaveLandmarkTransfer/MorphoWeaveLandmarkTransfer.py",
+   "line": 211,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "pip_uninstall of tiny3d/tiny3d-rs modifies Slicer's shared Python environment",
+     "file": "MorphoWeaveLandmarkTransfer/MorphoWeaveLandmarkTransfer.py",
+     "line_start": 210,
+     "line_end": 218,
+     "evidence": "      if legacy_tiny3d_installed:\n        slicer.packaging.pip_uninstall([\"tiny3d\", \"tiny3d-rs\"])\n\n      slicer.packaging.pip_ensure(\n        requirements,\n        prompt_install=not legacy_tiny3d_installed,\n        requester=\"Landmark Transfer\",\n      )",
+     "explanation": "Installing tiny3d-rs/rustcpd is user-confirmed and acceptable, but the code also uninstalls the legacy 'tiny3d' distribution from Slicer's shared environment. Any other installed extension that imports tiny3d (for example a SlicerMorph-style point-cloud workflow) stops working after this action, for a user who only wanted to run MorphoWeave. The confirmation dialog at lines 203-206 mentions the removal, which limits the surprise, but the impact on other extensions is not stated.",
+     "suggestion": "State in the confirmation dialog that other extensions using tiny3d will stop working, and prefer installing tiny3d-rs without removing tiny3d when the two can coexist, or document the conflict in the module help text.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "MorphoWeaveLandmarkTransfer/MorphoWeaveLandmarkTransfer.py",
+      "line": 211
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Landmark Transfer uninstalls and reinstalls shared pip packages",
+     "file": "MorphoWeaveLandmarkTransfer/MorphoWeaveLandmarkTransfer.py",
+     "line_start": 210,
+     "line_end": 218,
+     "evidence": "if legacy_tiny3d_installed:\n          slicer.packaging.pip_uninstall([\"tiny3d\", \"tiny3d-rs\"])\n\n        slicer.packaging.pip_ensure(",
+     "explanation": "In _ensure_dependencies, when a legacy tiny3d is detected the code calls slicer.packaging.pip_uninstall(['tiny3d','tiny3d-rs']) and then pip_ensure. This modifies Slicer's shared Python environment and can affect other extensions that import tiny3d. It is gated by a confirmation dialog and occurs only when the user opens the module's workflow, so it is a minor concern rather than a defect.",
+     "suggestion": "Keep the confirmation. Consider documenting in the tutorial which other extensions use tiny3d so users are not surprised.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MorphoWeaveLandmarkTransfer/MorphoWeaveLandmarkTransfer.py",
+      "line": 211
+     }
+    }
+   ]
+  },
+  {
+   "title": "rustcpd calls lack local error handling",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MorphoWeaveLandmarkTransfer/MorphoWeaveLandmarkTransfer.py",
+   "line": 1569,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "rustcpd calls lack local error handling",
+     "file": "MorphoWeaveLandmarkTransfer/MorphoWeaveLandmarkTransfer.py",
+     "line_start": 1569,
+     "line_end": 1583,
+     "evidence": "pca = rustcpd.register_atlas(\n            np.asarray(tgt_n),             # scaled target\n            np.asarray(src_n),             # source is the SSM base",
+     "explanation": "runDeformable calls rustcpd.register_atlas and register_deformable without try/except around the native calls. A failure surfaces only through the caller. Error reporting therefore depends on higher-level handling that was not fully traced.",
+     "suggestion": "Confirm that batch and single-run callers surface exceptions to the user with a clear message.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "MorphoWeaveLandmarkTransfer/MorphoWeaveLandmarkTransfer.py",
+      "line": 1569
+     }
+    }
+   ]
+  },
+  {
+   "title": "Several megabytes of images committed to the repository",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "README.md",
+   "line": 22,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Several megabytes of images committed to the repository",
+     "file": "README.md",
+     "line_start": 22,
+     "line_end": 22,
+     "evidence": "  <img src=\"Docs/Media/morphoweave.gif\" alt=\"MorphoWeave statistical shape space animation\" width=\"720\">",
+     "explanation": "The tutorial images total roughly 5 MB and the animated GIF is reported at about 4 MB. This is acceptable for documentation but is on the heavy side for a source repository; it does not affect the built extension.",
+     "suggestion": "Consider hosting the animation externally or compressing it.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 22
+     }
+    }
+   ]
+  },
+  {
+   "title": "Submission doc tells the author what to state in the index PR; no reviewer-directed instructions found",
+   "category": "safety",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "Docs/ExtensionCatalogSubmission.md",
+   "line": 41,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Submission doc tells the author what to state in the index PR; no reviewer-directed instructions found",
+     "file": "Docs/ExtensionCatalogSubmission.md",
+     "line_start": 41,
+     "line_end": 45,
+     "evidence": "State that:\n\n- The repository follows the recommended `Slicer+ExtensionName` naming convention while the extension remains displayed as MorphoWeave in Slicer.\n- The extension operates locally and does not upload user data.",
+     "explanation": "This is author-facing publication guidance, not an attempt to instruct AI reviewers to skip checks, so it is not a manipulation finding. I independently confirmed the claim: the only URLs in the code are documentation/help links, and no network, telemetry or upload code exists in the files I read.",
+     "suggestion": "None required.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Docs/ExtensionCatalogSubmission.md",
+      "line": 41
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unclosed file handles and first-markup assumption when reading markup files",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "MorphoWeaveModelLibrary/MorphoWeaveModelLibrary.py",
+   "line": 105,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Unclosed file handles and first-markup assumption when reading markup files",
+     "file": "MorphoWeaveModelLibrary/MorphoWeaveModelLibrary.py",
+     "line_start": 105,
+     "line_end": 111,
+     "evidence": "    def _read_json(self, path):\n      data=json.load(open(path,'r'))\n      m=(data.get('markups') or [{}])[0]",
+     "explanation": "json.load(open(...)) leaves the file handle to garbage collection, and only the first entry of the 'markups' array is read, so a .mrk.json containing several markup nodes silently yields the wrong point set. Neither is a safety issue; both are ordinary robustness nits.",
+     "suggestion": "Use a with-block and either validate that exactly one markup node is present or merge all fiducial nodes.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MorphoWeaveModelLibrary/MorphoWeaveModelLibrary.py",
+      "line": 105
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D1",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "environment": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "packaging": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  }
+ },
+ "overall": {
+  "deepseek": "minor issues",
+  "flash-lite": "no concerns",
+  "haiku": "minor issues"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 1,
+  "single": 7,
+  "unverified": 0,
+  "total": 8
+ }
+}

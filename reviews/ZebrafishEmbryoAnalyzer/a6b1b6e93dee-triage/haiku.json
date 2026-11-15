@@ -1,0 +1,120 @@
+{
+ "purpose": "Analyzes zebrafish embryo 2-D microscopy images in 3D Slicer (body length, curvature class, length/straight-line ratio, eye, edema and swim-bladder metrics) using locally run segmentation and classification models. Intended for research users who install it from the Extensions Index; the models are downloaded from Hugging Face on first use after user confirmation.",
+ "summary": "Reviewed the catalog entry, CMakeLists, the main module, MRML/logic/worker code, dependency installer, model manifest and downloader, and README. I found no malicious or concealed behavior: no telemetry, data upload or network calls outside user-confirmed model/package downloads; models are SHA-256 verified against pinned Hugging Face revisions; analysis runs in a QProcess subprocess. Main issues: EXTENSION_DEPENDS names PyTorch but the catalog entry has empty build_dependencies, the model weights carry no confirmed license (LICENSE_PENDING), and the installer downgrades numpy on macOS. I could not inspect the zebrafish-measure library, the remaining widget code, or the model files themselves.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Inspected dependency_installer.py, model_manifest.py, model_downloader.py, inference_runner.py, inference_worker.py, and bug_report.py. Downloads are pinned and checksum-verified, pip installs are user-confirmed via confirmOkCancelDisplay, and no telemetry was found. Not verified: zebrafish-measure library internals (torch.load usage) and the HF weights."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "dependency_installer.py line 43 sets NUMPY_TORCH_SPEC = \"numpy<2\" and lines 282-283 append it on macOS, downgrading numpy that Slicer bundles for all users of that Slicer. Installs are gated behind a user prompt, and the extension does not pip-install torch itself."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "CMakeLists.txt line 11 declares EXTENSION_DEPENDS \"PyTorch\", but the catalog entry has build_dependencies: []. All Lib/Core Python files listed in ZebrafishEmbryoAnalyzer/CMakeLists.txt appear to match the files present. The scm_revision is the branch 'main', which is not pinned."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "The extension code is Apache-2.0 (LICENSE). Every model entry in model_manifest.py is marked \"license\": \"LICENSE_PENDING\", and README.md line 322 says the model weights have their own terms. Distribution of the weights is therefore unconfirmed, though they are downloaded rather than bundled."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Long work runs in QProcess with progress, and the test suite is extensive. Minor issues: module-level sys.modules eviction in ZebrafishEmbryoAnalyzer.py, and a global monkey-patch of zebrafish_measure.seg in logic.py."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents installation, usage, and a research-use disclaimer, and states that analysis is not a medical device. README line 56 says the extension is not in the Extensions Manager, which conflicts with this submission. No sample data was seen in the repo. Tests exist in tests/ and in the Slicer self-test."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "EXTENSION_DEPENDS lists PyTorch but catalog build_dependencies is empty",
+   "file": "CMakeLists.txt",
+   "line_start": 11,
+   "line_end": 11,
+   "evidence": "set(EXTENSION_DEPENDS \"PyTorch\")",
+   "explanation": "CMakeLists.txt declares a runtime dependency on the PyTorch extension, and the module requires PyTorchUtils to install torch. The catalog entry sets build_dependencies to [], so the index may not build or configure the extension against PyTorch, and the dependency declaration is inconsistent between the two places.",
+   "suggestion": "Add \"PyTorch\" to build_dependencies in the catalog entry so it matches EXTENSION_DEPENDS, or justify the difference.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "Model weights downloaded by the extension have no confirmed license",
+   "file": "ZebrafishEmbryoAnalyzer/ZebrafishEmbryoAnalyzerLib/model_manifest.py",
+   "line_start": 58,
+   "line_end": 58,
+   "evidence": "\"license\": \"LICENSE_PENDING\",",
+   "explanation": "All model entries are marked LICENSE_PENDING. The README says the weights have their own license terms and points to Hugging Face model cards, but the manifest does not record what those terms are. Users have no verified permission for the weights they download and use, and the extension's Apache-2.0 license does not cover them.",
+   "suggestion": "Confirm the license on each Hugging Face model card (markdanielarndt/Zebrafish_Segmentation and markdanielarndt/Classification), record the SPDX identifier in model_manifest.py, and state any non-commercial or research-only restriction in the README and the Slicer help text.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "macOS installer downgrades numpy bundled with Slicer",
+   "file": "ZebrafishEmbryoAnalyzer/ZebrafishEmbryoAnalyzerLib/dependency_installer.py",
+   "line_start": 282,
+   "line_end": 283,
+   "evidence": "if _numpy_must_stay_v1() and (requirements or _numpy_major() >= 2):\n        requirements.append(NUMPY_TORCH_SPEC)",
+   "explanation": "On darwin, the installer appends numpy<2 to the pip install. This downgrades or pins numpy, which Slicer bundles, in the shared Slicer Python environment, affecting every extension and the Slicer session. The change is user-confirmed, but it is a shared-environment change that persists after the module is closed.",
+   "suggestion": "Prefer the PyTorch extension's own numpy constraint, which the README says it already applies. Otherwise, make the numpy downgrade an explicit, separately-confirmed step, and tell the user that it affects Slicer's shared environment.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Global monkey-patch of zebrafish_measure.seg at runtime",
+   "file": "ZebrafishEmbryoAnalyzer/ZebrafishEmbryoAnalyzerLib/logic.py",
+   "line_start": 68,
+   "line_end": 68,
+   "evidence": "_seg_module._load_unet_model = _cached_load_unet",
+   "explanation": "_install_model_cache replaces _load_unet_model inside the third-party zebrafish_measure.seg module. The patch is applied in the worker subprocess and in the in-process run_analysis path. It caches models by path and changes the behavior of any other code in the same process that uses that library.",
+   "suggestion": "Pass the cached loader explicitly through the library's API if it exposes one, or limit the patch to the worker process and document it.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Module import evicts modules from sys.modules at import time",
+   "file": "ZebrafishEmbryoAnalyzer/ZebrafishEmbryoAnalyzer.py",
+   "line_start": 48,
+   "line_end": 53,
+   "evidence": "def _evict_reload_modules():\n    for _m in _RELOAD_MODULES:\n        sys.modules.pop(_m, None)",
+   "explanation": "On import, the extension pops its own module names from sys.modules to force reloads. The work is confined to the extension's own names, so the impact is limited, but it is a global side effect that runs before the module is used.",
+   "suggestion": "Keep the eviction to setup() and enter() only, and document why it is needed for Slicer reload.",
+   "confidence": "low"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "README says the extension is not available in the Extensions Manager",
+   "file": "README.md",
+   "line_start": 56,
+   "line_end": 56,
+   "evidence": "The extension is not yet available through the Extensions Manager and must be installed manually from this repository.",
+   "explanation": "The installation section tells users to add the module path by hand, which conflicts with the catalog submission and could confuse users once the extension is listed.",
+   "suggestion": "Update the installation section to describe installation from the Extensions Manager once the entry is accepted.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "zebrafish-measure==0.2.0 PyPI package contents, including whether its loader uses torch.load with weights_only and what it does at import.",
+  "Model file contents and whether the pinned Hugging Face revisions match the sha256 values; no network access.",
+  "The actual scm_url revision (main) and the full commit contents; I read only the files given.",
+  "widget.py in full, detail_tab.py, results_tab.py, zoom_view.py, and the remaining parts of model_downloader.py (the verification and cleanup paths).",
+  "The test suite under tests/ and the ZebrafishEmbryoAnalyzerTest self-test were only listed, not run.",
+  "The Apache-2.0 LICENSE text beyond its first 30 lines, and any copyright holder line.",
+  "No CI results were available for this submission beyond the ci.yml workflow definition."
+ ],
+ "questions_for_author": [
+  "Which license applies to each Hugging Face model (markdanielarndt/Zebrafish_Segmentation and markdanielarndt/Classification)? Please record it in model_manifest.py and the README.",
+  "Should build_dependencies include \"PyTorch\" to match EXTENSION_DEPENDS?",
+  "Why is numpy<2 needed on macOS when the PyTorch extension already applies its own constraint? Can the downgrade be avoided?",
+  "Does zebrafish-measure 0.2.0 load weights with torch.load(weights_only=True) or an equivalent safe loader? The model files are loaded from disk after checksum verification."
+ ]
+}

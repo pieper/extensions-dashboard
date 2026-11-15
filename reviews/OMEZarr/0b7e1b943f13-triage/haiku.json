@@ -1,0 +1,66 @@
+{
+ "purpose": "An OME-Zarr (OME-NGFF) reader/writer extension for 3D Slicer that loads local, https:// and s3:// multiscale image stores at a chosen resolution, refines slice views, and writes volumes/labels back as OME-Zarr. It is for microscopy and medical-volume users who work with chunked multiscale stores.",
+ "summary": "I inspected the catalog entry, CMakeLists, README/TUTORIAL, the CI workflow, the test runner, and the relevant parts of OMEZarr/OMEZarr.py (helpers, ensureNgffZarr, storageOptions, writeVolume, the settings panel, and test teardown). The module installs ngff-zarr>=0.52.0 via pip only after a confirmation dialog in interactive use, and it does not install torch or pin Slicer-bundled packages. S3 is read anonymously unless credentials are supplied. I found no malicious or concealed behaviour and no blocking issue. The catalog entry is minimal but mechanically sound. Remaining gaps are listed below.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected ensureNgffZarr (OMEZarr.py:382-397), storageOptions (399-422), readStoreAttributes (157-186), writeVolume (1720-1760) and the test tearDown (2621-2625). The network fetch is only for a user-supplied URL, S3 defaults to anonymous, and rmtree targets a fresh slicer.util.tempDirectory. No pickle, eval, exec or subprocess was found in the module."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "The module calls slicer.util.pip_install('ngff-zarr[remote]>=0.52.0') at OMEZarr.py:394, gated by a confirmation dialog when interactive. ngff-zarr[remote] may pull transitive dependencies (for example obstore, dask, zarr) into Slicer's Python, which I could not resolve. There is no torch or Qt/VTK-bundling package."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMakeLists.txt sets EXTENSION_DEPENDS to NA, which matches build_dependencies []. OMEZarr/CMakeLists.txt installs OMEZarr.py and the icon via slicerMacroBuildScriptedModule. The CI workflow builds and runs the self-test on Linux, macOS and Windows."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is MIT (Copyright 2026 Fideus Labs LLC). README.md:140 states MIT. ngff-zarr is installed from PyPI at runtime and is not bundled."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "The module uses dask/lazy reads with progress and cancel (README). Module-level code is light. The settings-panel lambda at OMEZarr.py:2312 passes self.storageOptionsEdit.text, which is an attribute, not a call result, so it appears to be correct in PyQt-style access, but I did not verify this against the Slicer Python API. The module relies on a pip install at runtime, and the test suite is large (about 3500 lines)."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md and TUTORIAL.md document usage, the Python API and limitations, with screenshots and a video. A headless self-test runs in CI on three platforms. Tier 1 is appropriate for a new extension. The README's 'Still to do' section openly lists known limitations."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Runtime pip install of ngff-zarr pulls transitive dependencies into Slicer's Python",
+   "file": "OMEZarr/OMEZarr.py",
+   "line_start": 386,
+   "line_end": 394,
+   "evidence": "requirement = \"ngff-zarr[remote]>=0.52.0\"\n        if not slicer.packaging.pip_check(requirement):\n            interactive = slicer.util.mainWindow() and not slicer.app.testingEnabled()",
+   "explanation": "OMEZarr.py:386-394 installs 'ngff-zarr[remote]>=0.52.0' into Slicer's shared Python when a store is opened. The install is confirmed interactively but not in testing mode. Transitive dependencies could downgrade or conflict with packages Slicer bundles (for example numpy or requests). I did not verify the resolved dependency set, so the risk is unverified.",
+   "suggestion": "Document the resolved dependency set. Confirm the install does not downgrade Slicer-bundled packages, and state the install in the extension description.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Could not confirm the settings-panel editingFinished lambda",
+   "file": "OMEZarr/OMEZarr.py",
+   "line_start": 2311,
+   "line_end": 2313,
+   "evidence": "self.storageOptionsEdit.connect(\n            \"editingFinished()\", lambda: Settings.set(Settings.STORAGE_OPTIONS, self.storageOptionsEdit.text)",
+   "explanation": "OMEZarr.py:2312 passes self.storageOptionsEdit.text as a value to Settings.set. I did not check whether the Qt binding exposes this as a property or a method, so the stored value may be wrong. This is a minor, unverified bug candidate, not a safety issue.",
+   "suggestion": "Confirm the attribute access works in Slicer's Qt bindings, or use .text() and test that the setting persists.",
+   "confidence": "low"
+  }
+ ],
+ "not_checked": [
+  "Most of OMEZarr/OMEZarr.py (about 3,400 of 3,585 lines) was not read in full. I checked it with targeted searches and read only the sections above.",
+  "The 5 MB tutorial video (Screenshots/SlicerOMEZarr-tutorial.mp4) and the binary PNG/JPG screenshots were not inspected.",
+  "The upstream ngff-zarr package and its transitive dependencies were not inspected, so I could not verify its licence or dependency set.",
+  "The source revision 'main' was not resolved to a commit, and the commit 0b7e1b9 was not verified against the catalog's scm_revision.",
+  "The CI results for the remote workflow were not available to me. The remote-store test is gated behind OMEZARR_TEST_REMOTE and was not run.",
+  "No code was executed, and Slicer was not run."
+ ],
+ "questions_for_author": []
+}

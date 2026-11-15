@@ -1,0 +1,69 @@
+{
+ "purpose": "MorphoWeave is a set of 3D Slicer scripted modules for building anatomical atlases and statistical shape models, transferring landmarks to new surface models, and correspondence-guided surface segmentation. It is aimed at morphometrics researchers and is listed as a Tier 1 Registration extension.",
+ "summary": "Reviewed the catalog entry, top-level CMake, the four module CMake files, the AtlasBuilder module in full, the PoseEMTemplate helper, and targeted searches across the Landmark Transfer, Model Library and Surface Segmentation modules. No malicious or concealed behavior, no network exfiltration, and no unsafe deserialization was found in the parts read. Package installation in Landmark Transfer is user-gated via slicer.packaging.pip_ensure, and the requested packages are tiny3d-rs and rustcpd, not PyTorch or bundled Qt/VTK. Remaining concerns are minor. The license is BSD-2 and covers the bundled SlicerDenseCorrespondenceAnalysis attribution. Several large modules were only partly read.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read the pip-management block in MorphoWeaveLandmarkTransfer.py lines 181-231, which uses confirmation dialogs before installing or uninstalling. Read the Model Library delete path (confirmOkCancelDisplay before shutil.rmtree). No eval, pickle or subprocess calls were found in the searched code; np.load uses allow_pickle=False. Full reads of MorphoWeaveLandmarkTransfer.py, MorphoWeaveSurfaceSegmentation.py and most of MorphoWeaveModelLibrary.py were not done."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Landmark Transfer calls slicer.packaging.pip_uninstall(['tiny3d','tiny3d-rs']) on the legacy path and then installs tiny3d-rs and rustcpd, which changes the shared Slicer Python environment. This happens only after user confirmation and only when the module is used. Packages are not installed at import. Pins are version ranges, not exact pins, and do not touch numpy, scipy or VTK."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt sets EXTENSION_DEPENDS to empty and the catalog entry has build_dependencies []; both are consistent. The Landmark Transfer CMake installs Resources/Python/__init__.py and PoseEMTemplate.py. The module imports from Resources.Python.PoseEMTemplate, and that import path was not verified against the installed layout. The large GIF/PNG assets are not checked."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is BSD 2-Clause with a copyright holder. THIRD_PARTY_NOTICES.md reproduces the upstream BSD-2 notice for the SlicerDenseCorrespondenceAnalysis-derived Atlas Builder code. The runtime dependencies tiny3d-rs and rustcpd are installed from PyPI and their licenses were not checked."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "AtlasBuilder's runAlign and exportDenseLMs loops in MorphoWeaveAtlasBuilder.py read well and handle errors by status messages. The tiny3d/rustcpd call sites in Landmark Transfer (around lines 1521-1598) are not wrapped in error handling beyond the caller. The module-level Resources.Python import and the rustcpd API version checks look careful. Not verified by running anything."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md and a tutorial/README.md with 24 images, plus per-module READMEs, document the workflow. Each module has a CMake-registered unittest. Clinical-use disclaimer and model provenance for the SSM are not discussed in the parts read."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Landmark Transfer uninstalls and reinstalls shared pip packages",
+   "file": "MorphoWeaveLandmarkTransfer/MorphoWeaveLandmarkTransfer.py",
+   "line_start": 210,
+   "line_end": 218,
+   "evidence": "if legacy_tiny3d_installed:\n          slicer.packaging.pip_uninstall([\"tiny3d\", \"tiny3d-rs\"])\n\n        slicer.packaging.pip_ensure(",
+   "explanation": "In _ensure_dependencies, when a legacy tiny3d is detected the code calls slicer.packaging.pip_uninstall(['tiny3d','tiny3d-rs']) and then pip_ensure. This modifies Slicer's shared Python environment and can affect other extensions that import tiny3d. It is gated by a confirmation dialog and occurs only when the user opens the module's workflow, so it is a minor concern rather than a defect.",
+   "suggestion": "Keep the confirmation. Consider documenting in the tutorial which other extensions use tiny3d so users are not surprised.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "rustcpd calls lack local error handling",
+   "file": "MorphoWeaveLandmarkTransfer/MorphoWeaveLandmarkTransfer.py",
+   "line_start": 1569,
+   "line_end": 1583,
+   "evidence": "pca = rustcpd.register_atlas(\n            np.asarray(tgt_n),             # scaled target\n            np.asarray(src_n),             # source is the SSM base",
+   "explanation": "runDeformable calls rustcpd.register_atlas and register_deformable without try/except around the native calls. A failure surfaces only through the caller. Error reporting therefore depends on higher-level handling that was not fully traced.",
+   "suggestion": "Confirm that batch and single-run callers surface exceptions to the user with a clear message.",
+   "confidence": "low"
+  }
+ ],
+ "not_checked": [
+  "Full bodies of MorphoWeaveLandmarkTransfer.py (about 2400 lines), MorphoWeaveModelLibrary.py (about 950 lines) and MorphoWeaveSurfaceSegmentation.py were not read line by line; only targeted searches were done.",
+  "The Resources/Python import path (`from Resources.Python.PoseEMTemplate import`) was not verified against the packaged install layout.",
+  "The tutorial/README.md and binary media (GIF, PNG) were not inspected.",
+  "The pinned commit 6fd9e448 was not resolved; scm_revision is 'main', so the reviewed source may differ from the catalog state.",
+  "No tests were run. Upstream licenses and content of tiny3d-rs and rustcpd PyPI packages were not checked.",
+  "Did not verify the catalog schema URL or the ExtensionsIndex validation scripts."
+ ],
+ "questions_for_author": [
+  "Which Slicer version is the target for the submitted revision, and has the packaged build been tested with pip_ensure on a clean profile as Docs/ExtensionCatalogSubmission.md describes?",
+  "Is scm_revision 'main' intended? A pinned commit would make the reviewed source reproducible."
+ ]
+}

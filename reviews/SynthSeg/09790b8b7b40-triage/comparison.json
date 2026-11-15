@@ -1,0 +1,791 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Child process stdout/stderr pipes are never drained while polling; long runs can stall",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+   "line": 922,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Child stdout/stderr pipes are not drained while waiting, risking a stall until the 30-minute timeout",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 922,
+     "line_end": 940,
+     "evidence": "            proc = subprocess.Popen(\n                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,\n                text=True, env=env,\n            )",
+     "explanation": "The poll loop at lines 928-938 only calls proc.poll() and processEvents(); communicate() is called after the process exits. SynthSeg prints progress and TensorFlow warnings to stdout/stderr; once the OS pipe buffer (typically 64 KB) fills, the child blocks on write and never exits, so the run hangs until SYNTHSEG_TIMEOUT_SECONDS (1800 s) kills it and the user sees a misleading 'machine too slow' error.",
+     "suggestion": "Redirect output to a temporary file, or read the pipes in a thread/with select while polling, and include the captured output in the error message.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 922
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Child process stdout/stderr pipes are never drained while polling; long runs can stall",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 922,
+     "line_end": 940,
+     "evidence": "proc = subprocess.Popen(\n    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,\n    text=True, env=env,\n)",
+     "explanation": "subprocess.Popen is started with stdout=PIPE and stderr=PIPE. The loop only calls poll(), processEvents() and sleep(). If the SynthSeg/TensorFlow child writes more than the OS pipe buffer (about 64 KB) before exiting, it blocks on write. The poll loop then never sees an exit and the run is killed after 30 minutes with a misleading 'may be stuck' error. TensorFlow warnings make this plausible.",
+     "suggestion": "Redirect output to a temporary log file instead of PIPE, or read both pipes in background threads, or use communicate() after a non-blocking wait. Keep the timeout.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 922
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Redistribution of SynthSeg model weights rests on an unverifiable, future-dated e-mail claim",
+   "category": "license",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+   "line": 80,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Redistribution of SynthSeg model weights rests on an unverifiable, future-dated e-mail claim",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 80,
+     "line_end": 82,
+     "evidence": "# Automatic model download. The SynthSeg authors (B. Billot, J.E. Iglesias) allowed this extension to\n# redistribute the models (e-mail, 23 Oct 2026). Sources are tried in order and every file must match\n# its SHA-256 before it is used, so a partial download or a Google Drive warning page is never accepted.",
+     "explanation": "The extension downloads synthseg_1.0.h5 / synthseg_2.0.h5 / synthseg_parc_2.0.h5 from the author's GitHub release (MODEL_RELEASE_URL, line 83) and tells users in the UI that the models 'are redistributed with their permission' (lines 296, 424, 484). The only evidence in the repository is this comment, whose date (23 Oct 2026) is in the future, and there is no license or terms file covering the weights. If the upstream model terms do not permit redistribution, users are being given a false assurance about the models they download.",
+     "suggestion": "Add a documented permission statement (or the upstream model license) to the repository, e.g. a MODELS_LICENSE file referenced from README, and correct the date; if permission cannot be documented, download only from the official SynthSeg/FreeSurfer location instead of redistributing.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 80
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Model weight redistribution rests on an e-mail permission that is not in the repository",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 80,
+     "line_end": 84,
+     "evidence": "# Automatic model download. The SynthSeg authors (B. Billot, J.E. Iglesias) allowed this extension to\n# redistribute the models (e-mail, 23 Oct 2026). Sources are tried in order and every file must match",
+     "explanation": "The extension downloads and redistributes SynthSeg .h5 weights from the maintainer's GitHub release and a Google Drive mirror. The only evidence of permission is a claim in code and README that the authors allowed it by e-mail on '23 Oct 2026'. No license file or written grant accompanies the weights, and the upstream SynthSeg Apache-2.0 license covers source code, not necessarily the trained models. Reviewers and users cannot verify the terms, so distribution rights for the weights are unclear.",
+     "suggestion": "Add the written permission (or a license file for the models) to the repository, for example in a models/ LICENSE or NOTICE, and cite it in README. Check the date, which is unusual. Confirm the upstream model terms explicitly.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 80
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "h5py is pip-installed into Slicer's shared Python without asking the user",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+   "line": 552,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "h5py is pip-installed into Slicer's shared Python without asking the user",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 552,
+     "line_end": 559,
+     "evidence": "    def _ensurePackageInstalled(self, moduleName):\n        \"\"\"Import moduleName in Slicer's own Python, installing it via\n        slicer.util.pip_install if it isn't available yet.\"\"\"\n        try:\n            return __import__(moduleName)\n        except ImportError:\n            slicer.util.pip_install(moduleName)",
+     "explanation": "When the user clicks 'Import models from folder', _validateDownloadedModel (line 575) calls _ensurePackageInstalled(\"h5py\"), which runs slicer.util.pip_install with no confirmation dialog and no version constraint. This modifies the Python environment shared by Slicer and every other extension, for a step the user did not associate with installing packages; pip may also resolve/upgrade dependencies of h5py (numpy) in that environment. The TensorFlow install, by contrast, is gated by an explicit confirmOkCancelDisplay (lines 405-411).",
+     "suggestion": "Ask for confirmation before installing (or use slicer.util.pip_install with a numpy constraint file as installSlicerTensorFlow does), or avoid h5py by validating the file size only / using a bundled reader.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 552
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "h5py is pip-installed into Slicer's Python without confirmation during model validation",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 552,
+     "line_end": 559,
+     "evidence": "try:\n    return __import__(moduleName)\nexcept ImportError:\n    slicer.util.pip_install(moduleName)",
+     "explanation": "_ensurePackageInstalled calls slicer.util.pip_install when h5py is missing. It is reached from the Import models path without the confirmation dialog used for TensorFlow. This changes Slicer's shared environment silently and may replace a version other extensions rely on. The README already notes h5py was downgraded in testing.",
+     "suggestion": "Ask the user before installing, or validate the HDF5 file with a package already in Slicer. Avoid unpinned installs of shared packages.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 146
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Bare except silently discards a corrupt configuration file",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerSynthSeg/SlicerSynthSegLib/synthseg_config.py",
+   "line": 32,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Bare except silently discards a corrupt configuration file",
+     "file": "SlicerSynthSeg/SlicerSynthSegLib/synthseg_config.py",
+     "line_start": 31,
+     "line_end": 37,
+     "evidence": "            try:\n                with open(self.config_file, 'r') as f:\n                    return json.load(f)\n            except:\n                pass",
+     "explanation": "Any error reading config.json (corrupt JSON, permission problem) is swallowed and the module silently falls back to defaults, so a user whose saved custom-Python configuration is unreadable sees the module behave as if never configured, with no diagnostic. The bare except also hides KeyboardInterrupt/SystemExit.",
+     "suggestion": "Catch (OSError, ValueError) and log a warning naming the file and the error.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSegLib/synthseg_config.py",
+      "line": 32
+     }
+    }
+   ]
+  },
+  {
+   "title": "Custom Python validation only checks that the path exists",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerSynthSeg/SlicerSynthSegLib/synthseg_config.py",
+   "line": 77,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Custom Python validation only checks that the path exists",
+     "file": "SlicerSynthSeg/SlicerSynthSegLib/synthseg_config.py",
+     "line_start": 77,
+     "line_end": 82,
+     "evidence": "    def validate_python_env(self, python_path):\n        \"\"\"Validate Python environment - only check if executable exists\"\"\"\n        python_path = Path(python_path)\n        if not python_path.exists():\n            return False, \"Python executable not found\"",
+     "explanation": "Any existing file passes validation, so a user who selects a non-executable or a Python without TensorFlow/nibabel gets 'Configuration saved successfully' and only discovers the problem when segmentation fails with a subprocess exit code. The dialog text (lines 477-478) promises a Python 'that has TensorFlow, Keras and nibabel'.",
+     "suggestion": "Run the chosen interpreter once with a short import check (e.g. `-c \"import tensorflow, nibabel\"`) and report the result in the dialog.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSegLib/synthseg_config.py",
+      "line": 77
+     }
+    }
+   ]
+  },
+  {
+   "title": "Models are downloaded into the extension installation directory",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+   "line": 735,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Models are downloaded into the extension installation directory",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 733,
+     "line_end": 736,
+     "evidence": "        models_dir = Path(self.getConfiguration()['synthseg_path']) / \"models\"\n        return models_dir, [m for m in SYNTHSEG_MODES[mode][2] if not (models_dir / m).exists()]",
+     "explanation": "With no saved configuration, synthseg_path defaults to bundledSynthSegPath() (lines 718-721), i.e. the installed extension tree under Slicer's qt-scripted-modules directory. downloadModelsWithProgress then mkdirs and writes ~150 MB of .h5 files there. If the extension is installed in a read-only or administrator-owned location (common for system-wide Slicer installs), the download fails with a permission error, and in all cases user data is written into an installation directory that extension updates may replace.",
+     "suggestion": "Store models in a user-writable location (e.g. under slicer.app.userSettingsPath() or a per-user cache dir) and point SynthSeg at it, or copy the bundled source to a user directory on first use.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 735
+     }
+    }
+   ]
+  },
+  {
+   "title": "Module self-test asserts nothing",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+   "line": 993,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Module self-test asserts nothing",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 993,
+     "line_end": 995,
+     "evidence": "    def test_SlicerSynthSeg1(self):\n        self.delayDisplay(\"Starting the test\")\n        self.delayDisplay('Test passed')",
+     "explanation": "WITH_GENERIC_TESTS is enabled in SlicerSynthSeg/CMakeLists.txt:22, so this test runs in the extension build/CI, but it only displays two messages and always passes. It gives no signal about configuration loading, label-name parsing, colour-table construction or the CSV annotation step, all of which are testable without TensorFlow.",
+     "suggestion": "Add assertions for the pure-Python helpers (getConfiguration defaults, _labelNames, _buildColorTableNode, _annotateVolumeCsv) and mark the segmentation run as skipped when models/TensorFlow are absent.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 993
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Test case asserts nothing",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 993,
+     "line_end": 995,
+     "evidence": "def test_SlicerSynthSeg1(self):\n    self.delayDisplay(\"Starting the test\")\n    self.delayDisplay('Test passed')",
+     "explanation": "The scripted test prints 'Test passed' without checking any output, so the ScriptedLoadableModule test gives no coverage of segmentation or configuration logic.",
+     "suggestion": "Add a small test with a bundled sample volume, or with a mock subprocess, that checks the config and the label-name table. Add a clinical-use / research-only disclaimer to the README.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 993
+     }
+    }
+   ]
+  },
+  {
+   "title": "Segmentation runs on the GUI thread with no progress reporting",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+   "line": 927,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Segmentation runs on the GUI thread with no progress reporting",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 927,
+     "line_end": 938,
+     "evidence": "            pollStart = time.time()\n            while proc.poll() is None:\n                if time.time() - pollStart > SYNTHSEG_TIMEOUT_SECONDS:",
+     "explanation": "process() is called directly from onApplyButton (line 438) and spins on processEvents() for up to 30 minutes. The UI stays partially responsive but the user gets no progress or elapsed-time feedback and cannot cancel, which for a CPU-only SynthSeg run of several minutes looks like a freeze.",
+     "suggestion": "Run the subprocess from a slicer.util.ProgressDialog / CLI-style worker with a cancel button, or at least show elapsed time and allow cancellation.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 927
+     }
+    }
+   ]
+  },
+  {
+   "title": "Shared-package downgrade acknowledged in README",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 42,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Shared-package downgrade acknowledged in README",
+     "file": "README.md",
+     "line_start": 42,
+     "line_end": 44,
+     "evidence": "> Note: installing TensorFlow can change versions of packages it shares with other extensions\n> (in our test, h5py 3.16.0 became 3.14.0; TotalSegmentator and OpenMAP-T1 kept working).",
+     "explanation": "The README states TensorFlow installation changed h5py from 3.16.0 to 3.14.0 in the authors' environment. Installing TensorFlow into Slicer's Python can therefore break other extensions that depend on Slicer's shared packages. The numpy constraint in code does not protect h5py or other shared packages.",
+     "suggestion": "Extend the pip constraints file to every package already installed in Slicer (not just numpy), or pin them to their current versions, so no existing package is downgraded.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 42
+     }
+    }
+   ]
+  },
+  {
+   "title": "TensorFlow is exactly pinned into Slicer's shared Python",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+   "line": 58,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "TensorFlow is exactly pinned into Slicer's shared Python",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 58,
+     "line_end": 58,
+     "evidence": "SLICER_TF_REQUIREMENTS = [\"tensorflow==2.21.*\", \"tf-keras==2.21.*\"]",
+     "explanation": "installSlicerTensorFlow (lines 204-220) installs these exact pins into Slicer's own Python after user confirmation. numpy is protected by a constraints file, but TensorFlow's other transitive dependencies (protobuf, ml_dtypes, h5py, ...) are not, so other extensions that need different versions can break for users who accept the install. The pinned version also has to exist on PyPI for the Slicer Python version in use; if it does not, the install fails with a pip error rather than a clear message.",
+     "suggestion": "Constrain the full dependency set (or install into a separate venv/launcher), and verify the pinned version exists for the Slicer Python versions you support.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 58
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "minor",
+     "title": "Installs TensorFlow into Slicer Python environment",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 58,
+     "line_end": 58,
+     "evidence": "SLICER_TF_REQUIREMENTS = [\"tensorflow==2.21.*\", \"tf-keras==2.21.*\"]",
+     "explanation": "The extension installs TensorFlow and tf-keras directly into Slicer's Python environment via pip_install upon user prompt. While it uses constraints to preserve the numpy version, installing heavyweight packages like TensorFlow directly into Slicer's shared Python environment can potentially interfere with other extensions or Slicer's internal libraries. However, it respects user consent and does not install at import or startup.",
+     "suggestion": "Ensure robust testing across different Slicer releases to prevent dependency conflicts with TensorFlow.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 58
+     }
+    }
+   ]
+  },
+  {
+   "title": "Bundled upstream code contains os.system and pickle.load, not reachable from the Slicer UI path",
+   "category": "safety",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "SynthSeg/ext/lab2im/utils.py",
+   "line": 303,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Bundled upstream code contains os.system and pickle.load, not reachable from the Slicer UI path",
+     "file": "SynthSeg/ext/lab2im/utils.py",
+     "line_start": 303,
+     "line_end": 307,
+     "evidence": "def read_pickle(filepath):\n    \"\"\" read a python object with a pickle\"\"\"\n    with open(filepath, 'rb') as file:\n        unpickler = pickle.Unpickler(file)\n        return unpickler.load()",
+     "explanation": "The vendored SynthSeg/lab2im tree includes unsafe-deserialisation helpers and os.system calls (e.g. SynthSeg/ext/lab2im/edit_volumes.py lines 1516, 1546, 1574, 1596, 1736, 1776, 1790, 1844, 1888, 1896, 1902, 1917, 2254) used for FreeSurfer registration. The Slicer module only invokes scripts/commands/SynthSeg_predict.py, so these are not reachable from the module UI; they are noted so future changes that expose training/registration paths get re-reviewed.",
+     "suggestion": "Keep the Slicer entry point limited to SynthSeg_predict.py, or prune the unused training/registration modules from the packaged tree.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SynthSeg/ext/lab2im/utils.py",
+      "line": 303
+     }
+    }
+   ]
+  },
+  {
+   "title": "Model search globs WSL network shares on Windows",
+   "category": "safety",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+   "line": 264,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Model search globs WSL network shares on Windows",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 264,
+     "line_end": 269,
+     "evidence": "    if os.name == \"nt\":\n        for root in (r\"\\\\wsl.localhost\", r\"\\\\wsl$\"):\n            try:\n                found += [Path(p) for p in glob.glob(root + r\"\\*\\home\\*\\freesurfer\\models\")]",
+     "explanation": "findModelFolders enumerates \\\\wsl.localhost\\<distro>\\home\\<user>\\freesurfer\\models when the user opens 'Import models from folder'. This only lists paths and copies .h5 files the user then confirms, but it does touch other users' home directories over a network share, which may be slow or trigger access auditing on managed machines.",
+     "suggestion": "Only probe $FREESURFER_HOME by default and let the user browse to a WSL path explicitly.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 264
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Child process stdout/stderr pipes are never drained while polling; long runs can stall",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+   "line": 922,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Child stdout/stderr pipes are not drained while waiting, risking a stall until the 30-minute timeout",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 922,
+     "line_end": 940,
+     "evidence": "            proc = subprocess.Popen(\n                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,\n                text=True, env=env,\n            )",
+     "explanation": "The poll loop at lines 928-938 only calls proc.poll() and processEvents(); communicate() is called after the process exits. SynthSeg prints progress and TensorFlow warnings to stdout/stderr; once the OS pipe buffer (typically 64 KB) fills, the child blocks on write and never exits, so the run hangs until SYNTHSEG_TIMEOUT_SECONDS (1800 s) kills it and the user sees a misleading 'machine too slow' error.",
+     "suggestion": "Redirect output to a temporary file, or read the pipes in a thread/with select while polling, and include the captured output in the error message.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 922
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Child process stdout/stderr pipes are never drained while polling; long runs can stall",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 922,
+     "line_end": 940,
+     "evidence": "proc = subprocess.Popen(\n    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,\n    text=True, env=env,\n)",
+     "explanation": "subprocess.Popen is started with stdout=PIPE and stderr=PIPE. The loop only calls poll(), processEvents() and sleep(). If the SynthSeg/TensorFlow child writes more than the OS pipe buffer (about 64 KB) before exiting, it blocks on write. The poll loop then never sees an exit and the run is killed after 30 minutes with a misleading 'may be stuck' error. TensorFlow warnings make this plausible.",
+     "suggestion": "Redirect output to a temporary log file instead of PIPE, or read both pipes in background threads, or use communicate() after a non-blocking wait. Keep the timeout.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 922
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Redistribution of SynthSeg model weights rests on an unverifiable, future-dated e-mail claim",
+   "category": "license",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+   "line": 80,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Redistribution of SynthSeg model weights rests on an unverifiable, future-dated e-mail claim",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 80,
+     "line_end": 82,
+     "evidence": "# Automatic model download. The SynthSeg authors (B. Billot, J.E. Iglesias) allowed this extension to\n# redistribute the models (e-mail, 23 Oct 2026). Sources are tried in order and every file must match\n# its SHA-256 before it is used, so a partial download or a Google Drive warning page is never accepted.",
+     "explanation": "The extension downloads synthseg_1.0.h5 / synthseg_2.0.h5 / synthseg_parc_2.0.h5 from the author's GitHub release (MODEL_RELEASE_URL, line 83) and tells users in the UI that the models 'are redistributed with their permission' (lines 296, 424, 484). The only evidence in the repository is this comment, whose date (23 Oct 2026) is in the future, and there is no license or terms file covering the weights. If the upstream model terms do not permit redistribution, users are being given a false assurance about the models they download.",
+     "suggestion": "Add a documented permission statement (or the upstream model license) to the repository, e.g. a MODELS_LICENSE file referenced from README, and correct the date; if permission cannot be documented, download only from the official SynthSeg/FreeSurfer location instead of redistributing.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 80
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Model weight redistribution rests on an e-mail permission that is not in the repository",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 80,
+     "line_end": 84,
+     "evidence": "# Automatic model download. The SynthSeg authors (B. Billot, J.E. Iglesias) allowed this extension to\n# redistribute the models (e-mail, 23 Oct 2026). Sources are tried in order and every file must match",
+     "explanation": "The extension downloads and redistributes SynthSeg .h5 weights from the maintainer's GitHub release and a Google Drive mirror. The only evidence of permission is a claim in code and README that the authors allowed it by e-mail on '23 Oct 2026'. No license file or written grant accompanies the weights, and the upstream SynthSeg Apache-2.0 license covers source code, not necessarily the trained models. Reviewers and users cannot verify the terms, so distribution rights for the weights are unclear.",
+     "suggestion": "Add the written permission (or a license file for the models) to the repository, for example in a models/ LICENSE or NOTICE, and cite it in README. Check the date, which is unusual. Confirm the upstream model terms explicitly.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 80
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "h5py is pip-installed into Slicer's shared Python without asking the user",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+   "line": 552,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "h5py is pip-installed into Slicer's shared Python without asking the user",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 552,
+     "line_end": 559,
+     "evidence": "    def _ensurePackageInstalled(self, moduleName):\n        \"\"\"Import moduleName in Slicer's own Python, installing it via\n        slicer.util.pip_install if it isn't available yet.\"\"\"\n        try:\n            return __import__(moduleName)\n        except ImportError:\n            slicer.util.pip_install(moduleName)",
+     "explanation": "When the user clicks 'Import models from folder', _validateDownloadedModel (line 575) calls _ensurePackageInstalled(\"h5py\"), which runs slicer.util.pip_install with no confirmation dialog and no version constraint. This modifies the Python environment shared by Slicer and every other extension, for a step the user did not associate with installing packages; pip may also resolve/upgrade dependencies of h5py (numpy) in that environment. The TensorFlow install, by contrast, is gated by an explicit confirmOkCancelDisplay (lines 405-411).",
+     "suggestion": "Ask for confirmation before installing (or use slicer.util.pip_install with a numpy constraint file as installSlicerTensorFlow does), or avoid h5py by validating the file size only / using a bundled reader.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 552
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "h5py is pip-installed into Slicer's Python without confirmation during model validation",
+     "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+     "line_start": 552,
+     "line_end": 559,
+     "evidence": "try:\n    return __import__(moduleName)\nexcept ImportError:\n    slicer.util.pip_install(moduleName)",
+     "explanation": "_ensurePackageInstalled calls slicer.util.pip_install when h5py is missing. It is reached from the Import models path without the confirmation dialog used for TensorFlow. This changes Slicer's shared environment silently and may replace a version other extensions rely on. The README already notes h5py was downgraded in testing.",
+     "suggestion": "Ask the user before installing, or validate the HDF5 file with a package already in Slicer. Avoid unpinned installs of shared packages.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "SlicerSynthSeg/SlicerSynthSeg.py",
+      "line": 146
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Rating of license",
+   "category": "license",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "minor",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "license": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "soundness": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 5,
+  "single": 7,
+  "unverified": 0,
+  "total": 12
+ }
+}

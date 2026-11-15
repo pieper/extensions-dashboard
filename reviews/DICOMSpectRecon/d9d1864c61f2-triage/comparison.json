@@ -1,0 +1,542 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "PyTomography installed with --upgrade while only torch is constrained",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+   "line": 664,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "PyTomography installed with --upgrade while only torch is constrained",
+     "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+     "line_start": 664,
+     "line_end": 670,
+     "evidence": "    torchVersion = metadata.version(\"torch\")\n    with tempfile.TemporaryDirectory() as tempDir:\n        constraints = os.path.join(tempDir, \"keep-torch.txt\")\n        with open(constraints, \"w\") as f:\n            f.write(f\"torch=={torchVersion}\\n\")\n        # List form: the constraints path is passed as one argument even if it contains spaces\n        slicer.util.pip_install([\"--upgrade\", PYTOMOGRAPHY_REQUIREMENT, \"--constraint\", constraints])",
+     "explanation": "The constraint file pins only torch. `pip install --upgrade pytomography>=4.0,<5` will also upgrade any dependency that does not satisfy PyTomography's requirements, which for PyTomography 4 includes numpy, scipy and pydicom - packages Slicer bundles and links against. A user who accepts the install prompt can therefore end up with a numpy/scipy that breaks Slicer's own modules and other extensions, for the rest of that Slicer installation. The user is told only that 'Your PyTorch installation will not be changed'.",
+     "suggestion": "Add the Slicer-bundled packages to the same constraints file (e.g. numpy, scipy, pydicom, SimpleITK, vtk, requests at their installed versions) or install with `--no-deps` plus an explicit, reviewed dependency list, and state in the confirmation dialog that other packages may be installed.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+      "line": 664
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "PyTomography install only pins torch; other bundled Slicer packages may still change",
+     "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+     "line_start": 658,
+     "line_end": 670,
+     "evidence": "f.write(f\"torch=={torchVersion}\\n\")\n# List form: the constraints path is passed as one argument even if it contains spaces\nslicer.util.pip_install([\"--upgrade\", PYTOMOGRAPHY_REQUIREMENT, \"--constraint\", constraints])",
+     "explanation": "The install is user-confirmed and torch is held at its installed build, which is good. But the constraint file only mentions torch, so PyTomography's own requirements could upgrade or downgrade packages Slicer bundles (numpy, SimpleITK, pydicom, scipy), affecting Slicer for users who never open this module. I could not verify PyTomography's dependency list from the repo.",
+     "suggestion": "Also constrain numpy, SimpleITK, pydicom and scipy to their currently installed versions in the same constraints file, or document the expected impact and test a clean Slicer install with PyTomography 4.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+      "line": 668
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Drift check failures are silently ignored",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DICOMSpectRecon/SPECTCalibration.py",
+   "line": 75,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Drift check failures are silently ignored",
+     "file": "DICOMSpectRecon/SPECTCalibration.py",
+     "line_start": 461,
+     "line_end": 466,
+     "evidence": "                    try:\n                        drift = quant.driftMessage(record, quant.loadLibrary(quant.calibrationLibraryPath()))\n                        if drift:\n                            messages.append(drift)\n                    except Exception:\n                        pass",
+     "explanation": "If the calibration library cannot be read, the user gets no drift comparison and no indication that the check was skipped, which matters for a quantitative calibration workflow where a large drift is the main warning sign.",
+     "suggestion": "Log the exception and append an info message such as 'drift check skipped: library unreadable'.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "DICOMSpectRecon/SPECTCalibration.py",
+      "line": 75
+     }
+    }
+   ]
+  },
+  {
+   "title": "Fixed temporary filename in collimator library save can collide and leave a partial file",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DICOMSpectRecon/DICOMSpectReconLib/collimators.py",
+   "line": 196,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Fixed temporary filename in collimator library save can collide and leave a partial file",
+     "file": "DICOMSpectRecon/DICOMSpectReconLib/collimators.py",
+     "line_start": 196,
+     "line_end": 199,
+     "evidence": "tmp = path + \".tmp\"\n    with open(tmp, \"w\", encoding=\"utf-8\") as f:\n        json.dump({\"version\": LIBRARY_VERSION, \"collimators\": clean}, f, indent=2)\n    os.replace(tmp, path)",
+     "explanation": "saveLibrary writes to path + '.tmp' and then os.replace()s it. Two Slicer instances saving at once would write to the same temp file and could interleave, and an exception during json.dump leaves the .tmp file behind. The library is a shared user file, so a corrupted or lost edit is possible. The calibration library in quantification.py already uses mkstemp, so this is inconsistent.",
+     "suggestion": "Use tempfile.mkstemp in the same folder, as quantification._writeLibrary does, and remove the temp file on failure.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMSpectRecon/DICOMSpectReconLib/collimators.py",
+      "line": 196
+     }
+    }
+   ]
+  },
+  {
+   "title": "Module-level caches keyed by file path are never cleared",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+   "line": 68,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Module-level caches keyed by file path are never cleared",
+     "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+     "line_start": 68,
+     "line_end": 75,
+     "evidence": "# NM projection file -> (CT file list, how it was matched), filled in during examine()\n_CT_FOR_NM_FILE = {}\n# Multi-bed: header facts of NM files (nmdata.bedInfo), the beds found for each NM file, the single-bed\n# files that are already part of a multi-bed loadable of the same selection, and the groups loaded\n_BED_INFO = {}\n_BEDS_FOR_NM_FILE = {}\n_COVERED_BY_MULTIBED = {}\n_LOADED_MULTIBED = set()",
+     "explanation": "These dictionaries accumulate one entry per examined NM file for the lifetime of the Slicer session and are only partially cleared in addMultiBedLoadables (lines 225-226). In a long session with many studies they grow without bound, and stale CT/bed pairings from an earlier examine can be reused by load() (lines 376-379) if the browser serves cached loadables.",
+     "suggestion": "Clear the caches at the start of examine() or key them on the study/series UID and drop entries for series no longer in the database.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+      "line": 68
+     }
+    }
+   ]
+  },
+  {
+   "title": "No automated tests and no clinical/research-use disclaimer",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 91,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No automated tests and no clinical/research-use disclaimer",
+     "file": "README.md",
+     "line_start": 91,
+     "line_end": 94,
+     "evidence": "1. Import the study into the DICOM database and select the NM SPECT series.\n2. Load opens the reconstruction window: projections in cine, reconstruction and CT fusion previews,\n   and the settings (OSEM, BSREM or FBP, attenuation, scatter, filter, scaling, quantification).\n3. Press **Reconstruct**, check the preview, then **Load into Slicer**.",
+     "explanation": "The README documents the workflow well, but the only tests are manual scripts under Testing/PyTomography4 (run_recon.py, compare.py, check_beds.py) and there is no statement that the reconstructions and Bq/ml/SUV values are for research use and not validated for clinical decisions - relevant for a quantitative nuclear-medicine tool.",
+     "suggestion": "Add a short 'not for clinical use / research only' note and, if feasible, a small headless test that runs the pure-numpy parts (quantification, collimators, FBP windows) in CI.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 91
+     }
+    }
+   ]
+  },
+  {
+   "title": "No clinical or research-use disclaimer for quantitative and diagnostic-style output",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 82,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "No clinical or research-use disclaimer for quantitative and diagnostic-style output",
+     "file": "README.md",
+     "line_start": 1,
+     "line_end": 178,
+     "evidence": "- **Quantification (optional)**: with a calibration factor (cps/MBq) made in the **SPECT Calibration**\n  module, the static image is converted to Bq/ml and optionally to SUV:",
+     "explanation": "The README describes Bq/ml and SUV quantification, dosimetry traceability and clinical-style workflows (e.g. 'the usual clinical choice'), but contains no statement that outputs are unvalidated for clinical decisions or that the user must verify calibration. Users may trust the numbers without checking. This is a documentation gap, not a code defect.",
+     "suggestion": "Add a 'Research use only / not validated for clinical decisions' disclaimer and a short validation note (phantom checks, versioning) to the README and the module helpText.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "README.md",
+      "line": 82
+     }
+    }
+   ]
+  },
+  {
+   "title": "Reconstruction and preview work runs on the GUI thread",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DICOMSpectRecon/DICOMSpectReconLib/dialog.py",
+   "line": 2089,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Reconstruction and preview work runs on the GUI thread",
+     "file": "DICOMSpectRecon/DICOMSpectReconLib/dialog.py",
+     "line_start": 2089,
+     "line_end": 2093,
+     "evidence": "    def log(self, message):\n        logging.info(message)\n        self.logBox.appendPlainText(message)\n        self.logBox.verticalScrollBar().setValue(self.logBox.verticalScrollBar().maximum)\n        slicer.app.processEvents()",
+     "explanation": "The OSEM/BSREM/FBP loop is driven from the dialog with slicer.app.processEvents() to keep the UI responsive, so a long reconstruction blocks the event loop between callbacks and can make Slicer appear hung; the abort callback (reconstruction.py:149-157) mitigates this but the work is not moved off the GUI thread.",
+     "suggestion": "Run the reconstruction in a worker thread (or a CLI) and report progress through signals, as other Slicer reconstruction extensions do.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMSpectRecon/DICOMSpectReconLib/dialog.py",
+      "line": 2089
+     }
+    }
+   ]
+  },
+  {
+   "title": "Silent exception swallowing when attaching the CT volume to subject hierarchy",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+   "line": 118,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Silent exception swallowing when attaching the CT volume to subject hierarchy",
+     "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+     "line_start": 536,
+     "line_end": 541,
+     "evidence": "                          except Exception:\n                              pass\n                          return node",
+     "explanation": "If the subject-hierarchy check or insertion fails, the error is dropped with a bare except and pass. The CT then loads without DICOM metadata, and the user gets no message, which makes the later fusion or calibration steps hard to debug.",
+     "suggestion": "Log the traceback with logging.warning, as the surrounding code does elsewhere in this file.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+      "line": 118
+     }
+    }
+   ]
+  },
+  {
+   "title": "sys.path mutated at module import in three modules",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+   "line": 60,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "sys.path mutated at module import in three modules",
+     "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+     "line_start": 60,
+     "line_end": 62,
+     "evidence": "_MODULE_DIR = os.path.dirname(os.path.abspath(globals().get(\"__file__\", \"\") or \".\"))\nif globals().get(\"__file__\") and _MODULE_DIR not in sys.path:\n    sys.path.insert(0, _MODULE_DIR)",
+     "explanation": "The hidden module is imported when Slicer starts, so this prepends the module folder to sys.path for the whole process (same pattern in SPECTCalibration.py:28-30 and SPECTCollimators.py:23-25). Any file in that folder whose name shadows a stdlib or Slicer module would then win the import; today the folder only holds the extension's own files, so the practical risk is low.",
+     "suggestion": "Append instead of insert, or rely on the extension build's normal package layout and drop the sys.path change.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+      "line": 60
+     }
+    }
+   ]
+  },
+  {
+   "title": "Loadable confidence deliberately set above 1.0 to outrank other DICOM plugins",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+   "line": 355,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Loadable confidence deliberately set above 1.0 to outrank other DICOM plugins",
+     "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+     "line_start": 355,
+     "line_end": 360,
+     "evidence": "            # Above 1.0: the DICOM browser keeps only the highest confidence loadables of each series\n            # (DICOMUtils.selectHighestConfidenceLoadables, grouped by the series of their first file).\n            # With two NM series selected, MultiVolumeImporter lumps them into one multi-series\n            # loadable of confidence 1.0, which would otherwise deselect the reconstruction of one of\n            # them; the scalar volume plugin offers less than that.\n            loadable.confidence = 1.05",
+     "explanation": "The value is documented and only applied to files whose ImageType contains TOMO/GATED TOMO, so it does not hijack other modalities; it does mean the reconstruction loadable always wins over any other plugin offering the same NM series, which users should be aware of.",
+     "suggestion": "None required; consider mentioning in the README that the reconstruction loadable is preselected for TOMO series.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+      "line": 355
+     }
+    }
+   ]
+  },
+  {
+   "title": "Package installation is gated by an explicit confirmation dialog",
+   "category": "safety",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+   "line": 591,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Package installation is gated by an explicit confirmation dialog",
+     "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+     "line_start": 591,
+     "line_end": 596,
+     "evidence": "            if not slicer.util.confirmOkCancelDisplay(\n                    \"PyTomography is required for SPECT reconstruction but is not installed.\\n\\n\"\n                    \"Install it now? Your PyTorch installation will not be changed.\"):\n                return False\n            with slicer.util.WaitCursor():\n                _installPytomographyKeepingTorch()",
+     "explanation": "Nothing is installed at import or startup: PyTorch comes only from PyTorchUtils (lines 623-655) and PyTomography only after this prompt, which is the behaviour the review policy asks for. The prompt text is however incomplete about side effects (see the environment finding).",
+     "suggestion": "Keep the confirmation; extend its wording to mention that PyTomography's own dependencies may be installed or upgraded.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+      "line": 591
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "PyTomography installed with --upgrade while only torch is constrained",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+   "line": 664,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "PyTomography installed with --upgrade while only torch is constrained",
+     "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+     "line_start": 664,
+     "line_end": 670,
+     "evidence": "    torchVersion = metadata.version(\"torch\")\n    with tempfile.TemporaryDirectory() as tempDir:\n        constraints = os.path.join(tempDir, \"keep-torch.txt\")\n        with open(constraints, \"w\") as f:\n            f.write(f\"torch=={torchVersion}\\n\")\n        # List form: the constraints path is passed as one argument even if it contains spaces\n        slicer.util.pip_install([\"--upgrade\", PYTOMOGRAPHY_REQUIREMENT, \"--constraint\", constraints])",
+     "explanation": "The constraint file pins only torch. `pip install --upgrade pytomography>=4.0,<5` will also upgrade any dependency that does not satisfy PyTomography's requirements, which for PyTomography 4 includes numpy, scipy and pydicom - packages Slicer bundles and links against. A user who accepts the install prompt can therefore end up with a numpy/scipy that breaks Slicer's own modules and other extensions, for the rest of that Slicer installation. The user is told only that 'Your PyTorch installation will not be changed'.",
+     "suggestion": "Add the Slicer-bundled packages to the same constraints file (e.g. numpy, scipy, pydicom, SimpleITK, vtk, requests at their installed versions) or install with `--no-deps` plus an explicit, reviewed dependency list, and state in the confirmation dialog that other packages may be installed.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+      "line": 664
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "PyTomography install only pins torch; other bundled Slicer packages may still change",
+     "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+     "line_start": 658,
+     "line_end": 670,
+     "evidence": "f.write(f\"torch=={torchVersion}\\n\")\n# List form: the constraints path is passed as one argument even if it contains spaces\nslicer.util.pip_install([\"--upgrade\", PYTOMOGRAPHY_REQUIREMENT, \"--constraint\", constraints])",
+     "explanation": "The install is user-confirmed and torch is held at its installed build, which is good. But the constraint file only mentions torch, so PyTomography's own requirements could upgrade or downgrade packages Slicer bundles (numpy, SimpleITK, pydicom, scipy), affecting Slicer for users who never open this module. I could not verify PyTomography's dependency list from the repo.",
+     "suggestion": "Also constrain numpy, SimpleITK, pydicom and scipy to their currently installed versions in the same constraints file, or document the expected impact and test a clean Slicer install with PyTomography 4.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+      "line": 668
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D2",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "minor"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "packaging": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "minor issues"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 2,
+  "single": 10,
+  "unverified": 0,
+  "total": 11
+ }
+}

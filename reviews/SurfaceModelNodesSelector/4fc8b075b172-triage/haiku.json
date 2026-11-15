@@ -1,0 +1,125 @@
+{
+ "purpose": "A scripted Slicer module that, given a folder, loads each .ply surface model, creates a fiducial markups node with one point per mesh vertex, and saves each as .mrk.json plus a models_ids.csv index into that folder. It is intended for researchers working with surface meshes.",
+ "summary": "The extension's logic calls slicer.mrmlScene.Clear(0) inside the per-file loop, which wipes the user's entire open scene (including unsaved work) every iteration. Its test is broken (calls logic.process with an incompatible signature) and is not registered with CTest. It also writes files into the user-selected folder without confirmation, has committed __pycache__ binaries, and a hardcoded personal path script. Not ready for distribution in its current form.",
+ "overall": "do not accept",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "SurfaceModelNodesSelector.py line 385 clears the whole MRML scene inside the loop in process(), destroying user data that is not saved; the code also writes CSV and JSON files into the user's chosen folder without confirmation."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "process() imports pandas (line 351), which is not declared in any dependency and is not guaranteed by Slicer; no pip install, but the dependency is undeclared."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "CMakeLists.txt installs only the main .py and icon/UI; SurfaceModelNodesSelector/__pycache__/*.pyc binaries are committed (listed in Files); the Testing CMake entry for the Python test is commented out (Testing/Python/CMakeLists.txt line 2)."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is a full Apache-2.0 text at the root; the appendix placeholder '[yyyy]' is unfilled but this does not block distribution."
+  },
+  "soundness": {
+   "rating": "blocking",
+   "rationale": "The test at line 448 calls logic.process(inputVolume, outputVolume, threshold, True) which does not match process(self, dataDirectoryPath, showResult=True) at line 332; the test also expects volume scalar ranges unrelated to the logic. The widget's onApplyButton and the module-level surfaceModel.py do not use the same semantics; onMarkupEndInteraction is dead code."
+  },
+  "utility": {
+   "rating": "concern",
+   "rationale": "README describes usage, but the help text in __init__ still contains template placeholders ('organization/projectname') and the sample-data registration references thumbnails and data that were never added to Resources/Icons; the tests are not run."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "process() clears the entire MRML scene on every model, destroying unsaved user data",
+   "file": "SurfaceModelNodesSelector/SurfaceModelNodesSelector.py",
+   "line_start": 385,
+   "line_end": 385,
+   "evidence": "slicer.mrmlScene.Clear(0)",
+   "explanation": "Inside the per-file loop, after each markups node is saved, slicer.mrmlScene.Clear(0) is called. This removes every node in the user's current Slicer session (volumes, segmentations, unsaved work, other modules' data), not just the nodes this module created. A user who clicks Apply on a folder with several .ply files loses their open scene on the first iteration, with no warning.",
+   "suggestion": "Remove the Clear call. Remove the created markups and model nodes explicitly (slicer.mrmlScene.RemoveNode) after saving, and only those nodes.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Writes files into the user-selected folder without confirmation, and may overwrite existing outputs",
+   "file": "SurfaceModelNodesSelector/SurfaceModelNodesSelector.py",
+   "line_start": 355,
+   "line_end": 356,
+   "evidence": "filepath = dataDirectoryPath+'/models_ids.csv'\n        df.to_csv(filepath, index=True)",
+   "explanation": "process() writes models_ids.csv and <name>.mrk.json into the folder the user selects. Existing files with the same names are overwritten silently. Folder listing also picks up every *.ply file, so unrelated models in that folder are processed.",
+   "suggestion": "Warn before overwriting, use os.path.join, and document the outputs in the module help.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Test does not match the logic API and is not registered",
+   "file": "SurfaceModelNodesSelector/SurfaceModelNodesSelector.py",
+   "line_start": 445,
+   "line_end": 448,
+   "evidence": "logic = SurfaceModelNodesSelectorLogic()\n\n          # Test algorithm with non-inverted threshold\n          logic.process(inputVolume, outputVolume, threshold, True)",
+   "explanation": "The test calls logic.process with volume arguments (inputVolume, outputVolume, threshold, True), but process() takes a directory path. It also asserts on image scalar ranges that have nothing to do with surface models. The Python test registration is commented out, so the test does not run in CTest.",
+   "suggestion": "Rewrite the test for the .ply-to-markups workflow with a small .ply fixture, and re-enable slicer_add_python_unittest.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Undeclared dependency on pandas",
+   "file": "SurfaceModelNodesSelector/SurfaceModelNodesSelector.py",
+   "line_start": 351,
+   "line_end": 351,
+   "evidence": "import pandas as pd",
+   "explanation": "process() imports pandas to build a two-column index. pandas is not declared in EXTENSION_DEPENDS or as a package requirement, so the module fails at run time on Slicer builds without it. The logic is simple enough to use the standard library.",
+   "suggestion": "Use the csv module, or declare and install pandas explicitly through a user-confirmed step.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Committed __pycache__ binaries",
+   "file": "SurfaceModelNodesSelector/__pycache__/SurfaceModelNodesSelector.cpython-39.pyc",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "SurfaceModelNodesSelector/__pycache__/SurfaceModelNodesSelector.cpython-39.pyc  (12987 bytes, binary)",
+   "explanation": "Python 3.6 and 3.9 .pyc files are committed inside the source tree. These are generated artifacts, are interpreter-specific, and can go stale relative to the .py source.",
+   "suggestion": "Remove the __pycache__ directories and add a .gitignore entry.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Template placeholders left in module help and metadata",
+   "file": "SurfaceModelNodesSelector/SurfaceModelNodesSelector.py",
+   "line_start": 28,
+   "line_end": 28,
+   "evidence": "This module is used to select the indeces/nodes of the any 3D surface model <a href=\"https://github.com/organization/projectname#SurfaceModelNodesSelector\">module documentation</a>.",
+   "explanation": "The module help text links to 'https://github.com/organization/projectname' and the contributor list is a placeholder. The repository README is the only real documentation.",
+   "suggestion": "Point the help link to the real README and update the help text.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Hardcoded personal filesystem path in a committed script",
+   "file": "surfaceModel.py",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "s = slicer.modules.surfacemodelnodesselector.widgetRepresentation().self().logic.process(\"/media/useradmin/Disk2/Slicer-5.3.0-2023-01-21-linux-amd64/25_manually_picking_points/25_manually_picking_points/\")",
+   "explanation": "surfaceModel.py at the repository root runs a hardcoded path from the author's machine (/media/useradmin/Disk2/...). It is not installed by CMake, so it does not affect users directly, but it reveals a local environment and would fail for others.",
+   "suggestion": "Replace with a command-line argument or move to an examples folder with a placeholder path.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The .ui file and icon contents were not read beyond existence in the file listing.",
+  "The source repository at the 'main' branch was not fetched; the commit 4fc8b075... was not verified against the catalog's scm_revision.",
+  "No Slicer runtime was available, so the scene-clear and file-overwrite behavior was verified by reading code only.",
+  "The sample-data thumbnails referenced in registerSampleData (SurfaceModelNodesSelector1.png, SurfaceModelNodesSelector2.png) were not confirmed to exist in Resources/Icons.",
+  "The catalog build_dependencies is empty while the module needs no PyTorch; no unusual dependency was seen."
+ ],
+ "questions_for_author": []
+}

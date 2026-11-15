@@ -1,0 +1,176 @@
+{
+ "purpose": "A Slicer module that warps the AAL3 atlas onto a patient T1 MRI (N4 bias correction + Elastix rigid/affine/B-spline registration) and exports per-region volume/intensity CSVs, hemispheric asymmetry indices and a centroid-distance connectome matrix, for neuroimaging researchers doing morphometry and cohort batch studies.",
+ "summary": "No malicious or network behavior: no downloads, no telemetry, no pip installs, no eval/exec; outputs go to a user-chosen folder. The catalog entry is consistent (SlicerElastix in both build_dependencies and EXTENSION_DEPENDS, Neuroimaging category, tier 1). Main problems are non-safety: the MNI152 template that CMakeLists installs and the code requires is not present in the snapshot I could inspect (build/install or runtime failure), the bundled AAL3 atlas and MNI152 template carry no license/provenance statement, and the whole pipeline runs synchronously on the GUI thread with processEvents. Asymmetry results are printed but never saved.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read all of AAL3BrainLabeling.py (394 lines): no network calls, no downloads, no eval/exec/pickle, no credential access. Files are written only to the user-selected folder or slicer.app.temporaryPath, and RemoveNode is only called on nodes the module itself created (lines 255, 259, 287, 390-394)."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "No pip installs, no torch, no bundled Qt/VTK; numpy/vtk/qt are Slicer-provided. The only shared-state change is sys.path.append(elastix_dir) at lines 216-219, which adds the SlicerElastix module directory to sys.path globally."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "CMakeLists.txt line 35 installs Resources/Templates/MNI152_T1_1mm.nii.gz and AAL3BrainLabeling.py line 201 requires it, but no Templates directory exists in the repository listing I could inspect; the scan hint reports a 10 MB file that could not be read. Either the install step fails or the module aborts with 'CRITICAL ERROR: Template missing'."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "LICENSE.txt is MIT and covers the extension code, but the bundled AAL3 labelmap (Resources/Atlas/AAL3v1_1mm.nii.gz) and the MNI152 template have their own terms that are nowhere stated; README only asks for a citation of the Rolls et al. 2020 paper."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The pipeline (lines 158-196) runs entirely on the GUI thread, uses cli.runSync for N4 (line 294) and slicer.app.processEvents() in updateUI (line 156), so Slicer freezes for minutes per volume and batch runs can be re-entered. CLI status is never checked, asymmetry results are only printed (lines 337-354), and there is no parameter node."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents the workflow, formulas and atlas citation and there is a screenshot, but there are no tests, no sample data, no research-use disclaimer, and the install section describes manual Additional Module Paths rather than the extension manager."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "MNI152 template resource is installed and required but absent from the repository snapshot",
+   "file": "CMakeLists.txt",
+   "line_start": 31,
+   "line_end": 37,
+   "evidence": "set(MODULE_PYTHON_RESOURCES\n  Resources/AAL3BrainLabeling.png\n  Resources/Atlas/AAL3v1_1mm.nii.gz\n  Resources/Atlas/AAL3_ColorTable.ctbl\n  Resources/Templates/MNI152_T1_1mm.nii.gz",
+   "explanation": "CMakeLists.txt line 35 lists Resources/Templates/MNI152_T1_1mm.nii.gz as an installed resource and AAL3BrainLabeling.py line 201 loads it as the registration target. Listing the repository (root and Resources/) shows no Templates directory and no such file, while the automated scan reports a 10 MB file it could not read. If the file is really absent, the extension install step references a nonexistent file and, even if it builds, every run stops at 'CRITICAL ERROR: Template missing' (line 204) so the module does nothing. If it is present, it is a 10 MB binary committed to git that should be fetched on demand and whose provenance/license is undocumented.",
+   "suggestion": "Confirm the file is committed at the exact path used by CMake and the code (or download it on first use with user consent and a checksum), and state its source and license.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "Bundled AAL3 atlas and MNI152 template have no stated license or provenance",
+   "file": "LICENSE.txt",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "MIT License\n\nCopyright (c) 2026 Mustafa Sakci, Niyazi Acer",
+   "explanation": "The MIT license covers only the extension's own code. The extension redistributes third-party data: Resources/Atlas/AAL3v1_1mm.nii.gz (AAL3 atlas, Rolls et al. 2020) and the MNI152 T1 template. Neither file is accompanied by a license, attribution or source URL, and README.md only asks users to cite the paper (line 100-101). Atlas and template terms are commonly research/non-commercial, so users and the index cannot tell whether redistribution inside this extension is permitted.",
+   "suggestion": "Add a NOTICE/third-party section (or per-directory license files) naming the exact source, version and license of the AAL3 atlas and the MNI152 template, and state any non-commercial/research-only restriction in the README and module help text.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Entire pipeline runs synchronously on the GUI thread; batch mode can freeze Slicer for hours",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 151,
+   "line_end": 156,
+   "evidence": "def updateUI(self, msg, progress_val, progress_bar, status_label):\n        \"\"\"Updates UI elements and forces Slicer to process events, preventing app freezes.\"\"\"\n        print(msg)\n        if progress_bar: progress_bar.setValue(progress_val)\n        if status_label: status_label.text = msg\n        slicer.app.processEvents()",
+   "explanation": "run() (line 124) and batch() (line 144) call the logic directly from the button slot, and the logic only pumps the event loop with processEvents(). N4 is run with slicer.cli.runSync (line 294) and Elastix registration with logic.registerVolumes (line 252), so the application is unresponsive for the 3-5 minutes per volume the code itself warns about (line 171), and for a whole cohort in batch mode. processEvents() also allows the user to click 'PROCESS SINGLE VOLUME' again while a run is in progress, starting a second pipeline on the same scene; there is no cancel button and no guard flag.",
+   "suggestion": "Run the pipeline in a slicer.util.ProgressDialog / CLI-node based asynchronous worker (or at least a background thread with queued UI updates), disable the run/batch buttons while busy, and provide cancellation.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Hemispheric asymmetry results are printed to the console but never saved",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 348,
+   "line_end": 354,
+   "evidence": "for L_name in vol_data:\n            if L_name.endswith(\"_L\"):\n                R_name = L_name.replace(\"_L\", \"_R\")\n                if R_name in vol_data:\n                    L, R = vol_data[L_name], vol_data[R_name]\n                    ai = (L - R) / (L + R + 1e-6)\n                    print(f\"{L_name[:-2]} AI: {ai:.4f}\")",
+   "explanation": "README.md line 17 advertises 'Automatically computes the Asymmetry Index (AI)', but asymmetry() only prints to the Python console; nothing is written to outDir, so batch users lose the values. In addition, str.replace('_L', '_R') replaces every occurrence, which would corrupt names containing '_L' elsewhere.",
+   "suggestion": "Write the AI values to a CSV in outDir (e.g. <vol>_AAL3_Asymmetry.csv) and derive the right-hemisphere name by replacing only the trailing suffix.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "N4 bias correction ignores CLI status and failures propagate silently",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 291,
+   "line_end": 295,
+   "evidence": "out = slicer.mrmlScene.AddNewNodeByClass(\"vtkMRMLScalarVolumeNode\", f\"{volName}_N4_Corrected\")\n        slicer.cli.runSync(slicer.modules.n4itkbiasfieldcorrection, None, {\"inputImageName\": volume.GetID(), \"outputImageName\": out.GetID()})\n        return out",
+   "explanation": "The return value of runSync is discarded, so a failed or cancelled N4 run leaves an empty output node that is then used as the registration input (line 174) and as the statistics volume (line 185). The user sees no error and gets plausible-looking but meaningless volumes/intensities. Similarly atlasMapping() (line 275) does not check that loadLabelVolume succeeded before calling atlasNode.GetDisplayNode().",
+   "suggestion": "Check the returned CLI node status (and that the output volume has data) and report failures with slicer.util.errorDisplay, aborting the pipeline; guard the atlas/color-table loads.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Transform hardening uses a non-standard API call",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 280,
+   "line_end": 281,
+   "evidence": "atlasNode.SetAndObserveTransformNodeID(transform.GetID())\n        slicer.vtkSlicerTransformLogic().hardenTransform(atlasNode)",
+   "explanation": "The documented way to reach the transform logic is slicer.modules.transforms.logic().hardenTransform(node); slicer.vtkSlicerTransformLogic() is not a module-level factory in the Slicer Python API. If it raises AttributeError, the pipeline dies after the atlas node has been added to the scene, leaving orphan nodes and no segmentation.",
+   "suggestion": "Use slicer.modules.transforms.logic().hardenTransform(atlasNode) (or slicer.util.getModuleLogic('Transforms')).",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "No parameter node and results default to the temporary folder",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 74,
+   "line_end": 77,
+   "evidence": "self.outputButton = qt.QPushButton(\"Select Results Folder\")\n        self.outputButton.setStyleSheet(\"padding: 5px; font-weight: bold;\")\n        formLayout.addRow(\"Output Directory: \", self.outputButton)\n        self.outputPath = slicer.app.temporaryPath",
+   "explanation": "If the user does not pick a folder, all CSVs are written into Slicer's temporary directory, which is cleared on exit, so results silently disappear. The module also keeps no parameter node, so the selected input/output are not saved with the scene and cannot be scripted or restored, contrary to Slicer conventions.",
+   "suggestion": "Require an explicit output folder (or warn when using the temp path) and store input/output in a vtkMRMLScriptedModuleNode parameter node.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Global sys.path modification to import Elastix",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 213,
+   "line_end": 219,
+   "evidence": "try:\n                import Elastix\n            except ImportError:\n                elastix_dir = os.path.dirname(slicer.modules.elastix.path)\n                if elastix_dir not in sys.path:\n                    sys.path.append(elastix_dir)\n                import Elastix",
+   "explanation": "Appending the SlicerElastix module directory to sys.path mutates the shared interpreter state for the whole Slicer session, which can shadow other modules for unrelated code. The Elastix extension already exposes its Python module, so the fallback is normally unnecessary.",
+   "suggestion": "Drop the sys.path manipulation and rely on the declared SlicerElastix dependency, reporting a clear error if the import fails.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No tests, no sample data, no research-use disclaimer",
+   "file": "README.md",
+   "line_start": 72,
+   "line_end": 81,
+   "evidence": "1. **3D Slicer:** Version 5.10.0 or higher is recommended.\n2. **SlicerElastix:** You must install the SlicerElastix extension via the 3D Slicer Extension Manager.",
+   "explanation": "The extension performs atlas-based morphometry on clinical MRI data but the README contains no statement that results are for research use only and not for diagnosis, and there is no sample dataset or automated test to let a reviewer or user verify the pipeline output. The install section also describes manual Additional Module Paths instead of the extension manager.",
+   "suggestion": "Add a research-use-only disclaimer, a small sample T1 dataset with expected outputs, and a basic self-test.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Installed label CSV is unused and disagrees with the color table names",
+   "file": "Resources/Labels/AAL3_labels.csv",
+   "line_start": 1,
+   "line_end": 4,
+   "evidence": "ID,Name\n1,Precentral_L\n2,Precentral_R\n3,Frontal_Sup_L",
+   "explanation": "AAL3BrainLabeling.py never reads Resources/Labels/AAL3_labels.csv, yet CMakeLists.txt line 36 installs it. Its names also differ from the color table actually applied to the atlas (Resources/Atlas/AAL3_ColorTable.ctbl line 6: '3 Frontal_Sup_2_L'), so the CSV cannot be used as a reference for the exported region names.",
+   "suggestion": "Either use the CSV as the single source of region names or remove it from the install list and align the color table names.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Catalog entry is internally consistent",
+   "file": "CMakeLists.txt",
+   "line_start": 14,
+   "line_end": 14,
+   "evidence": "set(EXTENSION_DEPENDS \"SlicerElastix\")",
+   "explanation": "EXTENSION_DEPENDS matches the entry's build_dependencies (SlicerElastix), the category matches (Neuroimaging), the schema is v1.0.1, and scm_revision 'main' is a supported branch reference. The only Python file (AAL3BrainLabeling.py) is listed in MODULE_PYTHON_SCRIPTS, so nothing imported by the module is left uninstalled apart from the missing template noted above.",
+   "suggestion": "No action needed beyond resolving the template resource question.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Resources/Templates/MNI152_T1_1mm.nii.gz could not be read (reported as a 10 MB binary by the scan hint, and absent from the file listing I could inspect), so its content, provenance and license are unverified.",
+  "Binary resources (Resources/Atlas/AAL3v1_1mm.nii.gz, Resources/AAL3BrainLabeling.png, Screenshots/Screenshot.png) were not opened; the atlas label values were not compared against the color table or the CSV.",
+  "The upstream repository at commit b08789e87142603744cc02512c79a9a8f480a74b could not be fetched, so I could not confirm whether the template file exists on the branch, check git history, issues or CI build results.",
+  "No Slicer instance was available, so the runtime behavior of slicer.vtkSlicerTransformLogic(), SegmentStatistics key names and the Elastix registerVolumes argument order were assessed from code reading only."
+ ],
+ "questions_for_author": [
+  "Is Resources/Templates/MNI152_T1_1mm.nii.gz committed to the repository at that exact path? If so, what is its source and license, and why is a 10 MB binary committed instead of downloaded on demand?",
+  "Under what license is the AAL3 atlas (Resources/Atlas/AAL3v1_1mm.nii.gz) redistributed, and does it permit redistribution inside a Slicer extension?",
+  "Why is the asymmetry index only printed to the console rather than written to the output folder, and can the pipeline be moved off the GUI thread with a cancel option?"
+ ]
+}

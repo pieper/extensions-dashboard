@@ -1,0 +1,90 @@
+{
+ "purpose": "SurgicalPlanning is a scripted 3D Slicer module (packaged as the NeurosurgicalPlanning extension) for preoperative neurosurgical planning: MRI/CT registration, skull stripping, tumor and vascular segmentation, and 3D review. It targets neurosurgery researchers and planners who use Slicer.",
+ "summary": "I found no network, subprocess, pip, eval/exec, pickle, or deserialization calls in the module by search, and no package installation at import or startup. Optional features (HD-BET, Wrap Solidify, Elastix, ANTs) delegate installs to their own extensions and are guarded at runtime. The file is about 24k lines, so I read only the flagged regions. Packaging is minimal and consistent (EXTENSION_DEPENDS NA, build_dependencies empty, CMake installs the one .py and the .ui). The entry tracks the \"main\" branch rather than a fixed revision, which I note but do not treat as a security defect. No blocking issues found from the inspected parts.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Searched the whole module for subprocess, pip, urllib, requests, socket, eval, exec, pickle, and os.system; none found. The only file deletion (SurgicalPlanning.py:13511-13516) removes its own temp HD-BET files. No telemetry or data upload was seen. Lines outside the flagged regions were not read."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "No global logging, warnings, sys.path, or environment changes at import. PyTorch is only imported inside the HD-BET run path (lines 13389, 13587), and is provided by the HDBrainExtraction extension. Optional extensions are checked at runtime, not installed."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt sets EXTENSION_DEPENDS to NA and the catalog build_dependencies is empty, so they match. SurgicalPlanning/CMakeLists.txt installs SurgicalPlanning.py and Resources/UI/SurgicalPlanning.ui. The catalog uses scm_revision main, a moving branch, so the reviewed source is not pinned. A 2 MB banner PNG is committed. The real CMake build and CPack were not verified (docs/EXTENSION_SUBMISSION.md says only a mock configuration was run)."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE and LICENSE.txt both contain the full Apache License 2.0 text, with copyright 2026 Dimitrios Giakoumettis. README.md states the license and no patents. Bundled third-party material was not found; optional dependencies are not redistributed, per DEPENDENCIES.md."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "The HD-BET cleanup at SurgicalPlanning.py:13511-13516 uses a bare except-pass, which silently swallows errors. The 24k-line single file is hard to maintain. Long HD-BET and Wrap Solidify work runs on the GUI thread with only processEvents. The module does use a parameter node and has guarded optional-dependency paths."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README, DEPENDENCIES.md, and a clinical/research disclaimer are present. Documentation says optional workflows are not all retested. No tests or sample data were seen. Tier 1 is declared."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Silent exception swallowing during temp-file cleanup",
+   "file": "SurgicalPlanning/SurgicalPlanning.py",
+   "line_start": 13511,
+   "line_end": 13516,
+   "evidence": "for path in (inputFile, outputFile, maskFile):\n                try:\n                    if path and os.path.exists(path):\n                        os.remove(path)\n                except Exception:\n                    pass",
+   "explanation": "In the HD-BET finally block, errors from os.remove are caught and discarded, so a failed cleanup of patient-derived temporary NIfTI files in the temp directory goes unreported. This is low-impact, but it hides cleanup failures.",
+   "suggestion": "Log the exception with logging.warning, or narrow it to OSError.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Catalog entry tracks a moving branch instead of a pinned revision",
+   "file": "docs/ExtensionsIndex/NeurosurgicalPlanning.json",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "\"scm_revision\": \"main\",",
+   "explanation": "scm_revision is 'main', so the built extension can change without a catalog update. The reviewed source is therefore not fixed. The policy allows branch references, but a tagged release revision would make the reviewed build reproducible.",
+   "suggestion": "Pin scm_revision to a tagged release or commit hash for the reviewed baseline (v0.6.84).",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Real CMake/CPack build not verified by the author",
+   "file": "docs/EXTENSION_SUBMISSION.md",
+   "line_start": 19,
+   "line_end": 21,
+   "evidence": "1. Perform a **real** CMake extension configuration, build and CPack packaging using an installed matching Slicer SDK/build tree or the Slicer extension build infrastructure. The mock configuration does **not** prove that Slicer can build and package this extension.",
+   "explanation": "The submission checklist states that only a mock CMake configuration was run, and that a real Slicer-SDK build and package are still required. The entry may therefore fail to build in the index infrastructure.",
+   "suggestion": "Rely on the index's CI build results for the PR; confirm the build passes before merge.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Large single-file module and long GUI-thread operations",
+   "file": "SurgicalPlanning/SurgicalPlanning.py",
+   "line_start": 13439,
+   "line_end": 13450,
+   "evidence": "run_hd_bet(\n                [inputFile],\n                [outputFile],\n                mode,\n                configFile,\n                device,",
+   "explanation": "SurgicalPlanning.py is about 24,000 lines in one file. HD-BET and Wrap Solidify run synchronously on the GUI thread, with only processEvents calls for progress. This affects maintainability and responsiveness, not safety.",
+   "suggestion": "Consider splitting the module and running heavy inference off the GUI thread with progress reporting.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Most of SurgicalPlanning.py (about 24k lines) was not read; the review relied on keyword searches and targeted reads.",
+  "The HDBrainExtraction extension's setupPythonRequirements behaviour (whether it installs packages or PyTorch) was not inspected.",
+  "The scm_url repository at revision main was not fetched; the actual commit and any changes since v0.6.84 were not verified.",
+  "The real Slicer build, CPack packaging, and loading in Slicer were not run.",
+  "Binary image files (banner, icon, 3D and workflow screenshots) were not inspected.",
+  "The remote SurfaceWrapSolidify, SlicerElastix, SlicerANTs, and SlicerVMTK dependencies were not inspected."
+ ],
+ "questions_for_author": []
+}

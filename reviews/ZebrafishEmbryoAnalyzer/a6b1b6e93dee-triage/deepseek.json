@@ -1,0 +1,142 @@
+{
+ "purpose": "A 3D Slicer module for batch morphometry of 2-D zebrafish embryo microscopy images: it segments body/eye/edema/swim-bladder with Segformer models, measures body length, curvature class, length/straight-line ratio and eye metrics, and exports results to CSV/Excel. It targets zebrafish researchers doing high-throughput developmental/toxicology screening, not clinicians.",
+ "summary": "Well-engineered, unusually careful code: no data leaves the machine, model weights are fetched from pinned Hugging Face revisions and SHA-256 verified, np.load uses allow_pickle=False, no eval/exec, and package installation is behind an explicit confirmation dialog with torch routed through the PyTorch extension. Three issues need fixing: the catalog entry's empty build_dependencies contradicts EXTENSION_DEPENDS \"PyTorch\"; on macOS the installer appends \"numpy<2\", downgrading a package Slicer bundles for every extension; and every model entry still carries \"license\": \"LICENSE_PENDING\". Recommendation: 🔴 Do not merge yet.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Searched the whole tree for network/exec/deserialization primitives: the only outbound traffic is the Hugging Face model download in model_downloader.py (pinned revision, SHA-256 verified, HTTPS-only redirects, .tmp + backup/rollback), and inference_runner.py:286 uses np.load(..., allow_pickle=False). No eval/exec/pickle, no telemetry, no upload of images; bug_report.py only writes a local markdown file to Slicer's temp dir."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "dependency_installer.py:43 defines NUMPY_TORCH_SPEC = \"numpy<2\" and line 282-283 appends it to the pip requirements on macOS, downgrading numpy that Slicer bundles; logic.py:68 monkey-patches zebrafish_measure.seg._load_unet_model globally; ZebrafishEmbryoAnalyzer.py:53 evicts modules from sys.modules at import. Torch itself is correctly delegated to PyTorchUtils and pip installs are gated by a confirmation dialog (widget.py:1249)."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "ZebrafishEmbryoAnalyzer/CMakeLists.txt lists every Python file the modules import (all 17 Lib and 5 Core files), and Testing/CMakeLists.txt points at an existing test script, but CMakeLists.txt:11 sets EXTENSION_DEPENDS \"PyTorch\" while the catalog entry declares \"build_dependencies\": []."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "The extension itself is Apache-2.0 (LICENSE:1-3) and README.md:320-325 points at the model cards, but every entry in model_manifest.py carries \"license\": \"LICENSE_PENDING\" (e.g. line 58), i.e. the author's own manifest states the terms for the downloaded weights are unconfirmed."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Structure follows Slicer conventions (ScriptedLoadableModule, parameter node, observers removed in cleanup, heavy imports deferred, work in a QProcess worker). Two smaller issues: logic.py:429 sorts image paths while inference_runner.py:296-300 re-attaches originals by index, and overlay.py:9 imports cv2 at module level so the gallery needs OpenCV even for placeholders."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md is a full tutorial with screenshots, measurement reference, curvature-class table, research-use disclaimer and model provenance; there is a large pytest suite plus a Slicer self-test and a CI workflow. Platform support is honestly stated as macOS-only verified (README.md:285-289)."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Catalog entry build_dependencies is empty while the extension declares EXTENSION_DEPENDS \"PyTorch\"",
+   "file": "CMakeLists.txt",
+   "line_start": 11,
+   "line_end": 11,
+   "evidence": "set(EXTENSION_DEPENDS \"PyTorch\")",
+   "explanation": "The submitted catalog entry has \"build_dependencies\": [], but the extension's own CMakeLists declares PyTorch as an extension dependency. The index uses build_dependencies to build/package dependency extensions, so the entry and the source disagree about what the extension needs; the packaged extension can be produced without the PyTorch extension it depends on, and the mismatch is exactly the kind of 'demonstrably wrong setting' the admission rules ask to block on.",
+   "suggestion": "Set \"build_dependencies\": [\"PyTorch\"] in the catalog entry (or drop EXTENSION_DEPENDS if PyTorch is only a runtime, user-installed dependency — but then the runtime install path must be the only one).",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "macOS install path downgrades numpy, which Slicer bundles and shares with all extensions",
+   "file": "ZebrafishEmbryoAnalyzer/ZebrafishEmbryoAnalyzerLib/dependency_installer.py",
+   "line_start": 43,
+   "line_end": 43,
+   "evidence": "NUMPY_TORCH_SPEC = \"numpy<2\"",
+   "explanation": "On macOS, install_packages() appends \"numpy<2\" to the pip requirements (lines 282-283) and runs slicer.util.pip_install on Slicer's own interpreter. Any user who confirms the install dialog gets numpy replaced in the shared environment, which affects every other extension and Slicer itself, not just this module. The code comments acknowledge the PyTorch extension applies the same constraint, but doing it from a third-party extension means the downgrade happens even for users who never open the module again after one run.",
+   "suggestion": "Let PyTorchUtils/the PyTorch extension own the numpy constraint (it already does), or at minimum surface the numpy downgrade explicitly in the confirmation dialog text and restrict it to the torch install step rather than the general requirements list.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "All model weights are marked LICENSE_PENDING in the manifest",
+   "file": "ZebrafishEmbryoAnalyzer/ZebrafishEmbryoAnalyzerLib/model_manifest.py",
+   "line_start": 58,
+   "line_end": 58,
+   "evidence": "\"license\": \"LICENSE_PENDING\",",
+   "explanation": "The module's core function depends on ten model files downloaded from huggingface.co/markdanielarndt/*, and the manifest's own header (line 11) says 'Licenses are \"LICENSE_PENDING\" until confirmed'. README.md:322-325 defers to the model cards. Distribution permission for the material the extension fetches is therefore unconfirmed by the submission itself; the code is Apache-2.0 but the weights are the substance of the tool.",
+   "suggestion": "Confirm and record the license of each Hugging Face model repository (or state explicitly that the author owns them and releases them under a named license), and replace LICENSE_PENDING with the actual identifier.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Results are sorted by path but originals are re-attached by index",
+   "file": "ZebrafishEmbryoAnalyzer/ZebrafishEmbryoAnalyzerLib/logic.py",
+   "line_start": 429,
+   "line_end": 429,
+   "evidence": "for _loop_i, image_path in enumerate(sorted(image_paths)):",
+   "explanation": "analyse_images() iterates over sorted(image_paths), so the returned list order is alphabetical, not the order the user loaded the images. InferenceController._merge_originals (inference_runner.py:296-300) then pairs results[i] with originals[i] positionally. If the widget collects originals in load order, a result row can be displayed with another image's pixels, i.e. wrong measurements shown against the wrong picture. I could not read widget.py to confirm the originals ordering, so this is a suspected rather than verified mismatch.",
+   "suggestion": "Either drop the sort (preserve caller order) or key the merge on image_path/filename instead of list index.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Global monkey-patch of a third-party library function",
+   "file": "ZebrafishEmbryoAnalyzer/ZebrafishEmbryoAnalyzerLib/logic.py",
+   "line_start": 68,
+   "line_end": 68,
+   "evidence": "_seg_module._load_unet_model = _cached_load_unet",
+   "explanation": "The extension replaces zebrafish_measure.seg._load_unet_model process-wide and stashes the original on the library module to survive reloads. Any other code in the same Slicer process that uses zebrafish_measure gets the cached wrapper and an unbounded _MODEL_CACHE of ~180 MB models. It is confined to a third-party library rather than Slicer/VTK, and analysis runs in a worker subprocess, so impact is limited, but it is a global side effect that is not undone.",
+   "suggestion": "Pass a cache/loader explicitly to segmentation_pipeline if the library allows it, or bound the cache and restore the original on module cleanup.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "cv2 imported at module level in overlay.py, so the gallery needs OpenCV before any analysis",
+   "file": "ZebrafishEmbryoAnalyzer/ZebrafishEmbryoAnalyzerLib/overlay.py",
+   "line_start": 8,
+   "line_end": 9,
+   "evidence": "import numpy as np\nimport cv2",
+   "explanation": "gallery_tab.populate() calls make_overlay() for every result, including placeholders for images that have not been analysed, so merely listing loaded images requires OpenCV. The dependency_installer comments acknowledge this ('Showing images at all needs OpenCV'), which means the 'images' purpose pulls a package the user may not need; it is a usability wart rather than a defect.",
+   "suggestion": "Import cv2 lazily inside make_full_overlay and fall back to a plain numpy thumbnail when it is unavailable.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "info",
+   "title": "PyTorchUtils.installTorch is called with askConfirmation=False",
+   "file": "ZebrafishEmbryoAnalyzer/ZebrafishEmbryoAnalyzerLib/dependency_installer.py",
+   "line_start": 205,
+   "line_end": 208,
+   "evidence": "if torch_logic.installTorch(\n        askConfirmation=False,\n        torchVersionRequirement=_windows_torch_version_requirement(),\n    ) is None:",
+   "explanation": "The PyTorch extension's own confirmation is suppressed, but the extension shows its own confirmOkCancelDisplay before calling install_packages (widget.py:1249), so the user still opts in. The Windows-only torchVersionRequirement \"<2.13.0\" is a cap passed through PyTorchUtils rather than a direct pip pin, which is the sanctioned route.",
+   "suggestion": "Consider passing askConfirmation=True so the PyTorch extension's own dialog (which names the download size) is not bypassed.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "README still says the extension must be installed manually",
+   "file": "README.md",
+   "line_start": 56,
+   "line_end": 56,
+   "evidence": "The extension is not yet available through the Extensions Manager and must be installed manually from this repository.",
+   "explanation": "Once the catalog entry is live this instruction is wrong and will confuse users; the rest of the README (tutorial, screenshots, measurement reference, research-use disclaimer) is otherwise strong.",
+   "suggestion": "Update the installation section to the Extensions Manager flow when the entry is published.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The PyPI package zebrafish-measure==0.2.0 (installed with --no-deps) is not in this repository; its actual torch.load calls, preprocessing and license could not be inspected, so the weights_only=True guarantee asserted by tests/test_safe_checkpoint_loading.py covers only this repo's source.",
+  "The Hugging Face model repositories markdanielarndt/Zebrafish_Segmentation and markdanielarndt/Classification (licenses, model cards, whether the pinned revisions and SHA-256 values match) could not be fetched.",
+  "widget.py, zoom_view.py, detail_tab.py and results_tab.py were only searched, not read in full; the originals-ordering question behind the sorted() finding is therefore unconfirmed.",
+  "CI results (.github/workflows/ci.yml) and any actual Slicer build/load of the extension were not run or observed.",
+  "The catalog entry file itself is not part of the inspected repository; the build_dependencies mismatch was assessed from the entry text supplied with the request plus CMakeLists.txt."
+ ],
+ "questions_for_author": [
+  "Why does the catalog entry declare no build_dependencies while CMakeLists.txt sets EXTENSION_DEPENDS \"PyTorch\"?",
+  "Can the macOS numpy<2 constraint be left entirely to the PyTorch extension instead of being applied by this extension's pip call?",
+  "What are the licenses of the ten model files, and when will LICENSE_PENDING be replaced with the actual terms?",
+  "Does the widget pass originals to InferenceController in the same order as image_paths, given that analyse_images() sorts the paths?"
+ ]
+}

@@ -1,0 +1,93 @@
+{
+ "purpose": "A 3D Slicer extension that reconstructs NM SPECT projection series from the DICOM browser using PyTomography (OSEM, BSREM, FBP, with CT attenuation, scatter and resolution recovery), plus a SPECT Calibration module for Bq/ml and SUV and a SPECT Collimators library module. It is aimed at nuclear medicine researchers and physicists.",
+ "summary": "I read the extension entry, CMakeLists, the main module, the calibration and collimator modules, most of the reconstruction helpers, the README and LICENSE. I found no malicious or concealed behaviour, no telemetry or network transmission, and no eval/pickle/unsafe deserialization. PyTorch is obtained only through the PyTorch extension, and PyTomography is installed on user confirmation with torch pinned by a constraint. The main gaps are soft: no clinical or research-use disclaimer, a few swallowed exceptions, a fixed temp filename in one save path, and the possibility that the pip install of PyTomography changes Slicer-bundled packages that I could not verify. Overall: minor issues.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected DICOMSpectRecon.py, collimators.py, quantification.py, display.py and the search for network, subprocess, eval, pickle and delete calls. The only network-like action is a user-confirmed pip install of pytomography; file writes are to the user's settings folder or a temp folder. No telemetry or data upload was found."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Torch is never pip-installed by the extension (DICOMSpectRecon.py lines 580-655), and the PyTomography install uses a torch==<installed> constraint (lines 658-670). Nothing installs at import time. However, the constraint does not protect other Slicer-bundled packages (numpy, SimpleITK, pydicom, scipy) from being changed by PyTomography's own requirements, which I could not verify."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMakeLists.txt sets EXTENSION_DEPENDS PyTorch, which matches build_dependencies in the catalog entry. DICOMSpectRecon/CMakeLists.txt lists all eight DICOMSpectReconLib modules plus __init__.py, and each file listed exists in the repo listing. The Testing folder is not installed by CMake, which is correct."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is MIT with a 2026 copyright to Burak Demir. The README credits PyTomography (Qurit lab) and asks for citation, but I did not check PyTomography's license terms, which are a separate dependency installed by pip."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Some errors are swallowed silently (DICOMSpectRecon.py lines 539-540 and 541-544 with a bare except and pass). collimators.saveLibrary uses a fixed '.tmp' name (collimators.py lines 196-199), so concurrent saves can collide. The module-level sys.path insert and the developer-mode reload are workable but fragile."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README is detailed and covers installation, usage, calibration, and references. There is no clinical or research-use disclaimer in README.md (I read all 178 lines), even though the tool produces Bq/ml and SUV values. The Testing/PyTomography4 scripts are developer checks that are not wired into CTest, so there is no automated test in the extension."
+  }
+ },
+ "findings": [
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No clinical or research-use disclaimer for quantitative and diagnostic-style output",
+   "file": "README.md",
+   "line_start": 1,
+   "line_end": 178,
+   "evidence": "- **Quantification (optional)**: with a calibration factor (cps/MBq) made in the **SPECT Calibration**\n  module, the static image is converted to Bq/ml and optionally to SUV:",
+   "explanation": "The README describes Bq/ml and SUV quantification, dosimetry traceability and clinical-style workflows (e.g. 'the usual clinical choice'), but contains no statement that outputs are unvalidated for clinical decisions or that the user must verify calibration. Users may trust the numbers without checking. This is a documentation gap, not a code defect.",
+   "suggestion": "Add a 'Research use only / not validated for clinical decisions' disclaimer and a short validation note (phantom checks, versioning) to the README and the module helpText.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "PyTomography install only pins torch; other bundled Slicer packages may still change",
+   "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+   "line_start": 658,
+   "line_end": 670,
+   "evidence": "f.write(f\"torch=={torchVersion}\\n\")\n# List form: the constraints path is passed as one argument even if it contains spaces\nslicer.util.pip_install([\"--upgrade\", PYTOMOGRAPHY_REQUIREMENT, \"--constraint\", constraints])",
+   "explanation": "The install is user-confirmed and torch is held at its installed build, which is good. But the constraint file only mentions torch, so PyTomography's own requirements could upgrade or downgrade packages Slicer bundles (numpy, SimpleITK, pydicom, scipy), affecting Slicer for users who never open this module. I could not verify PyTomography's dependency list from the repo.",
+   "suggestion": "Also constrain numpy, SimpleITK, pydicom and scipy to their currently installed versions in the same constraints file, or document the expected impact and test a clean Slicer install with PyTomography 4.",
+   "confidence": "low"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Silent exception swallowing when attaching the CT volume to subject hierarchy",
+   "file": "DICOMSpectRecon/DICOMSpectRecon.py",
+   "line_start": 536,
+   "line_end": 541,
+   "evidence": "                          except Exception:\n                              pass\n                          return node",
+   "explanation": "If the subject-hierarchy check or insertion fails, the error is dropped with a bare except and pass. The CT then loads without DICOM metadata, and the user gets no message, which makes the later fusion or calibration steps hard to debug.",
+   "suggestion": "Log the traceback with logging.warning, as the surrounding code does elsewhere in this file.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Fixed temporary filename in collimator library save can collide and leave a partial file",
+   "file": "DICOMSpectRecon/DICOMSpectReconLib/collimators.py",
+   "line_start": 196,
+   "line_end": 199,
+   "evidence": "tmp = path + \".tmp\"\n    with open(tmp, \"w\", encoding=\"utf-8\") as f:\n        json.dump({\"version\": LIBRARY_VERSION, \"collimators\": clean}, f, indent=2)\n    os.replace(tmp, path)",
+   "explanation": "saveLibrary writes to path + '.tmp' and then os.replace()s it. Two Slicer instances saving at once would write to the same temp file and could interleave, and an exception during json.dump leaves the .tmp file behind. The library is a shared user file, so a corrupted or lost edit is possible. The calibration library in quantification.py already uses mkstemp, so this is inconsistent.",
+   "suggestion": "Use tempfile.mkstemp in the same folder, as quantification._writeLibrary does, and remove the temp file on failure.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Did not read dialog.py (about 155 KB), motion.py, motiondialog.py, nmdata.py, most of quantification.py, or the rest of reconstruction.py and collimators.py, so the internal logic, the DICOM parsing and the GUI-thread handling are not reviewed.",
+  "Did not check the upstream PyTomography license or its dependency list, so the environment impact of pip install is unverified.",
+  "Did not resolve the scm_revision 'main' to a commit, and did not inspect the Testing/PyTomography4 scripts in detail.",
+  "Did not run anything. No CI results were available to me, so no build or load evidence is available.",
+  "Did not check the icon resources or screenshots in the repo."
+ ],
+ "questions_for_author": [
+  "Does PyTomography 4's dependency set change any numpy, SimpleITK, pydicom or scipy version that Slicer bundles? If so, should those be constrained too?",
+  "Please add a research-use or clinical validation disclaimer to the README and helpText.",
+  "Is the calibration library written from more than one workstation? If so, is the mkstemp approach also used for the collimator library?"
+ ]
+}

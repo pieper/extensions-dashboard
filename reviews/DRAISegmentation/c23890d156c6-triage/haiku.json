@@ -1,0 +1,113 @@
+{
+ "purpose": "A 3D Slicer scripted module that uploads a selected CT/CTA volume to a remote DRAI server for AI segmentation, then loads the returned label map as a segmentation with a closed-surface 3D model. It is for clinicians and researchers who want cloud-based spine/pelvis and aorta-iliac-femoral segmentation.",
+ "summary": "The code is a single, readable ScriptedLoadableModule with a BSD-3 license, a per-upload consent dialog, and no environment changes or package installs. The main concerns are about data handling: patient volumes are sent over plain HTTP to a bare IP address, a persistent device UUID is registered with the server at module setup before any consent, and exported volumes and downloaded results are left in temp directories that are never deleted. The \"deleted immediately\" claim cannot be verified from the client. I could not inspect the server or the catalog's CI results. Overall: needs fixes before users are directed to this for clinical data.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "No malicious or obfuscated code was found, and uploads are gated by a consent dialog (DRAISegmentation.py lines 226-279). However, medical images go to a plain-HTTP bare-IP endpoint (line 33), the device ID is sent at setup without consent (line 90), and temp copies of PHI are left behind (lines 431, 483)."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Nothing is installed or pinned. requests is imported optionally with a urllib fallback, and there are no sys.path or global logging changes in DRAISegmentation.py."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMakeLists.txt and DRAISegmentation/CMakeLists.txt list the existing script and icon (DRAISegmentation/Resources/Icons/DRAISegmentation.jpg). EXTENSION_DEPENDS \"NA\" matches the empty build_dependencies. Screenshots are about 1 MB each and are committed, which is minor. The catalog revision is 'main', so the exact commit was not pinned."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is BSD-3-Clause with a clear copyright holder, and the README states the same license. No bundled third-party code or model weights were found in the repository."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Uses a QTimer poll rather than blocking, shows errors with errorDisplay, and has a cleanup method. Problems: temp files are never removed, the job-cancel button does not cancel the server job, job_id is interpolated into the URL unescaped (line 466), and the filename in the multipart fallback is unquoted (line 604)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README and in-module help explain usage and data policy. The test only checks that a device ID exists, so there is no functional test. The model is validated nowhere in the repo, and there is no clinical-use disclaimer. The tier is 1, which fits experimental status."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Patient CT volumes uploaded over unencrypted HTTP to a bare IP address",
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line_start": 33,
+   "line_end": 33,
+   "evidence": "DEFAULT_SERVER_URL = \"http://209.20.158.219:8000\"",
+   "explanation": "The default server is plain HTTP on a raw IP, so the full medical image and the X-Device-ID header travel unencrypted and can be read or altered by anyone on the network path. This conflicts with the description claiming data is 'securely processed'. A user following the documented workflow sends PHI over an unauthenticated channel, and the server identity is never verified. The server should be served over HTTPS with a stable hostname, and the default should not be a bare IP.",
+   "suggestion": "",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Persistent device identifier is registered with the server at module setup, before any consent",
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line_start": 86,
+   "line_end": 90,
+   "evidence": "self.logic = DRAISegmentationLogic()\n        self.logic.ensureDeviceRegistered()",
+   "explanation": "setup() calls ensureDeviceRegistered(), which POSTs a generated UUID to the remote server as soon as the module GUI is created. The consent dialog only appears when the user clicks Run. This sends an identifier off the machine without opt-in, and the UUID persists in QSettings and is sent on every later request as X-Device-ID. The registration should happen only after consent or be clearly disclosed in the privacy notice.",
+   "suggestion": "",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Exported patient volumes and downloaded results are never deleted from temp storage",
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line_start": 430,
+   "line_end": 437,
+   "evidence": "tmpDir = tempfile.mkdtemp(prefix=\"drai_\")\n        filename = \"volume.nii.gz\"\n        filepath = os.path.join(tmpDir, filename)",
+   "explanation": "Each run writes the input CT to a new mkdtemp directory and writes the result to another, and neither is removed afterwards. Medical images are left in the user's temp folder, which conflicts with the 'no data retained' messaging. Users on shared machines may expose PHI. The code should delete these directories after upload and after loading, for example with shutil.rmtree in a finally block.",
+   "suggestion": "",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Cancel does not cancel the server job, and the privacy claim is not verifiable from the client",
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line_start": 257,
+   "line_end": 261,
+   "evidence": "def _onCancelClicked(self, _checked):\n        self._stopPolling()\n        self._currentJobId = None",
+   "explanation": "_onCancelClicked only stops local polling. The job keeps running on the server and the user is told 'Cancelled by user.' with no server-side cancel call. Separately, the 'deleted immediately' and 'no data is retained' statements in the consent text and in the description cannot be checked from this code. The client should either send a cancel request or word the message accurately, and the privacy statements should be backed by a published retention policy.",
+   "suggestion": "",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Job ID is interpolated into the request URL without escaping",
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line_start": 465,
+   "line_end": 466,
+   "evidence": "def getJobStatus(self, jobId: str):\n        url = f\"{self.getServerUrl()}/api/v1/jobs/{jobId}/status\"",
+   "explanation": "The job_id returned by the server is inserted directly into the URL path. A malformed or hostile server response could inject path segments or query characters. The impact is limited because the server is the only source, but the value should be validated or URL-encoded.",
+   "suggestion": "",
+   "confidence": "low"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Description and privacy text overstate security and the test is trivial",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 12,
+   "evidence": "All data is securely processed and deleted immediately after inference.",
+   "explanation": "The CMake description says 'All data is securely processed', but the transport is plain HTTP. The only test checks that a device ID is non-empty. The README and Screenshots are reasonable, but there is no sample data, no accuracy or validation information for the models, and no clinical-use disclaimer.",
+   "suggestion": "",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "The remote server (209.20.158.219) was not accessible, so the actual retention behavior, TLS support, and server-side handling of uploaded data were not verified.",
+  "The source at the catalog revision 'main' was taken from the supplied files; the exact commit was not resolved or pinned.",
+  "Model provenance, validation data, and weight licensing were not available in the repository.",
+  "No Slicer build or runtime test was possible, and no CI results were provided.",
+  "The icon image and screenshot contents were not visually inspected."
+ ],
+ "questions_for_author": []
+}

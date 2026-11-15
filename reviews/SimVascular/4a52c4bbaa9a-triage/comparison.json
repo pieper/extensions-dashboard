@@ -1,0 +1,746 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "SeqSeg downgrades Slicer's bundled NumPy to <2",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "SeqSeg/seqseg.py",
+   "line": 2839,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "SeqSeg downgrades Slicer's bundled NumPy to <2",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 2839,
+     "line_end": 2843,
+     "evidence": "numpy_version_str = importlib.metadata.version(\"numpy\")\n        restart_for_numpy = pkg_version.parse(numpy_version_str) >= pkg_version.parse(\"2.0.0\")\n        if restart_for_numpy:\n            logging.info(_(\"Downgrading NumPy from {current} to <2 for PyTorch 2.2.2 compatibility...\").format(current=numpy_version_str))\n            self._pipInstall(\"numpy<2\")",
+     "explanation": "Pressing Run SeqSeg replaces the NumPy that Slicer bundles with a 1.x build, and a pip constraint file (`numpy<2`, line 2512) is then applied to every subsequent install. Any other extension or Slicer component built against NumPy 2 breaks in that installation, including for users who never open SeqSeg. The policy lists downgrading or exactly pinning packages Slicer bundles (numpy named explicitly) as blocking.",
+     "suggestion": "Do not change NumPy. Use a torch build compatible with Slicer's NumPy (through PyTorchUtils), or run the segmentation in a separate process/environment.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SeqSeg/seqseg.py",
+      "line": 2839
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "SeqSeg pins torch and downgrades NumPy in Slicer's shared Python",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 2835,
+     "line_end": 2843,
+     "evidence": "# torch 2.2.2 is built against NumPy 1.x; NumPy 2.x fails import with _ARRAY_API not found.\n...self._pipInstall(\"numpy<2\")",
+     "explanation": "Slicer's own numpy is downgraded and torch 2.2.2 is installed into Slicer's Python for all users, including those who never open SeqSeg. The index policy requires PyTorch to go through the PyTorchUtils extension and forbids downgrading bundled packages. Other extensions can break after the downgrade.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "SeqSeg/seqseg.py",
+      "line": 2835
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "SeqSeg installs PyTorch itself via light-the-torch with an exact pin",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "major",
+    "minor"
+   ],
+   "file": "SeqSeg/seqseg.py",
+   "line": 2618,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "SeqSeg installs PyTorch itself via light-the-torch with an exact pin",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 2618,
+     "line_end": 2628,
+     "evidence": "slicer.util.pip_install(\"https://github.com/Slicer/light-the-torch/archive/main.zip\")\n...\n            f\"torch=={requiredTorchVersion}\",\n            f\"torchvision=={requiredTorchVisionVersion}\",\n            \"numpy<2\",",
+     "explanation": "When the PyTorch extension is not installed, `_installTorchWithoutExtension` pip-installs light-the-torch from a GitHub main-branch zip and then runs `light_the_torch install torch==2.2.2 torchvision==0.17.2 numpy<2` into Slicer's shared Python (requiredTorchVersion = \"2.2.2\" at line 2827). The index policy names direct use of light-the-torch and exact torch pins as blocking, because the wheel is chosen outside PyTorchUtils and can mismatch the Slicer build; it also affects every other extension in that Slicer installation.",
+     "suggestion": "Declare PyTorch (and NNUNet) in `build_dependencies`/`EXTENSION_DEPENDS` and install torch only through `PyTorchUtils`; if the extension is absent, tell the user to install it from the Extensions Manager instead of falling back to light-the-torch.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "SeqSeg/seqseg.py",
+      "line": 2618
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "major",
+     "title": "Unpinned remote code download and custom PyTorch installation in SeqSeg",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 2615,
+     "line_end": 2620,
+     "evidence": "SeqSeg/seqseg.py:2618: slicer.util.pip_install(\"https://github.com/Slicer/light-the-torch/archive/main.zip\")",
+     "explanation": "SeqSeg downloads and installs arbitrary code from a GitHub zip archive (light-the-torch) at runtime without cryptographic verification or pinning, and installs PyTorch/nnUNet outside Slicer's PyTorch extension (PyTorchUtils), which risks modifying Slicer's core Python environment and breaking compatibility or reproducibility.",
+     "suggestion": "Use PyTorchUtils for PyTorch installation and avoid downloading unpinned zip archives from GitHub at runtime.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Remote light-the-torch installed from GitHub zip",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 2617,
+     "line_end": 2618,
+     "evidence": "slicer.util.pip_install(\"https://github.com/Slicer/light-the-torch/archive/main.zip\")",
+     "explanation": "An unpinned branch archive is installed into Slicer's Python to choose a torch wheel. It is a mutable reference, so the code that runs can change without notice.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SeqSeg/seqseg.py",
+      "line": 2618
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "SeqSeg pip-installs nnunetv2, which pulls torch from PyPI",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "SeqSeg/seqseg.py",
+   "line": 2696,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "SeqSeg pip-installs nnunetv2, which pulls torch from PyPI",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 2696,
+     "line_end": 2703,
+     "evidence": "def _installNnunetWithoutExtension(self, nnunetRequirement):\n        \"\"\"Install nnunetv2 without the NNUNet extension.\"\"\"\n        packagesToSkip = self._nnunetPackagesToSkip()\n        if sys.platform == \"darwin\":\n            self._installImagecodecsForDarwin()\n\n        logging.info(_(\"Installing nnunetv2 with pip ({spec})...\").format(spec=nnunetRequirement))\n        self.pipInstallSelective(\"nnunetv2\", nnunetRequirement, packagesToSkip, recursive=True)",
+     "explanation": "The policy explicitly names `nnunetv2` as a package that must not be pip-installed because it pulls torch from PyPI, and requires the NNUNet extension's install logic instead. Here the module installs nnunetv2 recursively with a hand-maintained skip list (lines 2637-2656) and additionally installs imagecodecs and acvl-utils pins (lines 2719, 2735) into Slicer's Python. The user is asked once via confirmOkCancelDisplay (line 2929), but the resulting environment is still modified outside the supported installers.",
+     "suggestion": "Depend on the NNUNet extension (declare it in `build_dependencies`/`EXTENSION_DEPENDS`) and use `SlicerNNUNetLib.InstallLogic`; remove the pip fallback path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SeqSeg/seqseg.py",
+      "line": 2696
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "SDFStent pip-installs svmorph into Slicer's Python without asking",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "SDFStent/SDFStent.py",
+   "line": 422,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "SDFStent pip-installs svmorph into Slicer's Python without asking",
+     "file": "SDFStent/SDFStent.py",
+     "line_start": 422,
+     "line_end": 427,
+     "evidence": "self._appendLog(_(\"svmorph is not installed. Installing svmorph...\"))\n        self._setStatus(_(\"Installing svmorph...\"))\n        try:\n            slicer.util.pip_install(\"svmorph\")\n        except Exception as exc:\n            raise RuntimeError(_(\"Failed to install required dependency 'svmorph'.\")) from exc",
+     "explanation": "The first click on Update silently installs `svmorph` and all of its declared dependencies into Slicer's shared Python, with no confirmation dialog and no skip list, so pip may replace packages Slicer bundles. Docs/SDFStent.md:22 tells users this may take minutes to download packages, but nothing asks them first. This affects every extension in that Slicer installation.",
+     "suggestion": "Ask for confirmation before installing (as SimVascularROM does with `confirmOkCancelDisplay`), install with `--no-deps` plus an explicit skip list for Slicer-provided packages, and state the package and size in the dialog.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SDFStent/SDFStent.py",
+      "line": 422
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "SDFStent installs svmorph into Slicer's Python at run time",
+     "file": "SDFStent/SDFStent.py",
+     "line_start": 422,
+     "line_end": 425,
+     "evidence": "self._appendLog(_(\"svmorph is not installed. Installing svmorph...\"))\n...\n slicer.util.pip_install(\"svmorph\")",
+     "explanation": "Packages are installed into the shared Slicer environment on first run without a separate confirmation dialog. Its transitive dependencies are not controlled, so NumPy/SimpleITK pins may be affected. The intended dependency set is not visible in the sampled code.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "SDFStent/SDFStent.py",
+      "line": 422
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Module unit tests are commented out of the CMake test registration",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SeqSeg/Testing/Python/CMakeLists.txt",
+   "line": 2,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Module unit tests are commented out of the CMake test registration",
+     "file": "SeqSeg/Testing/Python/CMakeLists.txt",
+     "line_start": 1,
+     "line_end": 2,
+     "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+     "explanation": "The same commented-out line appears in SDFStent, PaintModel, FaceAwareRemesh and SeqSeg Testing/Python/CMakeLists.txt, so the in-module `ScriptedLoadableModuleTest` classes (e.g. PaintModel/PaintModel.py:1070-1133) are never run by ctest. The package-level pytest suites exist (FaceAwareRemesh/tests, SimVascularMeshPrep/Testing/Python) but are not wired into the build either, so a regression in these modules would not be caught by the extension build.",
+     "suggestion": "Register the existing module tests with `slicer_add_python_unittest`, or add a ctest that runs the package pytest suites.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SeqSeg/Testing/Python/CMakeLists.txt",
+      "line": 2
+     }
+    }
+   ]
+  },
+  {
+   "title": "PaintModel runs region growing on the GUI thread and edits the user's polydata in place",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "PaintModel/PaintModel.py",
+   "line": 250,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "PaintModel runs region growing on the GUI thread and edits the user's polydata in place",
+     "file": "PaintModel/PaintModel.py",
+     "line_start": 250,
+     "line_end": 256,
+     "evidence": "qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)\n    try:\n      groupCount = self.logic.createFaceGroups(\n        modelNode, float(self.faceGroupAngleSlider.value), int(self.faceGroupSizeSpinBox.value))",
+     "explanation": "`createFaceGroups` builds per-cell normals, an edge map and a merge loop over all cells (lines 905-975) synchronously on the GUI thread with only a wait cursor and no progress or cancel, so a large surface freezes Slicer. The module also adds `ModelFaceID` and `_PaintModelSelectionDisplay` arrays directly to the user's model node polydata, so the in-memory model is modified without an undo snapshot for the selection overlay (only `onClearFaceGroups` calls `SaveStateForUndo`, line 278).",
+     "suggestion": "Run the grouping in a `qt.QTimer`/worker with progress and cancellation, and take an undo snapshot before the first modification of the model.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "PaintModel/PaintModel.py",
+      "line": 250
+     }
+    }
+   ]
+  },
+  {
+   "title": "SDFStent mutates sys.path with a generic module directory",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SDFStent/SDFStent.py",
+   "line": 1079,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "SDFStent mutates sys.path with a generic module directory",
+     "file": "SDFStent/SDFStent.py",
+     "line_start": 1079,
+     "line_end": 1082,
+     "evidence": "import sys\nmoduleDir = os.path.dirname(__file__)\nif moduleDir not in sys.path:\n    sys.path.insert(0, moduleDir)",
+     "explanation": "Inserting the module directory at position 0 can shadow other top-level packages imported later in the session. The effect is global to the process.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SDFStent/SDFStent.py",
+      "line": 1079
+     }
+    }
+   ]
+  },
+  {
+   "title": "SimVascularROM installs svromutils/svzerod into Slicer's Python at first use",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SimVascularROM/SimVascularROM.py",
+   "line": 253,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "SimVascularROM installs svromutils/svzerod into Slicer's Python at first use",
+     "file": "SimVascularROM/SimVascularROM.py",
+     "line_start": 253,
+     "line_end": 258,
+     "evidence": "elif slicer.util.confirmOkCancelDisplay(\n...\n                slicer.util.pip_install((\"--no-deps \" if skipPackages else \"\") + requirement)",
+     "explanation": "The ROM panel installs `svromutils` with `--no-deps` and skips vmtk/vtk/numpy/scipy (ROM_PACKAGE_SKIPPED_DEPENDENCIES, line 173), and `svzerod` whole, after a confirmation dialog. This is the careful pattern the policy asks for, but `svzerod` is installed with its own dependencies (numpy unpinned, pandas) into Slicer's environment, so a future release could still change Slicer's NumPy. Worth documenting the residual risk or pinning the solver install.",
+     "suggestion": "Consider installing svzerod with `--no-deps` plus an explicit skip list for numpy/pandas, or verify after install that Slicer's numpy version is unchanged.",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "SimVascularROM/SimVascularROM.py",
+      "line": 253
+     }
+    }
+   ]
+  },
+  {
+   "title": "Weights archive downloaded and extracted without path checks",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SeqSeg/seqseg.py",
+   "line": 2304,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Weights archive downloaded and extracted without path checks",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 2304,
+     "line_end": 2310,
+     "evidence": "urllib.request.urlretrieve(profile[\"url\"], zip_file, show_progress)\n...\nwith zipfile.ZipFile(zip_file, \"r\") as zip_ref:\n    zip_ref.extractall(extract_target)",
+     "explanation": "The archive comes from Zenodo over HTTPS after a user confirm, with no checksum verification and no member path validation before extractall. A malicious archive could write outside the target folder. The risk is limited by the trusted hosts, but integrity is not checked.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "SeqSeg/seqseg.py",
+      "line": 2304
+     }
+    }
+   ]
+  },
+  {
+   "title": "Model weights and solver binaries are downloaded at run time; provenance is documented but not validated",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "SeqSeg/seqseg.py",
+   "line": 495,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Model weights and solver binaries are downloaded at run time; provenance is documented but not validated",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 495,
+     "line_end": 502,
+     "evidence": "\"url\": \"https://zenodo.org/records/15020477/files/nnUNet_results.zip?download=1\",\n            \"zip_filename\": \"nnUNet_results.zip\",\n            \"extracted_dir_name\": \"nnUNet_results\",\n            \"progress_label\": \"Downloading Aorta weights (CT/MR) (236.3 MB)...\",",
+     "explanation": "SeqSeg downloads nnU-Net weights from Zenodo (with a confirmation dialog) and SDFStent downloads sample data from GitHub releases. The Docs describe the models, but there is no checksum verification of the downloaded archives and no statement of the weights' licence or validation, which matters for a clinical-adjacent segmentation tool.",
+     "suggestion": "Record a SHA256 for each archive and verify it after download, and state the weights' licence and validation data in Docs/SeqSeg.md.",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "SeqSeg/seqseg.py",
+      "line": 495
+     }
+    }
+   ]
+  },
+  {
+   "title": "Revision is 'main' and was not resolved",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "SimVascular",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Revision is 'main' and was not resolved",
+     "file": "SimVascular",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "\"scm_revision\": \"main\",",
+     "explanation": "A branch reference is not a security finding by itself, but the reviewed commit could not be confirmed. The 4a52c4bb commit in the review header was not resolved against the entry.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "file not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "SeqSeg downgrades Slicer's bundled NumPy to <2",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "SeqSeg/seqseg.py",
+   "line": 2839,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "SeqSeg downgrades Slicer's bundled NumPy to <2",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 2839,
+     "line_end": 2843,
+     "evidence": "numpy_version_str = importlib.metadata.version(\"numpy\")\n        restart_for_numpy = pkg_version.parse(numpy_version_str) >= pkg_version.parse(\"2.0.0\")\n        if restart_for_numpy:\n            logging.info(_(\"Downgrading NumPy from {current} to <2 for PyTorch 2.2.2 compatibility...\").format(current=numpy_version_str))\n            self._pipInstall(\"numpy<2\")",
+     "explanation": "Pressing Run SeqSeg replaces the NumPy that Slicer bundles with a 1.x build, and a pip constraint file (`numpy<2`, line 2512) is then applied to every subsequent install. Any other extension or Slicer component built against NumPy 2 breaks in that installation, including for users who never open SeqSeg. The policy lists downgrading or exactly pinning packages Slicer bundles (numpy named explicitly) as blocking.",
+     "suggestion": "Do not change NumPy. Use a torch build compatible with Slicer's NumPy (through PyTorchUtils), or run the segmentation in a separate process/environment.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SeqSeg/seqseg.py",
+      "line": 2839
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "SeqSeg pins torch and downgrades NumPy in Slicer's shared Python",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 2835,
+     "line_end": 2843,
+     "evidence": "# torch 2.2.2 is built against NumPy 1.x; NumPy 2.x fails import with _ARRAY_API not found.\n...self._pipInstall(\"numpy<2\")",
+     "explanation": "Slicer's own numpy is downgraded and torch 2.2.2 is installed into Slicer's Python for all users, including those who never open SeqSeg. The index policy requires PyTorch to go through the PyTorchUtils extension and forbids downgrading bundled packages. Other extensions can break after the downgrade.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "SeqSeg/seqseg.py",
+      "line": 2835
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "SeqSeg installs PyTorch itself via light-the-torch with an exact pin",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "major",
+    "minor"
+   ],
+   "file": "SeqSeg/seqseg.py",
+   "line": 2618,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "SeqSeg installs PyTorch itself via light-the-torch with an exact pin",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 2618,
+     "line_end": 2628,
+     "evidence": "slicer.util.pip_install(\"https://github.com/Slicer/light-the-torch/archive/main.zip\")\n...\n            f\"torch=={requiredTorchVersion}\",\n            f\"torchvision=={requiredTorchVisionVersion}\",\n            \"numpy<2\",",
+     "explanation": "When the PyTorch extension is not installed, `_installTorchWithoutExtension` pip-installs light-the-torch from a GitHub main-branch zip and then runs `light_the_torch install torch==2.2.2 torchvision==0.17.2 numpy<2` into Slicer's shared Python (requiredTorchVersion = \"2.2.2\" at line 2827). The index policy names direct use of light-the-torch and exact torch pins as blocking, because the wheel is chosen outside PyTorchUtils and can mismatch the Slicer build; it also affects every other extension in that Slicer installation.",
+     "suggestion": "Declare PyTorch (and NNUNet) in `build_dependencies`/`EXTENSION_DEPENDS` and install torch only through `PyTorchUtils`; if the extension is absent, tell the user to install it from the Extensions Manager instead of falling back to light-the-torch.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "SeqSeg/seqseg.py",
+      "line": 2618
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "major",
+     "title": "Unpinned remote code download and custom PyTorch installation in SeqSeg",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 2615,
+     "line_end": 2620,
+     "evidence": "SeqSeg/seqseg.py:2618: slicer.util.pip_install(\"https://github.com/Slicer/light-the-torch/archive/main.zip\")",
+     "explanation": "SeqSeg downloads and installs arbitrary code from a GitHub zip archive (light-the-torch) at runtime without cryptographic verification or pinning, and installs PyTorch/nnUNet outside Slicer's PyTorch extension (PyTorchUtils), which risks modifying Slicer's core Python environment and breaking compatibility or reproducibility.",
+     "suggestion": "Use PyTorchUtils for PyTorch installation and avoid downloading unpinned zip archives from GitHub at runtime.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Remote light-the-torch installed from GitHub zip",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 2617,
+     "line_end": 2618,
+     "evidence": "slicer.util.pip_install(\"https://github.com/Slicer/light-the-torch/archive/main.zip\")",
+     "explanation": "An unpinned branch archive is installed into Slicer's Python to choose a torch wheel. It is a mutable reference, so the code that runs can change without notice.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SeqSeg/seqseg.py",
+      "line": 2618
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "SeqSeg pip-installs nnunetv2, which pulls torch from PyPI",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "SeqSeg/seqseg.py",
+   "line": 2696,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "SeqSeg pip-installs nnunetv2, which pulls torch from PyPI",
+     "file": "SeqSeg/seqseg.py",
+     "line_start": 2696,
+     "line_end": 2703,
+     "evidence": "def _installNnunetWithoutExtension(self, nnunetRequirement):\n        \"\"\"Install nnunetv2 without the NNUNet extension.\"\"\"\n        packagesToSkip = self._nnunetPackagesToSkip()\n        if sys.platform == \"darwin\":\n            self._installImagecodecsForDarwin()\n\n        logging.info(_(\"Installing nnunetv2 with pip ({spec})...\").format(spec=nnunetRequirement))\n        self.pipInstallSelective(\"nnunetv2\", nnunetRequirement, packagesToSkip, recursive=True)",
+     "explanation": "The policy explicitly names `nnunetv2` as a package that must not be pip-installed because it pulls torch from PyPI, and requires the NNUNet extension's install logic instead. Here the module installs nnunetv2 recursively with a hand-maintained skip list (lines 2637-2656) and additionally installs imagecodecs and acvl-utils pins (lines 2719, 2735) into Slicer's Python. The user is asked once via confirmOkCancelDisplay (line 2929), but the resulting environment is still modified outside the supported installers.",
+     "suggestion": "Depend on the NNUNet extension (declare it in `build_dependencies`/`EXTENSION_DEPENDS`) and use `SlicerNNUNetLib.InstallLogic`; remove the pip fallback path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SeqSeg/seqseg.py",
+      "line": 2696
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "SDFStent pip-installs svmorph into Slicer's Python without asking",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "SDFStent/SDFStent.py",
+   "line": 422,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "SDFStent pip-installs svmorph into Slicer's Python without asking",
+     "file": "SDFStent/SDFStent.py",
+     "line_start": 422,
+     "line_end": 427,
+     "evidence": "self._appendLog(_(\"svmorph is not installed. Installing svmorph...\"))\n        self._setStatus(_(\"Installing svmorph...\"))\n        try:\n            slicer.util.pip_install(\"svmorph\")\n        except Exception as exc:\n            raise RuntimeError(_(\"Failed to install required dependency 'svmorph'.\")) from exc",
+     "explanation": "The first click on Update silently installs `svmorph` and all of its declared dependencies into Slicer's shared Python, with no confirmation dialog and no skip list, so pip may replace packages Slicer bundles. Docs/SDFStent.md:22 tells users this may take minutes to download packages, but nothing asks them first. This affects every extension in that Slicer installation.",
+     "suggestion": "Ask for confirmation before installing (as SimVascularROM does with `confirmOkCancelDisplay`), install with `--no-deps` plus an explicit skip list for Slicer-provided packages, and state the package and size in the dialog.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SDFStent/SDFStent.py",
+      "line": 422
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "SDFStent installs svmorph into Slicer's Python at run time",
+     "file": "SDFStent/SDFStent.py",
+     "line_start": 422,
+     "line_end": 425,
+     "evidence": "self._appendLog(_(\"svmorph is not installed. Installing svmorph...\"))\n...\n slicer.util.pip_install(\"svmorph\")",
+     "explanation": "Packages are installed into the shared Slicer environment on first run without a separate confirmation dialog. Its transitive dependencies are not controlled, so NumPy/SimpleITK pins may be affected. The intended dependency set is not visible in the sampled code.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "SDFStent/SDFStent.py",
+      "line": 422
+     }
+    }
+   ],
+   "id": "D4"
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "minor",
+   "flash-lite": "minor",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "blocking",
+   "flash-lite": "concern",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "unknown"
+  },
+  "license": {
+   "deepseek": "unknown",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "utility": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "minor issues",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 4,
+  "single": 8,
+  "unverified": 1,
+  "total": 11
+ }
+}

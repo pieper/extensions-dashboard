@@ -1,0 +1,191 @@
+{
+ "purpose": "SlicerPETDenoise provides two Slicer modules for PET/CT research: \"Belenos - PET Denoise\" runs UNET/SwinUNETR denoising models (downloaded from the author's GitHub releases) on PET volumes, and \"Belenos - Volume Comparator\" computes MSE/MAE/SSIM/PSNR/edge-loss between two volumes. It targets nuclear-medicine researchers, not clinical use.",
+ "summary": "No malicious or concealed behavior found: no telemetry, no image upload, network use limited to GitHub release/API downloads with user-initiated buttons, size/SHA-256 verification, and `weights_only=True` model loading. MIT license present; catalog entry is consistent (EXTENSION_DEPENDS \"PyTorch\" matches build_dependencies). Remaining issues are non-blocking: logo/banner PNGs are not installed by CMake (icon/banner silently missing), a committed `__pycache__` .pyc and two 9 MB banners, no real unit tests despite registered ctests, unsanitized release asset names used as file paths, unpinned `pip_install(\"monai\")`, and long inference on the GUI thread. Recommend merge with follow-ups.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Read PETDenoise/PETDenoise.py and VolumeComparator/VolumeComparator.py in full: no telemetry, no upload of images or identifiers, no eval/exec/pickle/subprocess; network access is only urllib to api.github.com/github.com release assets, triggered by explicit Download/Check buttons, with size and SHA-256 checks (lines 966-996) and torch.load(..., weights_only=True) (line 1137). Minor gaps: release asset names are used unsanitized in os.path.join (lines 1020-1021) and a pre-1.13 torch.load fallback without weights_only (lines 1138-1139)."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Heavy imports (torch, monai) are inside functions, and package installation happens only after a confirmOkCancelDisplay dialog (PETDenoise.py lines 608-632, VolumeComparator.py lines 299-321), so nothing changes the shared environment at import. However monai is installed unpinned and einops is exactly pinned (EINOPS_REQUIREMENT = \"einops==0.6.1\", line 25), so pip resolution can upgrade Slicer-bundled numpy or conflict with other extensions."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMake installs both module scripts and their Icons/UI resources, and EXTENSION_DEPENDS \"PyTorch\" matches build_dependencies; the entry's required fields are present. But Resources/logo.png and Resources/banner.png referenced by the code are not in MODULE_PYTHON_RESOURCES (PETDenoise/CMakeLists.txt lines 9-12), a __pycache__ .pyc is committed, and two 9 MB banner.png files are committed."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is a standard MIT text granting distribution rights (lines 1-21), and the extension bundles no third-party code; MONAI (Apache-2.0) and einops (MIT) are installed from PyPI at runtime. The license of the downloaded .pth model weights is not stated explicitly, which is worth clarifying but not a distribution blocker since they are hosted on the author's own repository."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Structure follows ScriptedLoadableModule conventions, scratch nodes are hidden and removed in finally blocks, the input volume is never written, and errors are shown via errorDisplay. Weaknesses: inference runs on the GUI thread with slicer.app.processEvents() (line 442), model_config.ini is written into the extension install directory (lines 646-656), and slicer_add_python_unittest is registered although neither module defines a unittest class."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md documents both modules, installation, dependencies, published models and sample cases, links a peer-reviewed paper, and both modules state 'This module is NOT a medical device. Research use only.' (PETDenoise.py line 389, VolumeComparator.py line 96). No automated tests and tier 1 maturity limit confidence, but usability documentation is good."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Module icon and banner PNGs are not installed by CMake",
+   "file": "PETDenoise/CMakeLists.txt",
+   "line_start": 9,
+   "line_end": 12,
+   "evidence": "set(MODULE_PYTHON_RESOURCES\n  Resources/Icons/${MODULE_NAME}.png\n  Resources/UI/${MODULE_NAME}.ui\n  )",
+   "explanation": "PETDenoise.py lines 282-284 and 376-381 (and VolumeComparator.py lines 32-34, 82-87) load Resources/logo.png and Resources/banner.png, but only Icons/*.png and UI/*.ui are listed as module resources, so those files are not installed with the extension. The os.path.exists guards mean no crash, but users of the installed extension get no module icon and no banner, and the 9 MB banner files are dead weight in the repository.",
+   "suggestion": "Add Resources/logo.png (and, if wanted, Resources/banner.png) to MODULE_PYTHON_RESOURCES in both module CMakeLists.txt files, or drop the unused images.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Compiled Python cache committed to the repository",
+   "file": "PETDenoise/__pycache__/PETDenoise.cpython-313.pyc",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "",
+   "explanation": "A 93 KB CPython 3.13 bytecode file is committed. It is not installed by CMake so it does not affect users at runtime, but it is a stale binary artifact that can drift from the source and should not be in the source repository.",
+   "suggestion": "Remove PETDenoise/__pycache__ and add __pycache__/ and *.pyc to .gitignore.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Two 9 MB banner images committed",
+   "file": "README.md",
+   "line_start": 10,
+   "line_end": 10,
+   "evidence": "![Screenshot](PETDenoise/Resources/banner.png)",
+   "explanation": "The scan reports PETDenoise/Resources/banner.png and VolumeComparator/Resources/banner.png at ~9 MB each (not readable here). Large binaries in the source repository slow clones and the extension build, and they are not even installed (see the resource finding).",
+   "suggestion": "Downscale the banners to a few hundred KB, or reference the images from the README only.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Registered ctest has no unittest class to run",
+   "file": "PETDenoise/CMakeLists.txt",
+   "line_start": 27,
+   "line_end": 27,
+   "evidence": "slicer_add_python_unittest(SCRIPT ${MODULE_NAME}.py)",
+   "explanation": "Both module CMakeLists.txt register a Python unittest on the module script, but a search for unittest classes in PETDenoise.py and VolumeComparator.py found none, and Testing/Python/CMakeLists.txt only contains a commented-out line. The generated test therefore exercises nothing, so the extension ships without any automated verification of the denoising or metric code.",
+   "suggestion": "Add a real test class (e.g. exercising parseSidecar/parseSequence/validateParameters and the metric formulas on synthetic arrays) or remove the test registration.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Release asset names from GitHub are used as file paths without sanitization",
+   "file": "PETDenoise/PETDenoise.py",
+   "line_start": 1020,
+   "line_end": 1021,
+   "evidence": "name = entry[\"name\"]\n        destination = os.path.join(folder, name)",
+   "explanation": "Asset names come from the GitHub release JSON (parseReleaseAssets, lines 207-221) and are joined directly onto the model folder, both for the .pth (line 1021) and the sidecar (line 1036). An asset named e.g. '../../x.pth' would make the download write outside the chosen model folder. The repository is author-controlled, so the practical risk is low, but the path is not validated.",
+   "suggestion": "Reject asset names containing path separators or '..' (e.g. require os.path.basename(name) == name) before using them as file names.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "torch.load fallback without weights_only for old PyTorch",
+   "file": "PETDenoise/PETDenoise.py",
+   "line_start": 1136,
+   "line_end": 1139,
+   "evidence": "# weights_only: a .pth file cannot run arbitrary code when it is loaded\n            state = torch.load(modelPath, map_location=device, weights_only=True)\n        except TypeError:  # PyTorch < 1.13\n            state = torch.load(modelPath, map_location=device)",
+   "explanation": "On a PyTorch older than 1.13 the code silently falls back to a full pickle load of a user-supplied .pth file, which can execute arbitrary code. The PyTorch extension normally provides a recent build, so this path is unlikely, but it removes the protection exactly where a user-chosen model file is loaded.",
+   "suggestion": "Drop the fallback and report that a newer PyTorch (from PyTorch Utils) is required, or keep weights_only and fail with a clear message on TypeError.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Unpinned monai install and exact einops pin in Slicer's shared environment",
+   "file": "PETDenoise/PETDenoise.py",
+   "line_start": 608,
+   "line_end": 620,
+   "evidence": "for moduleName, requirement in ((\"monai\", \"monai\"), (\"einops\", EINOPS_REQUIREMENT)):",
+   "explanation": "After user confirmation, `slicer.util.pip_install(\"monai\")` (also VolumeComparator.py line 309) resolves monai's dependencies inside Slicer's Python, which can upgrade Slicer-bundled numpy, while `einops==0.6.1` is an exact pin that can conflict with other extensions needing a newer einops. Installation is at least user-confirmed and not at import, so this is not a blocking environment change.",
+   "suggestion": "Pin a tested monai version (e.g. monai==1.3.x) and relax the einops pin to a minimum version, and mention the tested versions in the README.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Denoising and metric computation run on the GUI thread",
+   "file": "PETDenoise/PETDenoise.py",
+   "line_start": 440,
+   "line_end": 442,
+   "evidence": "def log(self, text):\n        self.outputTextBox.append(text)\n        slicer.app.processEvents()  # show progress while the run is going",
+   "explanation": "The whole sliding-window inference (PETDenoise.py lines 1184-1266) and the metric computation (VolumeComparator.py lines 406-464) run in the button-click slot; progress is only shown by pumping the Qt event loop with processEvents. During a long run the UI stays re-entrant, so scene changes or module switches can occur mid-inference, and the application appears frozen between log messages.",
+   "suggestion": "Move the heavy work to a slicer.util.ProgressDialog / CLI-style worker thread (or a qSlicerCLI-like background task) and keep processEvents out of the compute path.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Model folder path is written into the extension installation directory",
+   "file": "PETDenoise/PETDenoise.py",
+   "line_start": 646,
+   "line_end": 656,
+   "evidence": "return os.path.join(os.path.dirname(os.path.abspath(__file__)), \"model_config.ini\")",
+   "explanation": "saveModelFolderPath writes model_config.ini next to the module file. In an installed extension that directory is typically read-only (and shared by all users), so the write fails and is only logged at info level; the setting is still kept in QSettings, so functionality is preserved, but writing into the program installation is not a user-chosen location.",
+   "suggestion": "Keep the folder only in QSettings, or write the compatibility ini into the user settings/cache directory instead of the module directory.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "Automatic GitHub API request when the download section is opened",
+   "file": "PETDenoise/PETDenoise.py",
+   "line_start": 755,
+   "line_end": 758,
+   "evidence": "def onDownloadSectionCollapsed(self, collapsed):\n        \"\"\"Opening the section: check GitHub for new published models (at most once a day).\"\"\"\n        if not collapsed:\n            self.updatePublishedModelCatalog(force=False)",
+   "explanation": "Expanding the 'Download Published Models' section contacts api.github.com (at most once per day) without a separate confirmation. Only the request itself (IP address, User-Agent '3DSlicer-PETDenoise') leaves the machine; no image data, identifiers or telemetry are sent, so this is informational.",
+   "suggestion": "Optionally mention in the README/tooltip that opening the section queries GitHub for the model list.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "License of the downloaded model weights is not stated",
+   "file": "LICENSE",
+   "line_start": 5,
+   "line_end": 8,
+   "evidence": "Permission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"SlicerPETDenoise\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell",
+   "explanation": "The MIT text covers the extension source; the .pth weights downloaded from the repository's GitHub releases are not explicitly covered by a stated license, and the README does not say under which terms the models may be used or redistributed. This is a clarity gap rather than a prohibition.",
+   "suggestion": "State in the README (and ideally in the release notes) that the published model weights are released under the same MIT terms or another named license.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Committed model_config.ini contains the author's local path",
+   "file": "PETDenoise/model_config.ini",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "[ModelFolder]\npath = H:/SuperResPY/APPS/Models",
+   "explanation": "The committed ini holds a developer machine path. It is harmless to users (loadModelFolderPath only uses it if the directory exists) but it is a leftover development artifact and reveals the author's local layout.",
+   "suggestion": "Remove model_config.ini from the repository and add it to .gitignore.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The exact source revision 40a63cbfba7875615de0f75e3fd936a4b1ba95b6 could not be verified; I reviewed the file snapshot provided for this repository, and the catalog entry points at the moving branch 'main'.",
+  "PETDenoise/Resources/banner.png and VolumeComparator/Resources/banner.png (~9 MB each) are binary and were not readable, so their content is unverified.",
+  "The GitHub release assets (model .pth weights, their SHA-256 digests and .txt sidecars) and the model weights' license were not accessible, so model provenance beyond the built-in checksums in PUBLISHED_MODELS could not be confirmed.",
+  "Whether `pip_install(\"monai\")` resolves cleanly against the numpy/torch versions bundled with current Slicer releases was not tested.",
+  "CI/build results for the extension (catalog build, ctest) were not available.",
+  "The .ui files were only partially read (first 60 lines of PETDenoise/Resources/UI/PETDenoise.ui); they appear unused because both widgets are built in code."
+ ],
+ "questions_for_author": [
+  "Under which license are the published .pth model weights released, and may they be redistributed?",
+  "Which monai and einops versions were the models and metrics validated with, and can those be pinned?",
+  "Would you add a real unittest class (parameter parsing, metric formulas) so the registered ctest actually tests something?",
+  "Can the logo/banner PNGs be added to MODULE_PYTHON_RESOURCES (or removed) and the committed __pycache__ .pyc dropped?"
+ ]
+}

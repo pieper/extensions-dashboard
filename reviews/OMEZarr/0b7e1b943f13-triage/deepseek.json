@@ -1,0 +1,130 @@
+{
+ "purpose": "A 3D Slicer extension (OME-Zarr, Informatics) that reads and writes OME-Zarr/OME-NGFF multiscale images from local folders, .ozx archives, https:// and s3:// stores, loading the finest level that fits a memory budget, refining slice views at full resolution, and mapping labels, time series and OME-Zarr 0.6 scenes to Slicer volumes, label maps, segmentations, sequences and transforms. It targets microscopy and large-volume users who want to avoid converting to NRRD/NIfTI.",
+ "summary": "Well-structured, documented extension (README, TUTORIAL, screenshots, CI, self-test) with MIT license and a catalog entry consistent with the CMake build (EXTENSION_DEPENDS \"NA\" matches empty build_dependencies; OMEZarr.py and its icon are installed). No concealed behavior, no telemetry, no eval/exec/pickle, no bundled binaries; network access is limited to user-supplied store URLs. The one environment concern is that `ngff-zarr[remote]>=0.52.0` is pip-installed into Slicer's Python on first use — with a confirmation dialog only when a main window exists and testing is off, so headless/scripted use installs silently. Remaining issues are minor (unbounded class-level cache, global length-unit change, QSettings instead of a parameter node).",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read OMEZarr.py lines 1-2200: no eval/exec/pickle/subprocess/os.system, no telemetry, no credential harvesting; network use is urllib.request.urlopen on the user-supplied store URL (line 169) and ngff-zarr store access, which is the advertised function. S3 credentials are only read from the environment/settings and anonymous access is the default (lines 400-422)."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "ensureNgffZarr (lines 382-397) pip-installs 'ngff-zarr[remote]>=0.52.0' into Slicer's Python on first use; it asks for confirmation only when a main window exists and testing is disabled, so headless or scripted loads install silently. No torch, no Qt/VTK-bundling packages, no import-time installation."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "OMEZarr/CMakeLists.txt installs OMEZarr.py and Resources/Icons/OMEZarr.png via slicerMacroBuildScriptedModule; root CMakeLists sets EXTENSION_DEPENDS \"NA\", matching the catalog entry's empty build_dependencies; scm_url/scm_revision (main) and build_subdirectory \".\" are consistent. Only a 5 MB tutorial video is committed as a large binary."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is MIT (Copyright (c) 2026 Fideus Labs LLC), permitting distribution; README line 140 points to it. The dependency ngff-zarr is not bundled but installed from PyPI at runtime, so its own license terms apply to that install."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Follows ScriptedLoadableModule structure, keeps heavy imports (ngff_zarr, psutil, vtk.util.numpy_support) inside functions, reports errors through userMessages, removes observers in AutoRefiner.stop, and offers progress/cancel. Minor issues: runResponsive pumps processEvents in a loop (re-entrancy), the class-level _multiscalesCache is never bounded, and settings live in QSettings rather than a parameter node."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README (usage, feature list, limitations, development), TUTORIAL.md with eight screenshots, a walkthrough video, a GitHub Actions test workflow and Testing/run_headless_test.sh give a user a clear path; the module overlaps little with core Slicer readers, which do not handle OME-Zarr."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "ngff-zarr is pip-installed into Slicer's Python on first use, silently when no GUI confirmation is possible",
+   "file": "OMEZarr/OMEZarr.py",
+   "line_start": 386,
+   "line_end": 394,
+   "evidence": "        requirement = \"ngff-zarr[remote]>=0.52.0\"\n        if not slicer.packaging.pip_check(requirement):\n            interactive = slicer.util.mainWindow() and not slicer.app.testingEnabled()\n            if interactive and not slicer.util.confirmOkCancelDisplay(",
+   "explanation": "The dependency is installed into Slicer's shared Python environment the first time any OME-Zarr store is opened (including via slicer.util.loadNodeFromFile or drag-and-drop). When there is no main window or testing is enabled, `interactive` is false and pip_install runs with no confirmation at all, so a scripted or headless session modifies the shared environment without asking. In the GUI the confirmation is present, which is the acceptable path; the non-interactive path is the gap.",
+   "suggestion": "Refuse to install (and raise a clear error telling the user to install ngff-zarr) when no interactive confirmation is possible, or gate the silent install behind an explicit opt-in setting.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "info",
+   "title": "Dependency requirement is a lower bound only; effect on Slicer-bundled packages not verifiable here",
+   "file": "OMEZarr/OMEZarr.py",
+   "line_start": 386,
+   "line_end": 386,
+   "evidence": "        requirement = \"ngff-zarr[remote]>=0.52.0\"",
+   "explanation": "The requirement is not an exact pin, which is good, but pip may still resolve transitive requirements that upgrade or downgrade packages Slicer bundles (numpy, dask, zarr). I could not inspect ngff-zarr's metadata from this environment, so whether a downgrade of a Slicer-bundled package can occur is unverified rather than established.",
+   "suggestion": "State in the README which packages ngff-zarr[remote] pulls in, and consider passing --no-deps or a constraints file if any bundled package can be replaced.",
+   "confidence": "low"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Class-level multiscales cache is never bounded or invalidated on store change",
+   "file": "OMEZarr/OMEZarr.py",
+   "line_start": 380,
+   "line_end": 380,
+   "evidence": "    _multiscalesCache = {}",
+   "explanation": "Every opened store (and every scene image, line 1053) is kept in a process-wide dict of lazy dask-backed multiscales for the lifetime of the Slicer session; clearCache() exists but I found no call to it in the code I read. Opening many large stores in one session accumulates metadata and open store handles.",
+   "suggestion": "Bound the cache (e.g. keep the last few stores) or clear it on scene close.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Loading runs in a worker thread while the GUI thread pumps events",
+   "file": "OMEZarr/OMEZarr.py",
+   "line_start": 284,
+   "line_end": 291,
+   "evidence": "    thread = threading.Thread(target=target, name=\"OMEZarr\", daemon=True)\n    thread.start()\n    while thread.is_alive():\n        slicer.app.processEvents()",
+   "explanation": "runResponsive keeps the UI responsive by calling processEvents in a loop, which lets the user trigger other actions (closing the scene, deleting nodes, starting another load) while a volume is being written into a preallocated VTK buffer. This is a pragmatic pattern rather than a defect, but re-entrancy during a load is not guarded.",
+   "suggestion": "Disable the module panel and the load actions while a load is in progress, or document the re-entrancy assumption.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Display-units setting mutates the global application length unit node",
+   "file": "OMEZarr/OMEZarr.py",
+   "line_start": 1607,
+   "line_end": 1611,
+   "evidence": "        unitNode = slicer.mrmlScene.GetNodeByID(\"vtkMRMLUnitNodeApplicationLength\")\n        if unitNode is None:\n            return\n        unitNode.SetDisplayCoefficient(1.0 / LENGTH_UNIT_TO_MM[lengthUnit])\n        unitNode.SetSuffix(symbol)",
+   "explanation": "When the optional 'display units' setting is on, loading a store changes Slicer's application-wide length unit, which affects rulers and measurements in every module until resetDisplayUnits() is called. It is opt-in and reversible, so this is informational.",
+   "suggestion": "Mention in the setting's tooltip that it changes Slicer's global length unit for the session.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Module state is kept in QSettings rather than a parameter node",
+   "file": "OMEZarr/OMEZarr.py",
+   "line_start": 78,
+   "line_end": 89,
+   "evidence": "class Settings:\n    \"\"\"QSettings keys. Values are read on each use so the module panel takes effect immediately.\"\"\"",
+   "explanation": "Slicer convention is to store module state in a parameter node so it is saved with the scene and can be set from Python. Here the memory budget, orientation assumption, label/time options and storage options are global QSettings values, so they are not scene-specific and are not captured in a saved scene.",
+   "suggestion": "Consider a parameter node for per-scene options, keeping QSettings only for user preferences.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "5 MB tutorial video committed to the repository",
+   "file": "README.md",
+   "line_start": 34,
+   "line_end": 34,
+   "evidence": "**[Watch the walkthrough video](Screenshots/SlicerOMEZarr-tutorial.mp4)** (1 min, with captions), recorded on",
+   "explanation": "Screenshots/SlicerOMEZarr-tutorial.mp4 (about 5 MB) is committed rather than hosted externally. It is small enough not to break the build, but it grows the repository permanently and is not needed to build or run the extension.",
+   "suggestion": "Host the video externally (as the README already does for the user-attachments link on line 32) or keep it out of the source tree.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "OMEZarr/OMEZarr.py lines 2090-3585 (drop handler body, module widget, writeVolume, and the ScriptedLoadableModuleTest class) were not read; the widget's cleanup code around line 2619-2628 (QSettings().remove and shutil.rmtree(self.tempDir)) was only seen through search hits, so I could not verify wh",
+  "Whether `slicer.packaging.pip_check` exists in the targeted Slicer version (README says 5.12+) could not be verified; if the API is absent, ensureNgffZarr would raise and no store could be opened.",
+  "ngff-zarr's own dependency metadata and license (transitive packages, possible numpy/dask/zarr pins) could not be inspected from this environment.",
+  "The GitHub Actions workflow (.github/workflows/test.yml) and Testing/run_module_test.py were not read, so CI coverage and the self-test contents are unverified.",
+  "The binary assets (SlicerOMEZarr.png, Screenshots/*.png|jpg, the 5 MB mp4) were not inspected for content.",
+  "The catalog entry's scm_revision is the branch 'main', so the exact commit reviewed is the one given in the task (0b7e1b9); I could not confirm that this commit is the current tip or that it builds."
+ ],
+ "questions_for_author": [
+  "When Slicer runs without a main window (scripted or headless use), ngff-zarr is installed into Slicer's Python without any confirmation. Would you make that path fail with an instruction instead of installing silently?",
+  "Does ngff-zarr[remote]>=0.52.0 ever resolve to versions of numpy, dask or zarr that differ from the ones Slicer bundles, and if so, is that acceptable to you?",
+  "Is `slicer.packaging.pip_check` available in the minimum Slicer version you target (5.12), or should the check fall back to importlib.metadata?"
+ ]
+}

@@ -1,0 +1,186 @@
+{
+ "purpose": "A hidden Slicer DICOM plugin that recognises rotational C-arm X-ray runs (multi-frame XA/XRF) in the DICOM browser and reconstructs them into a 3D volume with FDK and/or SART in PyTorch, with an interactive preview window, optional 3D-DSA subtraction of a matching mask sweep, and optional use of GE's private 3D calibration. It targets researchers and clinicians who want cone-beam CT from C-arm spins without leaving Slicer.",
+ "summary": "DICOMCBCTRecon is a well-structured, MIT-licensed DICOM plugin that reconstructs C-arm rotational XA/XRF runs with FDK/SART in PyTorch. I found no network access, telemetry, subprocess, eval/exec, pickle or torch.load, no package pinning, and PyTorch is installed only through PyTorchUtils after explicit confirmation; the catalog entry matches the CMake dependencies and every imported Python file is installed. Remaining issues are non-blocking: a sys.path insert at import, GUI-thread reconstruction with processEvents, never-cleared module-level caches keyed by loadable name, a full-study header scan during examine, and no clinical-use disclaimer. 🟢 Recommend merge.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "A tree-wide search for requests/urllib/socket/subprocess/os.system/eval/exec/pickle/torch.load/pip_install/download returned only GitHub URLs in CMakeLists.txt and README.md and the dialog's own requestStop method. DICOM is read with pydicom and SimpleITK, previews are rendered in memory or in a tempfile.mkdtemp directory that is removed in cleanup (display.py:115-118), and nothing is uploaded or deleted outside that temp folder."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "PyTorch comes only from the PyTorch extension via PyTorchUtils with an explicit confirmation (DICOMCBCTRecon.py:341-374), and no package is pinned or installed at import. The one global side effect is the sys.path.insert(0, _MODULE_DIR) at module import (DICOMCBCTRecon.py:42-44)."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "DICOMCBCTRecon/CMakeLists.txt:5-19 lists every Python file the module imports and all of them exist; the catalog entry's build_dependencies [\"PyTorch\"] matches `set(EXTENSION_DEPENDS PyTorch)` (CMakeLists.txt:13) and build_subdirectory \".\" matches the root CMakeLists.txt. Only descriptive metadata differs (catalog category DICOM vs EXTENSION_CATEGORY Reconstruction) and the Testing/Python suite is not registered with CTest."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is a standard MIT text (\"MIT License / Copyright (c) 2026 Burak Demir\") permitting distribution. The extension bundles no third-party code, weights or datasets; PyTorch is pulled from the PyTorch extension rather than vendored, and the only committed binaries are a screenshot and an icon."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "The structure follows Slicer conventions (ScriptedLoadableModule, DICOMPlugin, heavy imports inside functions, progress and abort callbacks, errors shown via slicer.util.errorDisplay) and the maths is backed by a real test suite. Weak points: reconstruction runs on the GUI thread with slicer.app.processEvents() (dialog.py:544, 550), module-level caches that are never cleared and are keyed by loadable name (DICOMCBCTRecon.py:46-49), a full-study header scan during examine (DICOMCBCTRecon.py:180-188), and load() returning None on user cancel."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md documents the workflow, the DICOM tags used, the GE calibration, the methods with literature references and vendor-orientation troubleshooting, and the module ships a synthetic phantom, an in-Slicer self test and a unittest suite. It overlaps with no existing Slicer module for C-arm CBCT, but there is no clinical-use disclaimer and no validation beyond synthetic data."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "No network, subprocess, eval/exec, pickle or torch.load anywhere in the extension",
+   "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+   "line_start": 30,
+   "line_end": 33,
+   "evidence": "import logging\nimport os\nimport sys\nimport traceback",
+   "explanation": "I searched the whole tree for network, process and deserialization primitives (requests, urllib, urlopen, socket, subprocess, os.system, eval, exec, pickle, torch.load, pip_install, download). The only hits are the GitHub URLs in CMakeLists.txt/README.md and the dialog's own `requestStop` method. DICOM input is read with pydicom (`pydicom.dcmread`) and SimpleITK, both of which parse data rather than execute it. No telemetry, no upload of images or identifiers, no credentials, no obfuscated code, and no text addressed to AI reviewers.",
+   "suggestion": "None needed.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "info",
+   "title": "PyTorch installed only through PyTorchUtils, with user confirmation, never at import",
+   "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+   "line_start": 359,
+   "line_end": 363,
+   "evidence": "    if not slicer.util.confirmOkCancelDisplay(\n            \"Cone-beam reconstruction needs PyTorch, which is not installed yet.\\n\\n\"\n            \"Install it now with the PyTorch extension? It selects the CPU or CUDA build for \"\n            \"this computer and can take several minutes.\"):\n        return False",
+   "explanation": "PyTorch is obtained only through Slicer's PyTorch extension: `import PyTorchUtils` then `PyTorchUtils.PyTorchUtilsLogic().installTorch(askConfirmation=False)` after an explicit user confirmation, and the catalog entry lists PyTorch in build_dependencies while CMakeLists.txt sets `EXTENSION_DEPENDS PyTorch`. There is no pip_install, no torch pin, no index URL, and no numpy/scipy/SimpleITK/pydicom pinning anywhere in the tree. Installation happens only when a user loads a run, never at import or startup.",
+   "suggestion": "None needed.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Module import inserts its own directory at the front of sys.path",
+   "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+   "line_start": 42,
+   "line_end": 44,
+   "evidence": "_MODULE_DIR = os.path.dirname(os.path.abspath(globals().get(\"__file__\", \"\") or \".\"))\nif globals().get(\"__file__\") and _MODULE_DIR not in sys.path:\n    sys.path.insert(0, _MODULE_DIR)",
+   "explanation": "Importing the module mutates the shared interpreter's sys.path for the whole Slicer session, inserting the module directory at position 0. Any file in that directory would then shadow a stdlib or site-packages module of the same name for every other extension. The directory currently holds only DICOMCBCTRecon.py and DICOMCBCTReconLib/, so the practical risk is low, and Slicer already puts scripted-module directories on sys.path, making this largely redundant.",
+   "suggestion": "Drop the sys.path manipulation and rely on Slicer's scripted-module path handling, or append instead of insert at position 0.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "CMake installs every imported Python file; entry and CMake dependencies agree",
+   "file": "DICOMCBCTRecon/CMakeLists.txt",
+   "line_start": 5,
+   "line_end": 15,
+   "evidence": "set(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n  ${MODULE_NAME}Lib/__init__.py\n  ${MODULE_NAME}Lib/xadata.py\n  ${MODULE_NAME}Lib/geometry.py\n  ${MODULE_NAME}Lib/gecalib.py\n  ${MODULE_NAME}Lib/reconstruction.py\n  ${MODULE_NAME}Lib/phantom.py\n  ${MODULE_NAME}Lib/display.py\n  ${MODULE_NAME}Lib/dialog.py\n  )",
+   "explanation": "Every Python file the module imports is listed in MODULE_PYTHON_SCRIPTS and all of them exist in the tree (verified against the file listing), plus the icon in MODULE_PYTHON_RESOURCES. The catalog entry's build_dependencies [\"PyTorch\"] matches `set(EXTENSION_DEPENDS PyTorch)`, build_subdirectory \".\" matches the root CMakeLists.txt, and scm_revision \"main\" is a branch reference the index supports. The only uninstalled Python file is Testing/Python/test_cbct_reconstruction.py, which the module never imports.",
+   "suggestion": "None needed.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Catalog category (DICOM) differs from EXTENSION_CATEGORY (Reconstruction)",
+   "file": "CMakeLists.txt",
+   "line_start": 8,
+   "line_end": 8,
+   "evidence": "set(EXTENSION_CATEGORY \"Reconstruction\")",
+   "explanation": "The catalog entry declares `\"category\": \"DICOM\"` while the extension's own CMakeLists.txt declares EXTENSION_CATEGORY \"Reconstruction\". This is descriptive metadata only and does not affect building or loading, but the two sources disagree about where the extension belongs in the module list.",
+   "suggestion": "Make the catalog category and EXTENSION_CATEGORY agree (DICOM seems the better fit given the DICOM-browser workflow).",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Testing/Python unit tests are not registered with CTest",
+   "file": "DICOMCBCTRecon/CMakeLists.txt",
+   "line_start": 30,
+   "line_end": 33,
+   "evidence": "if(BUILD_TESTING)\n  # Self test inside Slicer (synthetic phantom)\n  slicer_add_python_unittest(SCRIPT ${MODULE_NAME}.py)\nendif()",
+   "explanation": "Only the in-module self test (DICOMCBCTReconTest) is registered with CTest. The 300-line unittest suite in Testing/Python/test_cbct_reconstruction.py, which covers FDK accuracy, Parker weights, the GE calibration fit and SART, is never run by the extension build, so regressions in the reconstruction maths would not be caught by CI.",
+   "suggestion": "Add a second slicer_add_python_unittest (or a plain add_test) for Testing/Python/test_cbct_reconstruction.py so the numeric tests run in the extension build.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Module-level loadable caches are never cleared and are keyed by a name string",
+   "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+   "line_start": 46,
+   "line_end": 49,
+   "evidence": "# (file, sweep) -> other sweeps of the study that follow the same trajectory, filled in by examine()\n_OTHER_RUNS_FOR_SWEEP = {}\n# (file, loadable name) -> sweep index (Qt-wrapped loadables can lose Python attributes)\n_SWEEP_FOR_LOADABLE = {}",
+   "explanation": "Both caches are module-level dicts that are written in examineFiles and never cleared, so they grow for the lifetime of the Slicer session and keep geometry dicts (per-frame numpy arrays) alive for every run ever examined. The sweep lookup is keyed by (filePath, loadable.name), and the name is built from series description plus run label, so two files with the same description and instance number would collide and the wrong sweep could be reconstructed. The comment shows the author knows Qt-wrapped loadables lose attributes, which is why the side table exists.",
+   "suggestion": "Clear both dicts at the start of each examine() pass, or key the sweep on the loadable object identity / a per-examine token instead of a name string.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Reconstruction runs on the GUI thread and re-enters the Qt event loop",
+   "file": "DICOMCBCTRecon/DICOMCBCTReconLib/dialog.py",
+   "line_start": 543,
+   "line_end": 544,
+   "evidence": "    self.logText.appendPlainText(message)\n    slicer.app.processEvents()",
+   "explanation": "FDK and SART run on the GUI thread and pump the Qt event loop from the progress and log callbacks. The modal dialog plus the BusyDialogGuard and the `if self.busy: return` guard in onApply limit re-entrancy, but any other queued event (scene changes, other module callbacks, timers) is still dispatched while a multi-minute reconstruction holds the interpreter, and a second Reconstruct click is only prevented by the disabled button. This is a common Slicer pattern but is the weakest point for responsiveness and re-entrancy.",
+   "suggestion": "Consider running the reconstruction in a worker thread (or at least a slicer.util.ProgressDialog with a queued abort flag) so the event loop is not re-entered from inside the computation.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Subtraction-run search parses the header of every file in the study during examine",
+   "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+   "line_start": 180,
+   "line_end": 181,
+   "evidence": "            for seriesUID in db.seriesForStudy(studyUID):\n                files += [f for f in db.filesForSeries(seriesUID) if f != filePath]",
+   "explanation": "For every candidate sweep, examineFiles calls _matchingRuns, which enumerates every file of every series in the study and, for each one that passes the cheap modality/numberOfFrames check, parses its header with pydicom to look for a matching trajectory. On a study with many series (or many single-frame XA objects) this makes the DICOM browser's examine step read a large number of headers synchronously, which can stall the browser. Results are memoised in the `summaries` dict within one examineFiles call, which limits but does not remove the cost.",
+   "suggestion": "Restrict the scan to series whose modality is XA/XRF/RF and whose NumberOfFrames is large, using the DICOM database before reading any header.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Manual I0 of 0 is silently ignored and replaced by the percentile estimate",
+   "file": "DICOMCBCTRecon/DICOMCBCTReconLib/reconstruction.py",
+   "line_start": 85,
+   "line_end": 86,
+   "evidence": "    if mode == I0_MANUAL and manualValue:\n        return float(manualValue)",
+   "explanation": "A user who selects \"Fixed value\" and enters 0 (or a value that evaluates falsy) silently falls through to the 99.9th-percentile estimate instead of using the entered value, so the log line \"I0 = ...\" reports a number the user did not choose. The spin box minimum is 1.0 so 0 is not reachable through the UI, which keeps the practical impact small.",
+   "suggestion": "Test `manualValue is not None` instead of truthiness.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Cancelling the reconstruction window returns None from the DICOM plugin load()",
+   "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+   "line_start": 259,
+   "line_end": 262,
+   "evidence": "        image, info = dialog.run()\n        if image is None:\n            logging.info(\"Cone-beam reconstruction cancelled by user.\")\n            return None",
+   "explanation": "When the user presses Cancel, or when ensureDependencies() fails, the DICOM plugin's load() returns None. Slicer's DICOM browser treats a None return as a failed load and typically reports an error to the user, so a deliberate cancellation is presented as a load failure. The dependency-missing path already shows its own message, so the extra browser error is redundant and confusing.",
+   "suggestion": "Return a sentinel the browser accepts, or suppress the browser's error for the deliberate-cancel path.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Good documentation and synthetic tests, but no clinical-use disclaimer",
+   "file": "README.md",
+   "line_start": 3,
+   "line_end": 6,
+   "evidence": "Reconstructs rotational C-arm X-ray runs (\"spins\", e.g. GE Innova 3D / Siemens DynaCT / Philips XperCT\nexports stored as one multi-frame XA or XRF DICOM object) into a 3D volume, straight from Slicer's\nDICOM browser.",
+   "explanation": "The README documents the workflow, the DICOM tags used for geometry, the GE private calibration, the reconstruction methods with literature references, the vendor-orientation troubleshooting steps and how to run the tests, and the module ships a synthetic phantom plus a self test. What is missing is any statement that the output is not validated for clinical use: the module produces HU-like volumes from vendor data and offers no accuracy claim or disclaimer, which matters for a tier-1 tool that will be used on patient studies.",
+   "suggestion": "Add a short research-use / not-for-clinical-decisions disclaimer and state what validation exists (synthetic phantom only).",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The exact source revision: the catalog entry pins scm_revision \"main\" (a branch), so the code I read is the tip of main at review time, not a fixed commit; the commit fdc8d856a39562bd282e1d204896297b070ec05f named in the request could not be resolved with the available tools.",
+  "The tail of reconstruction.py (toOutputUnits and the last lines after line 633) and the tail of geometry.py (matrixFromVectors after line 252) were truncated by the reader; I did not verify those function bodies.",
+  "The last ~90 lines of Testing/Python/test_cbct_reconstruction.py (after line 227) were truncated.",
+  "Whether the extension actually builds and loads in Slicer, and whether the CTest self test passes: no build or Slicer installation was available.",
+  "Whether the PyTorch extension is available for every platform the index builds for, and whether the reconstruction runs correctly on real vendor data (no GE/Siemens/Philips sample run was available).",
+  "The binary files screenshot.jpg and Resources/Icons/DICOMCBCTRecon.png were not inspected beyond their sizes."
+ ],
+ "questions_for_author": []
+}

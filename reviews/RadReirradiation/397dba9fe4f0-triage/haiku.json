@@ -1,0 +1,107 @@
+{
+ "purpose": "RadReirradiation is a Slicer scripted module for radiotherapy re-irradiation analysis: it registers previous and current CT scans, resamples and sums LQ-model EQD2/BED doses voxel by voxel, computes DVH and DMax/DMean metrics, and exports a PDF report and a derived RTDOSE/RTPLAN for TPS import. It is aimed at medical physicists and radiation oncologists, and depends on SlicerRT for DICOM-RT loading.",
+ "summary": "I read the CMake file, license, README and the export/PDF sections of the single 3207-line module, plus targeted searches. I found no network calls, telemetry, obfuscation, or unsafe deserialization in the parts I searched. Concerns: a runtime pip install of pydicom on the export click without confirmation, a dependency variable (EXTENSION_DEPENDENCIES) that is not the standard EXTENSION_DEPENDS name, a README claim that the derived dose \"bypasses standard TPS dose-lock restrictions\", and an empty test. The MIT license is fine. Most of the registration and dose-engine code was not reviewed in detail.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "No exfiltration or malicious code found in the searched areas. Export and PDF writes go only to user-chosen folders, but the export path runs an unconfirmed pip install and produces derived DICOM objects that the README says bypass TPS dose locks (RadReirradiation.py:2079, README.md:266)."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "pip_install runs only inside onExportDICOMClicked, and only on ImportError, so it does not run at startup. It still installs into Slicer's shared environment without asking the user (RadReirradiation.py:2078-2079)."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "CMakeLists.txt sets EXTENSION_DEPENDENCIES rather than the standard EXTENSION_DEPENDS variable, and parent.dependencies = [] in the module; SlicerRT is therefore not declared to the build (CMakeLists.txt:11, RadReirradiation.py:19). Only the CMake and the catalog entry were inspected, not a build."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is MIT with full text, and the README and module do not add restrictive terms."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Only a parts of the 3207-line module were reviewed. The export path has broad except blocks that show errors only as dialogs (RadReirradiation.py:2371-2374), and the test class is a no-op (RadReirradiation.py:3206-3207)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README gives a detailed tutorial, a research-only disclaimer (README.md:271-273), and a video. Automated tests are absent (runTest is pass), and there is no sample dataset in the repo."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Derived RTDOSE/RTPLAN intended to bypass TPS dose locks",
+   "file": "README.md",
+   "line_start": 266,
+   "line_end": 266,
+   "evidence": "This ensures seamless import compatibility and bypasses standard TPS dose-lock restrictions.",
+   "explanation": "The README says the export feature 'bypasses standard TPS dose-lock restrictions' and produces a 'shadow' RTPLAN and RTDOSE for import into commercial TPS (Eclipse, Monaco). The code (RadReirradiation.py:2305-2358) builds a plan from the original RTPLAN with the dose references removed and a new SOP UID, then writes it. A research-only tool's derived dose could be imported into a clinical TPS and mistaken for an approved plan. The code sets ApprovalStatus to UNAPPROVED, which is a partial mitigation, but the README's claim is an explicit bypass of a safety control.",
+   "suggestion": "Remove the 'bypasses dose-lock' wording. Add an on-screen warning before export that the file is research-only and not for treatment. Keep the UNAPPROVED status and add a visible marker in the DICOM (e.g., SeriesDescription or a text note) identifying it as a derived research dose.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Runtime pip install of pydicom without user confirmation",
+   "file": "RadReirradiation.py",
+   "line_start": 2075,
+   "line_end": 2081,
+   "evidence": "slicer.util.pip_install(\"pydicom\")",
+   "explanation": "If pydicom cannot be imported, the export handler installs it into Slicer's Python environment with no prompt. This is a side effect on the shared environment, triggered by a button, and it can fail silently or pull an unpinned version that conflicts with the bundled one. slicer.util.pip_install normally shows a progress dialog, but the user has not agreed to the install.",
+   "suggestion": "Ask the user for confirmation before installing, or rely on the pydicom that Slicer bundles and show a clear error if it is missing. Do not install unpinned packages at runtime.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "SlicerRT dependency set with a non-standard CMake variable",
+   "file": "CMakeLists.txt",
+   "line_start": 11,
+   "line_end": 11,
+   "evidence": "set(EXTENSION_DEPENDENCIES SlicerRT)",
+   "explanation": "The Slicer extension build reads EXTENSION_DEPENDS to declare required extensions. The CMakeLists sets EXTENSION_DEPENDENCIES, so SlicerRT is not recorded as a dependency. The module's parent.dependencies is also empty. Users who install from the catalog may get an extension that fails to load DICOM-RT features without SlicerRT, and the index may not install SlicerRT first. The README requires SlicerRT, so the declared dependency should match.",
+   "suggestion": "Use set(EXTENSION_DEPENDS SlicerRT). Also set parent.dependencies in the module to include SlicerRT, if the module imports it or needs its nodes.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Broad exception handling and a no-op test",
+   "file": "RadReirradiation.py",
+   "line_start": 3202,
+   "line_end": 3207,
+   "evidence": "def runTest(self):\n        pass",
+   "explanation": "The export and PDF handlers catch all exceptions and show only the message string (RadReirradiation.py:2371-2374), and some reads use bare except (RadReirradiation.py:2279-2280). Failures may be hard to diagnose. The only test, RadReirradiationTest.runTest, is 'pass' (RadReirradiation.py:3206-3207), so there is no automated coverage of the EQD2 math or the DICOM export.",
+   "suggestion": "Add unit tests for the LQ/EQD2 formula and for DICOM export on small synthetic data. Narrow the exception handling and log details.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Clinical-use disclaimer present and appropriate",
+   "file": "README.md",
+   "line_start": 271,
+   "line_end": 273,
+   "evidence": "**This software is for research and educational purposes only and has not been cleared for clinical use by any regulatory body (FDA, CE, etc.).**",
+   "explanation": "The README states that the software is for research and educational purposes only and has not been cleared by any regulator, and it asks for independent verification. This is good practice for a dosimetry tool.",
+   "suggestion": "Repeat the disclaimer in the module's helpText so it is visible inside Slicer.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Most of RadReirradiation.py (about 3,000 lines), including the registration, BRAINSFit calls, LQ/EQD2 engine, DVH and metrics logic, and the PDF HTML template.",
+  "The UI file Resources/UI/RadReirradiation.ui, and whether the module loads it.",
+  "The actual source revision 397dba9 (the catalog uses scm_revision 'main'), so the reviewed code may differ from the tip.",
+  "No build or Slicer load was performed. CI reports were not available.",
+  "Whether pydicom is bundled with the Slicer version targeted, which determines whether the runtime install is ever reached.",
+  "The YouTube tutorial and the external streamlit web app, which were not accessed."
+ ],
+ "questions_for_author": [
+  "Why does the module use EXTENSION_DEPENDENCIES rather than EXTENSION_DEPENDS in CMakeLists.txt, and should SlicerRT be added to parent.dependencies?",
+  "Can the pydicom install be removed, or made to ask the user first?",
+  "Please reword the 'bypasses standard TPS dose-lock restrictions' claim and describe the derived files as research-only in the export dialog.",
+  "Please add real tests (even a synthetic LQ/EQD2 check) and state the Slicer version that was tested."
+ ]
+}

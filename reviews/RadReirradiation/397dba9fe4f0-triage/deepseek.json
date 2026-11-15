@@ -1,0 +1,143 @@
+{
+ "purpose": "RadReirradiation is a SlicerRT-dependent scripted module for medical physicists that registers two CT/dose courses, computes voxel-wise BED/EQD2 summation with per-structure alpha/beta and recovery, and reports DVH metrics, a PDF report and an exported EQD2 RTDOSE for TPS import.",
+ "summary": "No malicious or concealed behavior found: no network calls, telemetry, eval/exec, or downloads; the only pip call is a fallback `pip_install(\"pydicom\")` inside the export handler. MIT license permits distribution; the catalog entry is usable (branch `main`, `build_subdirectory: \".\"`), though it lacks `build_dependencies` while CMakeLists declares `EXTENSION_DEPENDENCIES SlicerRT`. Main non-blocking concern: the DICOM export rewrites pixel data and frame count but never updates ImagePositionPatient/PixelSpacing/FrameOfReferenceUID, and fabricates a \"shadow\" RTPLAN, so the exported EQD2 dose can be spatially wrong in the receiving TPS. Also: synchronous BRAINSFit on the GUI thread and several silently swallowed exceptions. Per index policy the three admission requirements are met; recommend merge with follow-up fixes.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Searched the module for network, subprocess, eval/exec, pickle and file-deletion primitives: only help-text hyperlinks (lines 25-33) and local file writes to user-chosen folders (lines 2088, 2298-2358, 2542). No telemetry, no data transmission, no obfuscation, no reviewer-directed text."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Top-level imports (lines 1-8) are Slicer-provided only, but line 2079 calls slicer.util.pip_install(\"pydicom\") without user confirmation, which would install a PyPI pydicom over the version Slicer bundles and affect other extensions."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists installs RadReirradiation.py and the icon (lines 16-22) and the entry points at the repo root; however the catalog entry has no build_dependencies while CMakeLists line 11 declares EXTENSION_DEPENDENCIES SlicerRT, and the module itself sets self.parent.dependencies = [] (line 19). Resources/UI/RadReirradiation.ui is not installed by CMake."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is a standard MIT text granting distribution rights (lines 1-21); no bundled third-party code, weights or datasets were found in the repository listing."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read the export (2067-2374), PDF (2532-2790) and registration (2801-2900) paths: the DICOM export reuses the template RTDOSE geometry without updating ImagePositionPatient/PixelSpacing/FrameOfReferenceUID, BRAINSFit runs synchronously on the GUI thread, and several exceptions are swallowed with bare `except: pass`."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md is extensive (workflow tutorial, screenshots, video, references, research-only disclaimer at lines 271-273), but there are no automated tests and the README already claims the extension is 'officially available in the 3D Slicer Extensions Manager' (lines 48-49) before acceptance."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Exported EQD2 RTDOSE keeps the template's spatial geometry and a fabricated shadow RTPLAN",
+   "file": "RadReirradiation.py",
+   "line_start": 2182,
+   "line_end": 2191,
+   "evidence": "        frames, rows, cols = eqd2_array.shape\n        ds.NumberOfFrames = frames\n        ds.Rows = rows\n        ds.Columns = cols",
+   "explanation": "The export clones the original RTDOSE and only replaces NumberOfFrames/Rows/Columns, GridFrameOffsetVector, DoseGridScaling and PixelData (lines 2179-2210). ImagePositionPatient, PixelSpacing, ImageOrientationPatient and FrameOfReferenceUID are never taken from the EQD2 volume, which after registration was resampled to the *current* CT geometry (lines 2876-2894). The written file therefore carries the previous course's origin/spacing/frame of reference with the new voxel data, so a TPS importing it can place the accumulated EQD2 dose at the wrong location. In addition the code copies the original RTPLAN, strips ReferencedDoseSequence, assigns new SOP UIDs and sets DoseSummationType = \"PLAN\" (lines 2305-2343) although the dose is a two-course sum, so the receiving TPS sees a plan whose dose does not correspond to its beams. Non-blocking per index policy (ordinary correctness), but it should be fixed before the export is advertised as TPS-ready.",
+   "suggestion": "Set ImagePositionPatient, PixelSpacing, ImageOrientationPatient and FrameOfReferenceUID from the EQD2 volume node (and BitsStored/HighBit), use DoseSummationType MULTI_PLAN/FRACTION for a summed dose, and warn the user that the shadow plan is a placeholder.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "pip_install(\"pydicom\") without user confirmation can override Slicer's bundled pydicom",
+   "file": "RadReirradiation.py",
+   "line_start": 2078,
+   "line_end": 2081,
+   "evidence": "        except ImportError:\n            slicer.util.pip_install(\"pydicom\")\n            import pydicom\n            from pydicom.uid import generate_uid",
+   "explanation": "pydicom ships with Slicer; if the import ever fails (broken install, conflicting module on the path) this silently installs the latest PyPI pydicom into Slicer's shared Python, which is exactly the bundled-package replacement the index policy asks to avoid and can break SlicerRT and other extensions for users who never open this module. It is not at import time and is unlikely to trigger, hence minor.",
+   "suggestion": "Remove the pip fallback and report a clear error asking the user to reinstall Slicer/SlicerRT, or gate any install behind an explicit user confirmation dialog.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Catalog entry has no build_dependencies although the extension declares SlicerRT",
+   "file": "CMakeLists.txt",
+   "line_start": 11,
+   "line_end": 11,
+   "evidence": "set(EXTENSION_DEPENDENCIES SlicerRT)",
+   "explanation": "The catalog entry contains only $schema, build_subdirectory, category, scm_revision, scm_url and tier, with no build_dependencies, while CMakeLists declares SlicerRT and the module sets self.parent.dependencies = [] (RadReirradiation.py line 19). The index therefore has no declared dependency to build/order SlicerRT, and Slicer will not warn users who open the module without SlicerRT installed even though DICOM-RT loading depends on it.",
+   "suggestion": "Add \"build_dependencies\": [\"SlicerRT\"] to the catalog entry and set self.parent.dependencies = [\"SlicerRT\"] in the module class.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Registration and resampling run synchronously on the GUI thread",
+   "file": "RadReirradiation.py",
+   "line_start": 2859,
+   "line_end": 2863,
+   "evidence": "                brainsFit = slicer.modules.brainsfit\n                cliNode = slicer.cli.runSync(brainsFit, None, parameters)\n\n                if cliNode.GetStatus() & cliNode.ErrorsMask:\n                    raise ValueError(\"The image registration engine (BRAINSFit) failed.\")",
+   "explanation": "BRAINSFit (and BRAINSResample at line 2892) are run with slicer.cli.runSync inside the widget's button handler, with only a busy progress dialog and processEvents (lines 2806-2814). The README itself warns this can take several minutes (README line 206), during which Slicer is unresponsive and the user cannot cancel; a crash or forced quit loses the session state.",
+   "suggestion": "Use slicer.cli.run with a status observer (or a CLI node plus progress bar) so the GUI stays responsive and the operation can be cancelled.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Exceptions silently swallowed in DICOM lookup and fraction extraction",
+   "file": "RadReirradiation.py",
+   "line_start": 2529,
+   "line_end": 2530,
+   "evidence": "        except Exception as e:\n                pass  # Silencio absoluto ante errores",
+   "explanation": "attemptSilentFractionExtraction discards every error, and the DICOM search loops use bare `except: pass` (lines 2152-2153, 2235-2236, 2279-2280). If the fraction count cannot be recovered the spinbox keeps its default (25, line 120) and the EQD2 calculation silently uses a wrong fractionation, which is a dosimetric error the user is never told about.",
+   "suggestion": "Log the exception and tell the user that the fraction count could not be read from the RTPLAN so it must be entered manually.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Export copies files into the chosen folder with second-resolution names, risking overwrite",
+   "file": "RadReirradiation.py",
+   "line_start": 2298,
+   "line_end": 2300,
+   "evidence": "            rtstruct_filename = f\"RTSTRUCT_original_{os.path.basename(rtstruct_path)}\"\n            rtstruct_dest = os.path.join(output_dir, rtstruct_filename)\n            shutil.copy2(rtstruct_path, rtstruct_dest)",
+   "explanation": "The RTSTRUCT is copied under a fixed name and the RTPLAN/RTDOSE names use only HHMMSS (lines 2330, 2356), so two exports into the same folder within the same second, or a re-export, silently overwrite earlier files without asking. The user-chosen folder is respected, so this is limited to files the user pointed at.",
+   "suggestion": "Include the date in the filenames and check for existing files before writing, or ask the user to confirm overwriting.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Resources/UI/RadReirradiation.ui is not installed by CMake",
+   "file": "CMakeLists.txt",
+   "line_start": 16,
+   "line_end": 22,
+   "evidence": "slicerMacroBuildScriptedModule(\n  NAME RadReirradiation\n  SCRIPTS\n    RadReirradiation.py\n  RESOURCES\n    Resources/Icons/RadReirradiation.png\n)",
+   "explanation": "Only the icon is listed as a resource; the .ui file is not installed. The widget builds its interface programmatically in setup() (RadReirradiation.py lines 46-140), so the .ui file appears unused — but if any code path loaded it, the module would fail after installation. I did not find a loadUI call in the parts I read.",
+   "suggestion": "Either delete the unused .ui file or add it to RESOURCES if it is loaded at runtime.",
+   "confidence": "low"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No automated tests and premature availability claim in README",
+   "file": "README.md",
+   "line_start": 48,
+   "line_end": 49,
+   "evidence": "RadReirradiation is officially available in the \n3D Slicer Extensions Manager.",
+   "explanation": "The repository has no test suite for the radiobiology math (EQD2/BED, overlap priority, DVH metrics), which is the part most in need of regression checks for a clinical tool; the README also states the extension is already in the Extensions Manager before this submission is accepted. The research-only disclaimer (README lines 271-273) is present and appropriate.",
+   "suggestion": "Add a small self-test (e.g., ScriptedLoadableModuleTest) covering EQD2/BED for known single- and two-course cases, and adjust the installation wording until the extension is published.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The catalog entry pins scm_revision \"main\" while the review prompt names commit 397dba9fe4f00a7d5b2dfb7e4bf7d71a2871a0ee; I could not resolve the repository or verify that commit exists, so the exact reviewed revision is unknown.",
+  "I read roughly 600 of the 3207 lines of RadReirradiation.py (module/widget setup, export, PDF, registration logic); the DICOM auto-match, EQD2/BED math, DVH and metrics sections were not read line by line.",
+  "Whether Resources/UI/RadReirradiation.ui is loaded anywhere at runtime (no loadUI call seen in the inspected ranges).",
+  "Build/CI results for this extension and whether SlicerRT is present in the build environment.",
+  "Contents of the two PNG binaries (icon and screenshot).",
+  "Runtime behaviour of the BRAINSFit/BRAINSResample calls and of the generated DICOM files in a real TPS."
+ ],
+ "questions_for_author": [
+  "Does the exported EQD2 RTDOSE set ImagePositionPatient/PixelSpacing/FrameOfReferenceUID from the resampled EQD2 volume, or does it intentionally inherit them from the template RTDOSE?",
+  "Why is pydicom installed with pip when Slicer already bundles it?",
+  "Should the catalog entry declare build_dependencies: [\"SlicerRT\"] and the module set parent.dependencies accordingly?",
+  "Is Resources/UI/RadReirradiation.ui used at all, or can it be removed?"
+ ]
+}

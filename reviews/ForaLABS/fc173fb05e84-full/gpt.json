@@ -1,0 +1,125 @@
+{
+ "purpose": "ForaLABS provides micro-CT tools for researchers analyzing foraminifera and other porous specimens. It imports Zeiss TXM volumes and computes mesh-based pore, geometry, and thickness measurements.",
+ "summary": "The examined source has a broken module build and two output paths that can silently overwrite existing user files. The thickness map and cache also have non-blocking correctness issues. The catalog selects the moving main branch; the supplied commit was not independently resolved. 🔴 Do not merge yet: fix packaging and unintended overwrites, and verify the selected revision.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected ImportTXM and Measures file-writing paths and searched the repository for network, execution, and deletion APIs. Both directory-based exports can overwrite existing files without confirmation; no other data transmission was identified in the inspected extension code."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Inspected module imports and the olefile installation path. ImportTXM installs olefile into Slicer's shared environment on an import action without a separate confirmation, but not at module startup."
+  },
+  "packaging": {
+   "rating": "blocking",
+   "rationale": "Compared both CMake files with the complete repository file listing: the configured ForaLABS.py is absent and neither actual scripted module is registered. The catalog's branch revision could not be independently resolved."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "README identifies the project as Apache-2.0 and the repository includes the Apache 2.0 distribution grant. The license of the externally installed olefile distribution was not independently verified."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected the measurement, map generation, export and UI code. Maps contain a uniform mean rather than local thickness and cached images can be reused for changed inputs; no runtime validation was possible."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README provides a Measures quickstart and methods overview, but the in-source tests are a placeholder and a skipped TXM smoke test. The documented thickness methodology also differs from the implementation."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "blocking",
+   "title": "CMake selects a nonexistent module and omits both actual modules",
+   "file": "ForaLABS/CMakeLists.txt",
+   "line_start": 2,
+   "line_end": 7,
+   "evidence": "set(MODULE_NAME ForaLABS)\n\n#-----------------------------------------------------------------------------\nset(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n  )",
+   "explanation": "The repository listing has no ForaLABS/ForaLABS.py; it has Measures.py and ImportTXM.py instead. The scripted-module macro therefore refers to a nonexistent script, and neither actual module is registered for packaging, so the extension cannot be built and delivered as intended.",
+   "suggestion": "Configure separate scripted modules for Measures and ImportTXM, with the correct scripts, resources, and tests, then build and install the extension.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "TXM conversion silently overwrites an existing NRRD",
+   "file": "ForaLABS/ImportTXM.py",
+   "line_start": 639,
+   "line_end": 642,
+   "evidence": "        writer = sitk.ImageFileWriter()\n        writer.SetFileName(nrrdPath)\n        writer.UseCompressionOn()\n        writer.Execute(img)",
+   "explanation": "The destination is constructed from the input basename and output directory at lines 631–633; when no directory is selected it defaults to the TXM directory. Importing a TXM when a same-named NRRD already exists writes over that file without checking or asking, potentially destroying unrelated or earlier image data. This path is reachable when the source module is loaded manually or packaging is repaired.",
+   "suggestion": "Let users choose the output filename and explicitly confirm replacement, or generate a noncolliding filename and use an atomic write.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "PDF export replaces an existing report without warning",
+   "file": "ForaLABS/Measures.py",
+   "line_start": 581,
+   "line_end": 584,
+   "evidence": "        if not os.path.isdir(outDir):\n            os.makedirs(outDir, exist_ok=True)\n        pdfPath = os.path.join(outDir, \"MAR_ForaLABS.pdf\")\n        self._save_html_to_pdf(html, pdfPath)",
+   "explanation": "The UI asks only for a directory, then uses the same fixed PDF filename every time. Exporting another specimen to that directory can overwrite a previous report without an overwrite confirmation; the user is not choosing the existing file itself.",
+   "suggestion": "Use a save-file dialog with overwrite confirmation or generate unique report filenames.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Import action installs a package without asking",
+   "file": "ForaLABS/ImportTXM.py",
+   "line_start": 363,
+   "line_end": 367,
+   "evidence": "    def ensurePackages(self):\n        try:\n            import olefile  # noqa: F401\n        except Exception:\n            slicer.util.pip_install(\"olefile\")",
+   "explanation": "On the first TXM import, if olefile cannot be imported, pip modifies Slicer's shared Python environment without a confirmation dialog. This is triggered by an explicit import action rather than startup; the UI only posts a status message.",
+   "suggestion": "Ask before installing and handle a declined or failed installation explicitly.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Thickness maps contain only the global mean",
+   "file": "ForaLABS/Measures.py",
+   "line_start": 828,
+   "line_end": 832,
+   "evidence": "        try:\n            mask, spacing, origin, shape = self._voxelize_poly_solid(poly, voxel_mm=float(voxel_mm))\n            mask_arr = sitk.GetArrayFromImage(mask)\n            thick_vol = np.zeros_like(mask_arr, dtype=np.float32)\n            thick_vol[mask_arr > 0] = stats[\"mean_mm\"]",
+   "explanation": "All occupied voxels receive the same global mean; the mesh coloring samples this image. The advertised map and exported NRRD therefore do not encode spatially varying thickness, which can mislead researchers interpreting local variation. This is non-blocking correctness feedback under the index policy.",
+   "suggestion": "Compute spatially assigned local thickness values, validate them against known geometries, and align the documentation with the implemented method.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Thickness export reuses an image for different selected inputs",
+   "file": "ForaLABS/Measures.py",
+   "line_start": 883,
+   "line_end": 888,
+   "evidence": "    def export_thickness_nrrd(self, segNode, wallSegmentId, outPath, voxel_mm=0.003, minDiamPct=10.0, removeUnref=True):\n        try:\n            # if we already have it, save directly\n            if self.last_thick_img is not None:\n                sitk.WriteImage(self.last_thick_img, outPath)\n                return True, outPath",
+   "explanation": "The cached image is reused without checking the selected segment, segmentation, voxel size, or cleaning parameters. After changing inputs or recomputing with thickness unchecked, users can export or view the previous specimen's map as if it belonged to the current selection. This is non-blocking correctness feedback.",
+   "suggestion": "Invalidate the cache on input or parameter changes, or key it to all relevant inputs and their modification times.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Tests do not exercise the advertised calculations or import",
+   "file": "ForaLABS/Measures.py",
+   "line_start": 1048,
+   "line_end": 1052,
+   "evidence": "class MeasuresTest(ScriptedLoadableModuleTest):\n    def runTest(self):\n        self.setUp(); self.test_All()\n    def test_All(self):\n        self.delayDisplay(\"Measures mesh-only test placeholder…\"); self.delayDisplay(\"OK\")",
+   "explanation": "The Measures test only displays messages; the TXM test similarly skips when its sample path is empty. Consequently neither analytic correctness nor TXM conversion is checked by these tests. This is non-blocking feedback.",
+   "suggestion": "Add small synthetic meshes with known measures and a redistributable TXM fixture for conversion and metadata tests.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No code was executed; Slicer builds, loading, UI behavior, output writes, and tests were not run.",
+  "The supplied commit fc173fb05e84c5aa9c5a973d3bc19b1061e64c42 and the catalog's main branch were not independently resolved against the remote repository; the exact checked-out revision is not independently verified.",
+  "The Extensions Index PR checklist, CI results, previous entry or reviewed baseline were not available.",
+  "The olefile package and its transitive metadata and distribution license were not inspected; network access and package installation were unavailable.",
+  "Binary icon and screenshot contents were not examined."
+ ],
+ "questions_for_author": []
+}

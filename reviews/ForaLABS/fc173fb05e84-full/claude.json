@@ -1,0 +1,100 @@
+{
+ "purpose": "ForaLABS provides two Slicer scripted modules for micro-CT of foraminifera. Measures computes surface area, volume, S/V, genus-based pore count and ray-cast wall thickness from a segment mesh and exports a PDF report. ImportTXM reads Zeiss .txm files and saves them as NRRD.",
+ "summary": "The extension's CMake build is broken. ForaLABS/CMakeLists.txt names the module ForaLABS and installs ForaLABS.py, which does not exist. The real modules, Measures.py and ImportTXM.py, are never installed or registered. The extension would fail at configure time or ship no working modules. Other points:\n- ImportTXM runs pip_install(\"olefile\") without asking.\n- The thickness \"map\" is a constant mean value, which the README does not make clear.\n- A stale cached thickness image can be exported.\n- The license is Apache-2.0, which is fine.\n- The catalog entry uses scm_revision \"main\", which is acceptable, and the build_dependencies match EXTENSION_DEPENDS (\"NA\").\n- I found no data exfiltration or malicious behavior.\nRecommendation: 🔴 Do not merge yet, because of the packaging defect.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "I read Measures.py and ImportTXM.py in full. There is no network access, no eval/exec/pickle, and no data leaves the machine. File writes go to user-chosen paths."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "ImportTXM.ensurePackages calls slicer.util.pip_install(\"olefile\") on the first import click, without a confirmation prompt. The package is small and does not bundle Qt or VTK, and nothing is installed at startup or import."
+  },
+  "packaging": {
+   "rating": "blocking",
+   "rationale": "ForaLABS/CMakeLists.txt sets MODULE_NAME ForaLABS and installs ForaLABS.py, which is absent from the repo. Measures.py and ImportTXM.py are not in the SCRIPTS list. The macro will fail at configure time, or the extension will ship with no loadable modules. The slicer_add_python_unittest call also references the missing ForaLABS.py."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "The LICENSE file is the Apache-2.0 text, and the README states the same license. The bundled resources are the extension's own icons and HTML. The Apache boilerplate placeholders are unfilled, which is cosmetic."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The thickness map fills the whole mask with a single mean value (Measures.py lines 831-833), while the README describes a Maurer distance / medial method. The export reuses a cached last_thick_img that may belong to another segment or voxel size. Heavy computation runs on the GUI thread with processEvents, and errors are raised as assert statements. The tests are placeholders."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The tool serves a niche but real need: foraminifera micro-CT morphometrics and TXM import. The README has a quickstart and a screenshot. There is no sample data, the tests are placeholders, and there is no research-only or clinical disclaimer. The README's methodology text does not match the ray-casting implementation."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "blocking",
+   "title": "CMake installs nonexistent ForaLABS.py and omits the real module scripts",
+   "file": "ForaLABS/CMakeLists.txt",
+   "line_start": 5,
+   "line_end": 7,
+   "evidence": "set(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n  )",
+   "explanation": "The ForaLABS/ directory has no ForaLABS.py. The actual modules, Measures.py and ImportTXM.py, are not listed in the CMake script list. slicerMacroBuildScriptedModule will fail or produce an extension with no loadable modules. The README's installation route (additional module paths) does not apply to catalog users.",
+   "suggestion": "Call slicerMacroBuildScriptedModule once per module (Measures and ImportTXM) with its own NAME and SCRIPTS. Remove the ForaLABS.py references, including the slicer_add_python_unittest call. Put each module's resources in its own call.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "pip_install of olefile without user confirmation",
+   "file": "ForaLABS/ImportTXM.py",
+   "line_start": 363,
+   "line_end": 367,
+   "evidence": "            import olefile  # noqa: F401\n        except Exception:\n            slicer.util.pip_install(\"olefile\")",
+   "explanation": "Clicking Import silently installs olefile into Slicer's shared Python. The package is small, but the user is not asked first. The test also calls ensurePackages.",
+   "suggestion": "Ask for confirmation with a dialog before installing, and document the dependency.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Thickness map is a constant fill, and the export can use a stale cached image",
+   "file": "ForaLABS/Measures.py",
+   "line_start": 831,
+   "line_end": 833,
+   "evidence": "thick_vol = np.zeros_like(mask_arr, dtype=np.float32)\n            thick_vol[mask_arr > 0] = stats[\"mean_mm\"]",
+   "explanation": "The thickness volume is the mean value written into every voxel of the mask, so it is not a spatial map. The README describes a Maurer/medial-distance method, which the code does not use. export_thickness_nrrd writes the cached last_thick_img whenever it exists, even if the segment or voxel size has changed. The same applies to show_thickness_in_slices. Mesh vertices are colored from this constant volume.",
+   "suggestion": "Store per-vertex thickness and rasterize it, or describe the output accurately. Invalidate the cache when inputs change, and update the README.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "PDF export overwrites a fixed file name silently; user input handled with assert",
+   "file": "ForaLABS/Measures.py",
+   "line_start": 583,
+   "line_end": 583,
+   "evidence": "pdfPath = os.path.join(outDir, \"MAR_ForaLABS.pdf\")",
+   "explanation": "export_results always writes MAR_ForaLABS.pdf in the chosen folder and overwrites any existing file without asking. Missing selections use assert, which gives poor user feedback. Segment and volume names are inserted into HTML unescaped.",
+   "suggestion": "Use a save dialog or confirm before overwriting. Replace asserts with user messages and html.escape the names.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Placeholder tests, no sample data, no scientific-use disclaimer",
+   "file": "ForaLABS/Measures.py",
+   "line_start": 1048,
+   "line_end": 1052,
+   "evidence": "class MeasuresTest(ScriptedLoadableModuleTest):\n    def runTest(self):\n        self.setUp(); self.test_All()\n    def test_All(self):\n        self.delayDisplay(\"Measures mesh-only test placeholder…\"); self.delayDisplay(\"OK\")",
+   "explanation": "MeasuresTest is a placeholder and the Testing/Python CMake is commented out. The pore count is a genus-based proxy that depends on mesh quality. No validation is provided.",
+   "suggestion": "Add a synthetic torus or shell test and sample data, and document the limits of the pore-count proxy.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Contents of the .ui and HTML resource files, which I did not read",
+  "Whether the main branch head matches commit fc173fb",
+  "Runtime behavior inside Slicer",
+  "Binary icon and screenshot contents"
+ ],
+ "questions_for_author": []
+}

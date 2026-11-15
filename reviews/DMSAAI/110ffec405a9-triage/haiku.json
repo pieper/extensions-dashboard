@@ -1,0 +1,114 @@
+{
+ "purpose": "DMSAAI is a Slicer scripted extension for research analysis of planar Tc-99m DMSA renal scintigraphy: it loads planar NM DICOM views, segments kidneys with SwinUNETR/SegResNet/DynUNet networks, computes split renal function, and runs DenseNet-based cortical evaluation. It is intended for nuclear medicine researchers and clinicians working with Slicer, with PyTorch supplied by the PyTorch extension.",
+ "summary": "Reviewed the catalog entry, CMake files, the main module, DICOM plugin, networks, settings, volumes, dicomviews and processing modules, plus README and a test file header. No malicious or concealed behavior found. PyTorch is not installed by the extension; MONAI/einops are pip-installed only after user confirmation. Weights are downloaded only after confirmation and loaded with torch.load(weights_only=True). Main gaps: no checksum verification of downloaded weights, unverified license for the weights, a screenshot URL pointing at a different repository name, and a few documentation mismatches. None block admission in my view, but the weight-licensing and integrity points should be confirmed.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Inspected networks.py download_weights (urlretrieve from raw.githubusercontent.com, no hash check) and the torch.load call with weights_only=True; downloads are gated by a user confirmation. No telemetry, no subprocess or eval found in the files read."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected ensureRequirements and REQUIREMENTS in DMSAAI.py: torch is never installed, the user is directed to PyTorch Utils, and only monai>=1.3 and einops are pip-installed after confirmation. No import-time side effects beyond a DICOM plugin registration and a hidden module."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "DMSAAI/CMakeLists.txt lists all Python files that DMSAAI.py and DMSAAILib import (including DICOMDmsaaiPlugin.py and all DMSAAILib modules) and the resource files; build_dependencies and EXTENSION_DEPENDS both name PyTorch. Root-level DMSAAI.png (icon) was not directly listed in the root file list, so its presence is only inferred from the scan hint."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "LICENSE.txt is MIT and covers the code. The model weights (about 140 MB, fetched from the separate 4burakfe/DMSAAI repository) have no stated license in the files reviewed, so distribution and downstream use of the weights are not verified."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Inspected DMSAAI.py, processing.py, volumes.py and dicomviews.py. Heavy imports are lazy and the segmentation runs on a clear path. Minor issues: the torch.load fallback catches any TypeError, the module reloads networks per call, and the README button name differs from the UI."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md gives installation, usage, orientation notes, tests and a research-use disclaimer; the module has a ScriptedLoadableModuleTest and a Testing/ suite. No sample data is bundled and the tests need an external DMSAAI checkout."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Downloaded model weights are not integrity-checked",
+   "file": "DMSAAI/DMSAAILib/networks.py",
+   "line_start": 183,
+   "line_end": 193,
+   "evidence": "urllib.request.urlretrieve(WEIGHTS_BASE_URL + name, tmp)\n        os.replace(tmp, target)",
+   "explanation": "download_weights fetches each .pth file from raw.githubusercontent.com with urllib.request.urlretrieve and no checksum or signature check, then loads it with torch.load. A compromised upstream repo or a network MITM would deliver arbitrary weights. The weights_only=True load limits code execution from pickle, but tampered weights could still change clinical outputs silently. Download is gated by user confirmation.",
+   "suggestion": "Pin SHA-256 hashes for each weight file and verify before os.replace; state the source commit of the weights in the docs.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "License of the downloaded model weights is not stated",
+   "file": "LICENSE.txt",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "MIT License\n\nCopyright (c) 2026 Burak Demir",
+   "explanation": "The extension's MIT license covers only the wrapper code. The ~140 MB weights are fetched from a different repository (4burakfe/DMSAAI) and the files reviewed do not state their terms. Users and redistributors cannot tell whether the weights may be used or redistributed, including for commercial use.",
+   "suggestion": "Confirm and state the license of the weights (in the DMSAAI repo or README), and note any non-commercial terms, since the extension downloads them on demand.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Screenshot URL points to a different repository name",
+   "file": "CMakeLists.txt",
+   "line_start": 11,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_ICONURL \"https://raw.githubusercontent.com/4burakfe/SlicerDMSAAI/main/DMSAAI.png\")\nset(EXTENSION_SCREENSHOTURLS \"https://raw.githubusercontent.com/4burakfe/DMSAAI/main/scr.jpg\")",
+   "explanation": "The screenshot URL uses the repo name DMSAAI while the source repo is SlicerDMSAAI; the icon URL uses SlicerDMSAAI. If scr.jpg is not present in the DMSAAI repo, the Extensions Manager screenshot will be broken. scr.jpg is also committed in this repo.",
+   "suggestion": "Point EXTENSION_SCREENSHOTURLS at the SlicerDMSAAI repo (main/scr.jpg), which contains the file.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "torch.load fallback triggers on any TypeError",
+   "file": "DMSAAI/DMSAAILib/networks.py",
+   "line_start": 94,
+   "line_end": 101,
+   "evidence": "try:\n        state = torch.load(path, map_location=device, weights_only=True)\n    except TypeError:  # torch < 1.13\n        state = torch.load(path, map_location=device)",
+   "explanation": "_load wraps torch.load(weights_only=True) in a bare except TypeError and then calls torch.load without weights_only, which unpickles arbitrary objects. The intent is only for torch<1.13, but any TypeError raised inside the safe path would silently fall back to the unsafe load.",
+   "suggestion": "Check torch.__version__ (or inspect the signature) before choosing the call, and do not fall back to the unrestricted pickle load for any other exception.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "README button name does not match the UI",
+   "file": "README.md",
+   "line_start": 61,
+   "line_end": 61,
+   "evidence": "5. Click **Clinical Evaluation** for the cortical abnormality, normal kidney, afunctional kidney and horseshoe\n   kidney models.",
+   "explanation": "The README says to click 'Clinical Evaluation', but the widget button is labeled 'AI-powered Evaluation'. Users following the docs will not find the button.",
+   "suggestion": "Use the actual label 'AI-powered Evaluation' in the README.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Model is reloaded from disk on every call",
+   "file": "DMSAAI/DMSAAILib/networks.py",
+   "line_start": 128,
+   "line_end": 162,
+   "evidence": "for side in (\"left\", \"right\"):\n        findings = []\n        for typeName, files in CLASSIFIER_FILES.items():\n            p = _positive_probability(_load(_build_classifier(), os.path.join(weightsDir, files[side]), device),",
+   "explanation": "segment() and classify() rebuild the network and reload weights from disk on each click, including one DenseNet per kidney side and per class (up to 7 loads per evaluation). This is slow on CPU and adds memory churn, but it is not a correctness defect.",
+   "suggestion": "Cache loaded models keyed by path and device, and run long inference off the GUI thread with progress.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Did not read the bundled ColorMap CSV files or the banner/icon images beyond their listing.",
+  "Did not verify that the root icon DMSAAI.png and screenshot scr.jpg exist in the source repository at the pinned revision; scr.jpg exists locally, the icon is inferred from the scan hint.",
+  "scm_revision is 'main' (a moving branch); the exact commit reviewed is unknown and I did not resolve it.",
+  "Did not check the license or contents of the external DMSAAI weights repository, nor the weight files themselves.",
+  "Did not run the module, the tests, or any pip/pre-commit checks; no CI report was available.",
+  "Clinical validity of the networks and thresholds is not assessable from the code."
+ ],
+ "questions_for_author": []
+}

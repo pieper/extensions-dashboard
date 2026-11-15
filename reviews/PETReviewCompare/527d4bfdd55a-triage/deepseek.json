@@ -1,0 +1,132 @@
+{
+ "purpose": "PETReviewCompare (Epona) is a 3D Slicer extension for reading SPECT/PET with CT/MRI: fusion, MIP, reading layouts, windowing presets, spherical SUV ROIs (Max/Mean/MTV/TLG) with TSV export, and optional AI denoise/super-resolution filters using Belenos PET Denoise models. It targets nuclear-medicine readers and researchers reviewing PET/CT studies in Slicer.",
+ "summary": "Well-structured, carefully written extension: two scripted modules sharing an EponaLib package, all Python files listed in CMake, MIT license, large unit-test suite, checksum-verified model downloads from the author's own GitHub releases. Concerns: a runtime `slicer.util.pip_install` (einops==0.6.1) into Slicer's shared Python environment whose user-confirmation path I could not read; a `torch.load` fallback without `weights_only` for downloaded .pth files; LICENSE text names \"SlicerPETDenoise\" instead of this extension; inference runs on the GUI thread. No telemetry or uploads found. Needs confirmation of the pip-install consent path before merge.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Searched Easy_fusion for network/exec/pickle patterns: only urllib downloads from GitHub releases with size and SHA-256 verification (filters.py:575-579); no telemetry or uploads. The one weak spot is the torch.load fallback without weights_only (filters.py:702-704)."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "filters.py:65 pins einops==0.6.1 and Easy_fusion.py:2882 calls slicer.util.pip_install(requirement); I could not read the surrounding lines to confirm the user is asked first. CMakeLists.txt:13 declares EXTENSION_DEPENDS \"NA\" although the AI filters need the PyTorch extension."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Easy_fusion/CMakeLists.txt lists all 18 EponaLib modules and every resource referenced; all listed files exist in the tree. Catalog entry has valid schema, category, build_subdirectory \".\" and a resolvable scm_url; EXTENSION_DEPENDS \"NA\" matches empty build_dependencies."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE is MIT and permits distribution, but line 6 grants rights over 'the \"SlicerPETDenoise\"' rather than this extension (copy-paste from another project). The license of the downloaded Belenos model weights was not verified."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Code follows Slicer conventions (heavy imports inside functions, observers removed in release(), new output volumes instead of modifying inputs, errors logged/reported). Inference runs synchronously on the GUI thread with processEvents (filters.py:969-972) and _petValueInfoCache grows without bound (values.py:333)."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "19 KB README, a 73 KB unit-test module registered via slicer_add_python_unittest, tier 1, and documented model provenance with checksums. Overlaps partly with Slicer's PET DICOM / DICOM loading but adds reading layouts and SUV ROI tooling."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Runtime pip install into Slicer's shared Python environment (einops==0.6.1)",
+   "file": "Easy_fusion/Easy_fusion.py",
+   "line_start": 2882,
+   "line_end": 2882,
+   "evidence": "slicer.util.pip_install(requirement)",
+   "explanation": "A search of Easy_fusion found slicer.util.pip_install(requirement) at Easy_fusion.py:2882, and filters.py:65 defines FILTER_EINOPS_REQUIREMENT = \"einops==0.6.1\". This installs a pinned third-party package into Slicer's shared Python environment, which persists for users and other extensions. I did not read the surrounding lines, so whether the user is explicitly asked first (and whether this can run at import/startup) is unverified; if it runs without confirmation, it violates the index's environment policy.",
+   "suggestion": "Show an explicit confirmation dialog naming the package and version before installing, never install at import/startup, and avoid an exact pin unless required; document the install in the README.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "torch.load fallback without weights_only on downloaded model files",
+   "file": "Easy_fusion/EponaLib/filters.py",
+   "line_start": 702,
+   "line_end": 704,
+   "evidence": "        state = torch.load(modelPath, map_location=device, weights_only=True)\n    except TypeError:  # PyTorch older than 1.13 has no weights_only\n        state = torch.load(modelPath, map_location=device)",
+   "explanation": "Model .pth files are downloaded from GitHub releases (filters.py:38-42) and loaded with torch.load. On PyTorch < 1.13 the code falls back to pickle-based loading without weights_only, so a replaced or tampered release asset would execute arbitrary code at load time. The SHA-256 check (filters.py:577) mitigates this, but when a release asset changes the digest is taken from the same GitHub API, so the trust root is the same.",
+   "suggestion": "Require torch >= 1.13 (the Slicer PyTorch extension provides newer versions) and remove the unsafe fallback, or refuse to load models without weights_only.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "PyTorch dependency not declared although AI filters need it",
+   "file": "CMakeLists.txt",
+   "line_start": 13,
+   "line_end": 13,
+   "evidence": "set(EXTENSION_DEPENDS \"NA\") # PyTorch is optional: only the AI post-processing filters need it (installed via the PyTorch extension)",
+   "explanation": "The AI filters import torch (filters.py:917) and expect the Slicer PyTorch extension to have installed it, but neither EXTENSION_DEPENDS nor the catalog's build_dependencies lists PyTorch/PyTorchUtils. Users who install only this extension get a failure when they try a filter, with no dependency hint in the catalog.",
+   "suggestion": "Either declare PyTorchUtils in EXTENSION_DEPENDS and build_dependencies, or make the module's error message and README point clearly to the PyTorch extension.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "MIT license text names a different project (\"SlicerPETDenoise\")",
+   "file": "LICENSE",
+   "line_start": 6,
+   "line_end": 6,
+   "evidence": "of this software and associated documentation files (the \"SlicerPETDenoise\"), to deal",
+   "explanation": "The grant in LICENSE covers 'the \"SlicerPETDenoise\"' rather than PETReviewCompare, apparently copied from the author's other project. The MIT terms still permit distribution, but the named subject is wrong, which creates ambiguity about what the license covers.",
+   "suggestion": "Replace the project name with PETReviewCompare (or the actual extension name) in the LICENSE text.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Sliding-window inference runs on the GUI thread",
+   "file": "Easy_fusion/EponaLib/filters.py",
+   "line_start": 969,
+   "line_end": 972,
+   "evidence": "            with torch.no_grad():\n                predictedNoise = sliding_window_inference(\n                    inputs=networkInput, roi_size=roiSize, sw_batch_size=1, predictor=predictor,\n                    overlap=FILTER_WINDOW_OVERLAP, mode=\"gaussian\", sw_device=device, device=torch.device(\"cpu\"))",
+   "explanation": "The whole inference runs synchronously in the module's slot; the progress dialog only repaints via slicer.app.processEvents() (filters.py:445). On large volumes this blocks the Slicer UI for minutes and cancellation is only honoured between windows, which can look like a hang.",
+   "suggestion": "Run the filter in a worker thread (or Slicer CLI) and keep the GUI responsive, or at minimum document the expected duration and keep the cancel check frequent.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Unbounded module-level cache keyed by node ID",
+   "file": "Easy_fusion/EponaLib/values.py",
+   "line_start": 333,
+   "line_end": 333,
+   "evidence": "_petValueInfoCache = {}  # node ID -> (cache key, PetValueInfo)",
+   "explanation": "petValueInfo() stores an entry per volume node ID (values.py:413) and never removes entries when nodes are deleted or the scene is closed, so the dict grows for the lifetime of the Slicer session and keeps stale keys.",
+   "suggestion": "Prune entries for nodes no longer in the scene (e.g. on node-removed events) or use a bounded cache.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Large binary assets committed to the repository",
+   "file": "Easy_fusion/CMakeLists.txt",
+   "line_start": 29,
+   "line_end": 29,
+   "evidence": "  Resources/Icons/fusbanner.jpg",
+   "explanation": "fusbanner.jpg (~3 MB), scr1.jpg (~1.1 MB) and SlicerPETReviewCompare.png (~680 KB) are committed. They are legitimate UI/screenshot resources, but they bloat the repository and every clone; the scan hint flagged the 3 MB banner.",
+   "suggestion": "Downscale the banner/screenshot or generate them at build time; keep only what the module actually displays.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The context of slicer.util.pip_install at Easy_fusion.py:2882 (whether a confirmation dialog precedes it, and whether it can run at import/startup) — only the search hit was seen.",
+  "EponaCompare/EponaCompare.py and Easy_fusion/Easy_fusion.py module bodies: module structure, cleanup, and how EponaCompare imports the shared EponaLib package installed under Easy_fusion's directory.",
+  "README.md content: clinical-use disclaimer, model provenance/validation statements, and user instructions.",
+  "License terms of the downloaded Belenos PET Denoise model weights in the SlicerPETDenoise releases.",
+  "Whether the catalog's scm_revision \"main\" currently resolves to the reviewed commit 527d4bfdd55a65c980e2920ea616370a3325acc3 (branch reference, not pinned).",
+  "Actual build/load of the extension and its CMake install tree; no Slicer build was run.",
+  "EponaLib/display.py, layouts.py, overlays.py, registration.py, mippick.py, toolbar.py, shortcuts.py, slicescroll.py, compareviews.py, studyinfo.py were not read in detail."
+ ],
+ "questions_for_author": [
+  "Is the einops install at Easy_fusion.py:2882 preceded by an explicit user confirmation dialog, and can it ever run at module import or Slicer startup?",
+  "How does EponaCompare.py import EponaLib, which CMake installs under the Easy_fusion module directory? Does it add that directory to sys.path, and does the module load when only EponaCompare is enabled?",
+  "What license covers the Belenos PET Denoise model weights downloaded from the SlicerPETDenoise releases, and does it permit redistribution/use by extension users?",
+  "Why is PyTorch not declared in EXTENSION_DEPENDS/build_dependencies when the AI filters require it?"
+ ]
+}

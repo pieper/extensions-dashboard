@@ -1,0 +1,837 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Patient CT volumes uploaded over unencrypted HTTP to a hard-coded IP address",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line": 33,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "Patient CT volumes uploaded over unencrypted HTTP to a hard-coded IP address",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 33,
+     "line_end": 33,
+     "evidence": "DEFAULT_SERVER_URL = \"http://209.20.158.219:8000\"",
+     "explanation": "submitJob (lines 441-461) and downloadResult (lines 481-495) POST/GET against this URL, so the exported NIfTI of the patient's CT and the returned segmentation cross the public internet in cleartext. Anyone on the network path (clinic Wi-Fi, ISP, hosting provider) can read or modify the images and the returned mask. The module's own help text (line 59) and README.md:60-62 tell users data is 'securely processed', which is not true of plain HTTP, so consent is not fully informed. There is also no TLS certificate to authenticate the server, so a spoofed endpoint could return arbitrary label maps that a clinician would then use.",
+     "suggestion": "Serve the API over HTTPS with a real hostname and a valid certificate, make that the default, and reject non-HTTPS URLs in setServerUrl (or warn explicitly). Update the privacy text to state the actual transport and destination.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 33
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Patient CT volumes uploaded over unencrypted HTTP to a bare IP address",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 33,
+     "line_end": 33,
+     "evidence": "DEFAULT_SERVER_URL = \"http://209.20.158.219:8000\"",
+     "explanation": "The default server is plain HTTP on a raw IP, so the full medical image and the X-Device-ID header travel unencrypted and can be read or altered by anyone on the network path. This conflicts with the description claiming data is 'securely processed'. A user following the documented workflow sends PHI over an unauthenticated channel, and the server identity is never verified. The server should be served over HTTPS with a stable hostname, and the default should not be a bare IP.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 33
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Blocking network I/O on the GUI thread freezes Slicer during upload, download and polling",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line": 409,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Blocking network I/O on the GUI thread freezes Slicer during upload, download and polling",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 444,
+     "line_end": 452,
+     "evidence": "        if HAS_REQUESTS:\n            with open(niftiPath, \"rb\") as f:\n                resp = requests.post(\n                    url,\n                    files={\"file\": (os.path.basename(niftiPath), f, \"application/gzip\")},\n                    data={\"model\": model},",
+     "explanation": "_onRunClicked calls submitJob directly on the GUI thread with timeout=300; a large CT upload can block the whole application for minutes with no progress and no way to cancel (the Cancel button cannot be clicked while the event loop is blocked). _pollStatus (line 294) likewise performs a 15 s-timeout GET every 5 s on the GUI thread, and downloadResult blocks for up to 300 s.",
+     "suggestion": "Move upload/download to a worker thread (e.g. ctk.QLabel or a QThread/QRunnable) and report progress via signals; keep only the timer-driven status check on the GUI thread with a short timeout.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 409
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Exported patient volumes and downloaded results are left in temp folders indefinitely",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line": 431,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Exported patient volumes and downloaded results are left in temp folders indefinitely",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 430,
+     "line_end": 437,
+     "evidence": "        tmpDir = tempfile.mkdtemp(prefix=\"drai_\")\n        filename = \"volume.nii.gz\"\n        filepath = os.path.join(tmpDir, filename)",
+     "explanation": "exportVolume and downloadResult (line 483, 'tempfile.mkdtemp(prefix=\"drai_result_\")') create directories that are never removed, so a copy of the patient's CT and the segmentation stay on disk after the session, on shared or multi-user machines too. This contradicts the 'No data is retained' statement shown to users (lines 172-173) and leaves PHI-derived files behind.",
+     "suggestion": "Use a TemporaryDirectory owned by the widget/logic and delete it after the result is loaded (and on cancel/cleanup), or write into slicer.app.temporaryPath with explicit cleanup.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 431
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Exported patient volumes and downloaded results are never deleted from temp storage",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 430,
+     "line_end": 437,
+     "evidence": "tmpDir = tempfile.mkdtemp(prefix=\"drai_\")\n        filename = \"volume.nii.gz\"\n        filepath = os.path.join(tmpDir, filename)",
+     "explanation": "Each run writes the input CT to a new mkdtemp directory and writes the result to another, and neither is removed afterwards. Medical images are left in the user's temp folder, which conflicts with the 'no data retained' messaging. Users on shared machines may expose PHI. The code should delete these directories after upload and after loading, for example with shutil.rmtree in a finally block.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 431
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "No terms of service or privacy policy for the cloud service that receives patient data",
+   "category": "license",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "README.md",
+   "line": 58,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "No terms of service or privacy policy for the cloud service that receives patient data",
+     "file": "README.md",
+     "line_start": 58,
+     "line_end": 63,
+     "evidence": "## Data Privacy\n\n- Your CT volume is uploaded to the DRAI server **only** for the duration of the segmentation\n- All uploaded images are **deleted from the server immediately** after segmentation is complete",
+     "explanation": "The extension's core function is a remote service, but the repository contains only the BSD-3 code license; there is no link to service terms, a privacy policy, a data-processing agreement, or any statement of who operates 209.20.158.219 and under which jurisdiction data is handled. Users (and their institutions) have no documented basis for the retention/deletion claims made in the UI, and no way to verify them.",
+     "suggestion": "Publish and link service terms and a privacy policy covering upload, retention, deletion, subprocessors and jurisdiction, and reference them from the consent dialog and README.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 58
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Persistent device identifier sent to the vendor server automatically on module open, without consent",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line": 400,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Persistent device identifier sent to the vendor server automatically on module open, without consent",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 400,
+     "line_end": 426,
+     "evidence": "    def ensureDeviceRegistered(self):\n        key = f\"{SETTINGS_KEY_PREFIX}/DeviceRegistered\"\n        if self._settings.value(key, \"false\") == \"true\":\n            return",
+     "explanation": "DRAISegmentationWidget.setup() calls self.logic.ensureDeviceRegistered() (line 90) as soon as the module panel is opened, which POSTs a UUID persisted in QSettings (getDeviceId, lines 379-386) to /api/v1/register. This happens before, and independently of, the consent dialog at line 226, so merely opening the module contacts a third-party server and transmits a stable per-installation identifier. The consent dialog and privacy notice never mention this registration.",
+     "suggestion": "Do not contact the server until the user has consented; fold registration into the first consented job submission, or ask explicitly. Disclose the device identifier in the privacy notice.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 400
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Persistent device identifier is registered with the server at module setup, before any consent",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 86,
+     "line_end": 90,
+     "evidence": "self.logic = DRAISegmentationLogic()\n        self.logic.ensureDeviceRegistered()",
+     "explanation": "setup() calls ensureDeviceRegistered(), which POSTs a generated UUID to the remote server as soon as the module GUI is created. The consent dialog only appears when the user clicks Run. This sends an identifier off the machine without opt-in, and the UUID persists in QSettings and is sent on every later request as X-Device-ID. The registration should happen only after consent or be clearly disclosed in the privacy notice.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 89
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Cancel only stops polling; server job and job state are not cleaned up",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line": 257,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Cancel only stops polling; server job and job state are not cleaned up",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 257,
+     "line_end": 261,
+     "evidence": "    def _onCancelClicked(self, _checked):\n        self._stopPolling()\n        self._currentJobId = None\n        self._setUIIdle()\n        self.statusLabel.text = \"Cancelled by user.\"",
+     "explanation": "The remote job keeps running and its result is never fetched or deleted, so the server retains a job (and, per the vendor's claim, the uploaded volume until it finishes) after the user believes they cancelled. The timeout path in _pollStatus (lines 300-306) likewise leaves _currentJobId set.",
+     "suggestion": "Send a cancel/delete request to the API on cancel and on timeout, and clear _currentJobId in all terminal paths.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 257
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Cancel does not cancel the server job, and the privacy claim is not verifiable from the client",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 257,
+     "line_end": 261,
+     "evidence": "def _onCancelClicked(self, _checked):\n        self._stopPolling()\n        self._currentJobId = None",
+     "explanation": "_onCancelClicked only stops local polling. The job keeps running on the server and the user is told 'Cancelled by user.' with no server-side cancel call. Separately, the 'deleted immediately' and 'no data is retained' statements in the consent text and in the description cannot be checked from this code. The client should either send a cancel request or word the message accurately, and the privacy statements should be backed by a published retention policy.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 257
+     }
+    }
+   ]
+  },
+  {
+   "title": "Job ID is interpolated into the request URL without escaping",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line": 465,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Job ID is interpolated into the request URL without escaping",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 465,
+     "line_end": 466,
+     "evidence": "def getJobStatus(self, jobId: str):\n        url = f\"{self.getServerUrl()}/api/v1/jobs/{jobId}/status\"",
+     "explanation": "The job_id returned by the server is inserted directly into the URL path. A malformed or hostile server response could inject path segments or query characters. The impact is limited because the server is the only source, but the value should be validated or URL-encoded.",
+     "suggestion": "",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 465
+     }
+    }
+   ]
+  },
+  {
+   "title": "No clinical-use disclaimer, regulatory status or model validation information",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 5,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No clinical-use disclaimer, regulatory status or model validation information",
+     "file": "README.md",
+     "line_start": 5,
+     "line_end": 16,
+     "evidence": "## Description\n\nDRAI Segmentation and 3D Modeling provides automatic, deep-learning-based segmentation of anatomical structures from CT and CTA scans and creates 3D surface models from the results.",
+     "explanation": "The module produces anatomical labels and 3D models that a clinician may act on, but neither README nor the module help text states that output is for research/visualization only, nor gives any accuracy/validation data, training data description, or regulatory clearance status. Users cannot judge whether the output is fit for clinical decisions.",
+     "suggestion": "Add a clear intended-use statement (e.g. research use only unless cleared), a pointer to validation results, and a note that results must be reviewed by a qualified clinician.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 5
+     }
+    }
+   ]
+  },
+  {
+   "title": "Reference geometry set after label map import may misalign the segmentation",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line": 505,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Reference geometry set after label map import may misalign the segmentation",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 505,
+     "line_end": 512,
+     "evidence": "        slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(\n            labelmapNode, segmentationNode\n        )\n\n        slicer.mrmlScene.RemoveNode(labelmapNode)\n\n        if referenceVolumeNode is not None:\n            segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(referenceVolumeNode)",
+     "explanation": "The usual Slicer pattern is to set the reference image geometry before importing the label map so the imported segments are placed in the reference frame. Setting it afterwards can leave the segmentation in the label map's own geometry while the node claims the volume's geometry, producing a mask that does not overlay the CT. Also, loadLabelVolume's return value is not checked, so a failed load passes None into ImportLabelmapToSegmentationNode.",
+     "suggestion": "Set the reference geometry on the segmentation node before importing, and raise a user-visible error if loadLabelVolume returns None.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 505
+     }
+    }
+   ]
+  },
+  {
+   "title": "Test only checks that a device ID exists; no functional test or sample data",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line": 678,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Test only checks that a device ID exists; no functional test or sample data",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 678,
+     "line_end": 683,
+     "evidence": "    def test_ModuleLoads(self):\n        self.delayDisplay(\"Starting module load test\")\n        logic = DRAISegmentationLogic()\n        self.assertIsNotNone(logic.getDeviceId())\n        self.assertTrue(len(logic.getDeviceId()) > 0)",
+     "explanation": "The generic test exercises none of the module's real logic (volume export, multipart encoding, error parsing, segmentation import), so regressions in those paths would go unnoticed; there is also no sample volume for users to try the module without their own patient data.",
+     "suggestion": "Add offline unit tests for exportVolume, _postMultipart body construction and _extractApiErrorMessage, and ship a small public sample CT for a tutorial.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 678
+     }
+    }
+   ]
+  },
+  {
+   "title": "Description and privacy text overstate security and the test is trivial",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 12,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Description and privacy text overstate security and the test is trivial",
+     "file": "CMakeLists.txt",
+     "line_start": 12,
+     "line_end": 12,
+     "evidence": "All data is securely processed and deleted immediately after inference.",
+     "explanation": "The CMake description says 'All data is securely processed', but the transport is plain HTTP. The only test checks that a device ID is non-empty. The README and Screenshots are reasonable, but there is no sample data, no accuracy or validation information for the models, and no clinical-use disclaimer.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 12
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Patient CT volumes uploaded over unencrypted HTTP to a hard-coded IP address",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line": 33,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "Patient CT volumes uploaded over unencrypted HTTP to a hard-coded IP address",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 33,
+     "line_end": 33,
+     "evidence": "DEFAULT_SERVER_URL = \"http://209.20.158.219:8000\"",
+     "explanation": "submitJob (lines 441-461) and downloadResult (lines 481-495) POST/GET against this URL, so the exported NIfTI of the patient's CT and the returned segmentation cross the public internet in cleartext. Anyone on the network path (clinic Wi-Fi, ISP, hosting provider) can read or modify the images and the returned mask. The module's own help text (line 59) and README.md:60-62 tell users data is 'securely processed', which is not true of plain HTTP, so consent is not fully informed. There is also no TLS certificate to authenticate the server, so a spoofed endpoint could return arbitrary label maps that a clinician would then use.",
+     "suggestion": "Serve the API over HTTPS with a real hostname and a valid certificate, make that the default, and reject non-HTTPS URLs in setServerUrl (or warn explicitly). Update the privacy text to state the actual transport and destination.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 33
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Patient CT volumes uploaded over unencrypted HTTP to a bare IP address",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 33,
+     "line_end": 33,
+     "evidence": "DEFAULT_SERVER_URL = \"http://209.20.158.219:8000\"",
+     "explanation": "The default server is plain HTTP on a raw IP, so the full medical image and the X-Device-ID header travel unencrypted and can be read or altered by anyone on the network path. This conflicts with the description claiming data is 'securely processed'. A user following the documented workflow sends PHI over an unauthenticated channel, and the server identity is never verified. The server should be served over HTTPS with a stable hostname, and the default should not be a bare IP.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 33
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Blocking network I/O on the GUI thread freezes Slicer during upload, download and polling",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line": 409,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Blocking network I/O on the GUI thread freezes Slicer during upload, download and polling",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 444,
+     "line_end": 452,
+     "evidence": "        if HAS_REQUESTS:\n            with open(niftiPath, \"rb\") as f:\n                resp = requests.post(\n                    url,\n                    files={\"file\": (os.path.basename(niftiPath), f, \"application/gzip\")},\n                    data={\"model\": model},",
+     "explanation": "_onRunClicked calls submitJob directly on the GUI thread with timeout=300; a large CT upload can block the whole application for minutes with no progress and no way to cancel (the Cancel button cannot be clicked while the event loop is blocked). _pollStatus (line 294) likewise performs a 15 s-timeout GET every 5 s on the GUI thread, and downloadResult blocks for up to 300 s.",
+     "suggestion": "Move upload/download to a worker thread (e.g. ctk.QLabel or a QThread/QRunnable) and report progress via signals; keep only the timer-driven status check on the GUI thread with a short timeout.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 409
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Exported patient volumes and downloaded results are left in temp folders indefinitely",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line": 431,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Exported patient volumes and downloaded results are left in temp folders indefinitely",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 430,
+     "line_end": 437,
+     "evidence": "        tmpDir = tempfile.mkdtemp(prefix=\"drai_\")\n        filename = \"volume.nii.gz\"\n        filepath = os.path.join(tmpDir, filename)",
+     "explanation": "exportVolume and downloadResult (line 483, 'tempfile.mkdtemp(prefix=\"drai_result_\")') create directories that are never removed, so a copy of the patient's CT and the segmentation stay on disk after the session, on shared or multi-user machines too. This contradicts the 'No data is retained' statement shown to users (lines 172-173) and leaves PHI-derived files behind.",
+     "suggestion": "Use a TemporaryDirectory owned by the widget/logic and delete it after the result is loaded (and on cancel/cleanup), or write into slicer.app.temporaryPath with explicit cleanup.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 431
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Exported patient volumes and downloaded results are never deleted from temp storage",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 430,
+     "line_end": 437,
+     "evidence": "tmpDir = tempfile.mkdtemp(prefix=\"drai_\")\n        filename = \"volume.nii.gz\"\n        filepath = os.path.join(tmpDir, filename)",
+     "explanation": "Each run writes the input CT to a new mkdtemp directory and writes the result to another, and neither is removed afterwards. Medical images are left in the user's temp folder, which conflicts with the 'no data retained' messaging. Users on shared machines may expose PHI. The code should delete these directories after upload and after loading, for example with shutil.rmtree in a finally block.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 431
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "No terms of service or privacy policy for the cloud service that receives patient data",
+   "category": "license",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "README.md",
+   "line": 58,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "No terms of service or privacy policy for the cloud service that receives patient data",
+     "file": "README.md",
+     "line_start": 58,
+     "line_end": 63,
+     "evidence": "## Data Privacy\n\n- Your CT volume is uploaded to the DRAI server **only** for the duration of the segmentation\n- All uploaded images are **deleted from the server immediately** after segmentation is complete",
+     "explanation": "The extension's core function is a remote service, but the repository contains only the BSD-3 code license; there is no link to service terms, a privacy policy, a data-processing agreement, or any statement of who operates 209.20.158.219 and under which jurisdiction data is handled. Users (and their institutions) have no documented basis for the retention/deletion claims made in the UI, and no way to verify them.",
+     "suggestion": "Publish and link service terms and a privacy policy covering upload, retention, deletion, subprocessors and jurisdiction, and reference them from the consent dialog and README.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 58
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Persistent device identifier sent to the vendor server automatically on module open, without consent",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line": 400,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Persistent device identifier sent to the vendor server automatically on module open, without consent",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 400,
+     "line_end": 426,
+     "evidence": "    def ensureDeviceRegistered(self):\n        key = f\"{SETTINGS_KEY_PREFIX}/DeviceRegistered\"\n        if self._settings.value(key, \"false\") == \"true\":\n            return",
+     "explanation": "DRAISegmentationWidget.setup() calls self.logic.ensureDeviceRegistered() (line 90) as soon as the module panel is opened, which POSTs a UUID persisted in QSettings (getDeviceId, lines 379-386) to /api/v1/register. This happens before, and independently of, the consent dialog at line 226, so merely opening the module contacts a third-party server and transmits a stable per-installation identifier. The consent dialog and privacy notice never mention this registration.",
+     "suggestion": "Do not contact the server until the user has consented; fold registration into the first consented job submission, or ask explicitly. Disclose the device identifier in the privacy notice.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 400
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Persistent device identifier is registered with the server at module setup, before any consent",
+     "file": "DRAISegmentation/DRAISegmentation.py",
+     "line_start": 86,
+     "line_end": 90,
+     "evidence": "self.logic = DRAISegmentationLogic()\n        self.logic.ensureDeviceRegistered()",
+     "explanation": "setup() calls ensureDeviceRegistered(), which POSTs a generated UUID to the remote server as soon as the module GUI is created. The consent dialog only appears when the user clicks Run. This sends an identifier off the machine without opt-in, and the UUID persists in QSettings and is sent on every later request as X-Device-ID. The registration should happen only after consent or be clearly disclosed in the privacy notice.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DRAISegmentation/DRAISegmentation.py",
+      "line": 89
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D6",
+   "rating_dispute": {
+    "deepseek": "blocking",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of utility",
+   "category": "utility",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D8",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "minor"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "blocking",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "packaging": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "license": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 8,
+  "single": 7,
+  "unverified": 0,
+  "total": 11
+ }
+}

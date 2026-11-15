@@ -1,0 +1,154 @@
+{
+ "purpose": "A 3D Slicer module that sends a loaded CT/CTA volume to the vendor's cloud service (DRAI) for AI segmentation of spine/pelvis or aorta-iliac-femoral arteries, then downloads the label map, imports it as a segmentation and builds closed surface models. Intended for clinicians/engineers doing spine, pelvic and vascular segmentation and 3D modeling.",
+ "summary": "Small, readable scripted module with a clear consent dialog and no code downloads, no pip installs and no import-time side effects. However, patient CT volumes are uploaded over plain HTTP to a hard-coded bare IP address with no TLS, no published privacy policy or service terms, while the UI and README claim data is \"securely processed\" — a concrete path to interception of medical images. A persistent device UUID is also sent to that server automatically when the module is opened, without consent, and exported volumes/results are left indefinitely in temp folders. Packaging and the BSD-3 license are fine. Needs fixes before distribution.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "DRAISegmentation.py:33 hard-codes 'http://209.20.158.219:8000' and all uploads/downloads (lines 441-495) use it, so patient CT data travels unencrypted; ensureDeviceRegistered (lines 400-426) sends a persistent device UUID to that server from setup() (line 90) with no consent. No eval/exec, pickle, subprocess or code downloads were found."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Only stdlib plus vtk/qt/ctk/slicer and an optional 'requests' import guarded by try/except (lines 20-25); no pip_install, no sys.path or environment changes, no global logging/warning suppression, no torch. QSettings keys are namespaced under 'DRAISegmentation' (line 34)."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "DRAISegmentation/CMakeLists.txt installs DRAISegmentation.py and Resources/Icons/DRAISegmentation.jpg, both of which exist; root CMakeLists sets EXTENSION_DEPENDS \"NA\" matching build_dependencies [] in the catalog entry; scm_url is reachable and scm_revision 'main' is a supported branch reference."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE is standard BSD 3-Clause permitting redistribution of the extension code, and README.md:91 states the same. No license or terms are provided for the cloud inference service itself, which is what users actually depend on."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Upload (submitJob, timeout=300), download and every 5 s status poll run on the GUI thread, freezing Slicer for the duration; tempfile.mkdtemp output in exportVolume (line 431) and downloadResult (line 483) is never deleted; loadSegmentation sets reference geometry after ImportLabelmapToSegmentationNode (lines 505-512) and does not check that the label map loaded."
+  },
+  "utility": {
+   "rating": "concern",
+   "rationale": "README documents install and usage with screenshots, but there is no sample data, no model validation/provenance information, no clinical-use or regulatory disclaimer for an AI segmentation tool, and the only test (lines 669-683) merely checks that a device ID exists."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Patient CT volumes uploaded over unencrypted HTTP to a hard-coded IP address",
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line_start": 33,
+   "line_end": 33,
+   "evidence": "DEFAULT_SERVER_URL = \"http://209.20.158.219:8000\"",
+   "explanation": "submitJob (lines 441-461) and downloadResult (lines 481-495) POST/GET against this URL, so the exported NIfTI of the patient's CT and the returned segmentation cross the public internet in cleartext. Anyone on the network path (clinic Wi-Fi, ISP, hosting provider) can read or modify the images and the returned mask. The module's own help text (line 59) and README.md:60-62 tell users data is 'securely processed', which is not true of plain HTTP, so consent is not fully informed. There is also no TLS certificate to authenticate the server, so a spoofed endpoint could return arbitrary label maps that a clinician would then use.",
+   "suggestion": "Serve the API over HTTPS with a real hostname and a valid certificate, make that the default, and reject non-HTTPS URLs in setServerUrl (or warn explicitly). Update the privacy text to state the actual transport and destination.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Persistent device identifier sent to the vendor server automatically on module open, without consent",
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line_start": 400,
+   "line_end": 426,
+   "evidence": "    def ensureDeviceRegistered(self):\n        key = f\"{SETTINGS_KEY_PREFIX}/DeviceRegistered\"\n        if self._settings.value(key, \"false\") == \"true\":\n            return",
+   "explanation": "DRAISegmentationWidget.setup() calls self.logic.ensureDeviceRegistered() (line 90) as soon as the module panel is opened, which POSTs a UUID persisted in QSettings (getDeviceId, lines 379-386) to /api/v1/register. This happens before, and independently of, the consent dialog at line 226, so merely opening the module contacts a third-party server and transmits a stable per-installation identifier. The consent dialog and privacy notice never mention this registration.",
+   "suggestion": "Do not contact the server until the user has consented; fold registration into the first consented job submission, or ask explicitly. Disclose the device identifier in the privacy notice.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Exported patient volumes and downloaded results are left in temp folders indefinitely",
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line_start": 430,
+   "line_end": 437,
+   "evidence": "        tmpDir = tempfile.mkdtemp(prefix=\"drai_\")\n        filename = \"volume.nii.gz\"\n        filepath = os.path.join(tmpDir, filename)",
+   "explanation": "exportVolume and downloadResult (line 483, 'tempfile.mkdtemp(prefix=\"drai_result_\")') create directories that are never removed, so a copy of the patient's CT and the segmentation stay on disk after the session, on shared or multi-user machines too. This contradicts the 'No data is retained' statement shown to users (lines 172-173) and leaves PHI-derived files behind.",
+   "suggestion": "Use a TemporaryDirectory owned by the widget/logic and delete it after the result is loaded (and on cancel/cleanup), or write into slicer.app.temporaryPath with explicit cleanup.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "No terms of service or privacy policy for the cloud service that receives patient data",
+   "file": "README.md",
+   "line_start": 58,
+   "line_end": 63,
+   "evidence": "## Data Privacy\n\n- Your CT volume is uploaded to the DRAI server **only** for the duration of the segmentation\n- All uploaded images are **deleted from the server immediately** after segmentation is complete",
+   "explanation": "The extension's core function is a remote service, but the repository contains only the BSD-3 code license; there is no link to service terms, a privacy policy, a data-processing agreement, or any statement of who operates 209.20.158.219 and under which jurisdiction data is handled. Users (and their institutions) have no documented basis for the retention/deletion claims made in the UI, and no way to verify them.",
+   "suggestion": "Publish and link service terms and a privacy policy covering upload, retention, deletion, subprocessors and jurisdiction, and reference them from the consent dialog and README.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Blocking network I/O on the GUI thread freezes Slicer during upload, download and polling",
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line_start": 444,
+   "line_end": 452,
+   "evidence": "        if HAS_REQUESTS:\n            with open(niftiPath, \"rb\") as f:\n                resp = requests.post(\n                    url,\n                    files={\"file\": (os.path.basename(niftiPath), f, \"application/gzip\")},\n                    data={\"model\": model},",
+   "explanation": "_onRunClicked calls submitJob directly on the GUI thread with timeout=300; a large CT upload can block the whole application for minutes with no progress and no way to cancel (the Cancel button cannot be clicked while the event loop is blocked). _pollStatus (line 294) likewise performs a 15 s-timeout GET every 5 s on the GUI thread, and downloadResult blocks for up to 300 s.",
+   "suggestion": "Move upload/download to a worker thread (e.g. ctk.QLabel or a QThread/QRunnable) and report progress via signals; keep only the timer-driven status check on the GUI thread with a short timeout.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Reference geometry set after label map import may misalign the segmentation",
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line_start": 505,
+   "line_end": 512,
+   "evidence": "        slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(\n            labelmapNode, segmentationNode\n        )\n\n        slicer.mrmlScene.RemoveNode(labelmapNode)\n\n        if referenceVolumeNode is not None:\n            segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(referenceVolumeNode)",
+   "explanation": "The usual Slicer pattern is to set the reference image geometry before importing the label map so the imported segments are placed in the reference frame. Setting it afterwards can leave the segmentation in the label map's own geometry while the node claims the volume's geometry, producing a mask that does not overlay the CT. Also, loadLabelVolume's return value is not checked, so a failed load passes None into ImportLabelmapToSegmentationNode.",
+   "suggestion": "Set the reference geometry on the segmentation node before importing, and raise a user-visible error if loadLabelVolume returns None.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Cancel only stops polling; server job and job state are not cleaned up",
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line_start": 257,
+   "line_end": 261,
+   "evidence": "    def _onCancelClicked(self, _checked):\n        self._stopPolling()\n        self._currentJobId = None\n        self._setUIIdle()\n        self.statusLabel.text = \"Cancelled by user.\"",
+   "explanation": "The remote job keeps running and its result is never fetched or deleted, so the server retains a job (and, per the vendor's claim, the uploaded volume until it finishes) after the user believes they cancelled. The timeout path in _pollStatus (lines 300-306) likewise leaves _currentJobId set.",
+   "suggestion": "Send a cancel/delete request to the API on cancel and on timeout, and clear _currentJobId in all terminal paths.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No clinical-use disclaimer, regulatory status or model validation information",
+   "file": "README.md",
+   "line_start": 5,
+   "line_end": 16,
+   "evidence": "## Description\n\nDRAI Segmentation and 3D Modeling provides automatic, deep-learning-based segmentation of anatomical structures from CT and CTA scans and creates 3D surface models from the results.",
+   "explanation": "The module produces anatomical labels and 3D models that a clinician may act on, but neither README nor the module help text states that output is for research/visualization only, nor gives any accuracy/validation data, training data description, or regulatory clearance status. Users cannot judge whether the output is fit for clinical decisions.",
+   "suggestion": "Add a clear intended-use statement (e.g. research use only unless cleared), a pointer to validation results, and a note that results must be reviewed by a qualified clinician.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Test only checks that a device ID exists; no functional test or sample data",
+   "file": "DRAISegmentation/DRAISegmentation.py",
+   "line_start": 678,
+   "line_end": 683,
+   "evidence": "    def test_ModuleLoads(self):\n        self.delayDisplay(\"Starting module load test\")\n        logic = DRAISegmentationLogic()\n        self.assertIsNotNone(logic.getDeviceId())\n        self.assertTrue(len(logic.getDeviceId()) > 0)",
+   "explanation": "The generic test exercises none of the module's real logic (volume export, multipart encoding, error parsing, segmentation import), so regressions in those paths would go unnoticed; there is also no sample volume for users to try the module without their own patient data.",
+   "suggestion": "Add offline unit tests for exportVolume, _postMultipart body construction and _extractApiErrorMessage, and ship a small public sample CT for a tutorial.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The remote service at 209.20.158.219:8000 was not contacted, so its actual behaviour (retention, deletion, authentication, whether it logs images) could not be verified — the 'deleted immediately / no data retained' claims are unverified vendor statements.",
+  "The exact source revision: the catalog entry pins scm_revision 'main' (a moving branch), so the reviewed code is the snapshot provided, not a fixed commit.",
+  "Whether the NIfTI written by slicer.util.saveNode embeds patient identifiers from DICOM metadata (e.g. in the NIfTI descrip field) — not verified.",
+  "Model weights and training data are server-side and were not available for inspection; no validation or provenance evidence exists in the repository.",
+  "No build or runtime test was performed (no execution environment)."
+ ],
+ "questions_for_author": [
+  "Why is the API served over plain HTTP at a bare IP address rather than HTTPS on a named host, and is there a plan to change this before release?",
+  "What exactly does /api/v1/register do with the device UUID, and why is it called when the module panel is opened rather than after the user consents?",
+  "Where are the service terms and privacy policy that back the 'deleted immediately, no data is retained' statement, and which jurisdiction processes the data?",
+  "Are uploaded NIfTI files free of DICOM patient identifiers, and is any of the upload retained for logging or model improvement?"
+ ]
+}
