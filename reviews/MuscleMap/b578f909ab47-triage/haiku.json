@@ -1,0 +1,114 @@
+{
+ "purpose": "A 3D Slicer extension that runs the MuscleMap muscle segmentation tool (whole-body and regional models) on a selected volume, installing MuscleMap and its Python dependencies into Slicer's Python and downloading model weights from Zenodo. It is aimed at researchers working with CT/MRI muscle images.",
+ "summary": "No malicious or concealed behavior found in the inspected module. The main concerns are supply-chain and environment hygiene: the MuscleMap package is pip-installed unpinned from the git main branch, a generic top-level \"scripts\" package is installed into Slicer's site-packages, and model weights are fetched from Zenodo with no checksum verification visible in this repo. Packaging, PyTorch dependency handling, and MIT licensing look correct. The review is limited to the extension repo; MuscleMap upstream code, model weights, and model licensing were not inspected.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Inspected WholeBodyMuscleSegmentation.py fully. The install step pip-installs code from an unpinned git branch (line 804), and model weights are downloaded from Zenodo without a visible checksum. No telemetry or concealed behavior was seen; the input volume is written only to a temp dir and passed to a local subprocess."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Good: torch and numpy are constrained to their installed versions (lines 756-762) and PyTorch is provided via the PyTorch build dependency. However, the module installs a generic top-level 'scripts' package into Slicer's site-packages (line 513, 918), and dependency installs run only on user button click, not at import."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMakeLists.txt sets EXTENSION_DEPENDS 'PyTorch', matching build_dependencies in the entry. The Python module and the icon and UI resources referenced by WholeBodyMuscleSegmentation/CMakeLists.txt exist in the file listing. The scm_revision is 'main', which is a moving reference."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is a standard MIT license with a copyright line. Model weights downloaded from Zenodo are not covered by this repo, and their license was not checked, so that remains unknown."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Overall structure is reasonable: a ScriptedLoadableModule, a QProcess-like poll loop with processEvents, cancellation, and parameter-setting via QSettings. Issues: the pip install runs synchronously on the GUI thread (lines 360-379), temp dirs leak on failure (lines 944-950), and export overwrites _labels.csv and .ctbl without confirmation (lines 1088-1111)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents usage, models, export formats, and sample data links. The test module is commented out (Testing/Python/CMakeLists.txt), so there are no automated tests. There is no clinical-use disclaimer, and the tier 1 / Experimental status is declared."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "MuscleMap package installed unpinned from git main branch",
+   "file": "WholeBodyMuscleSegmentation/WholeBodyMuscleSegmentation.py",
+   "line_start": 802,
+   "line_end": 805,
+   "evidence": "slicer.util.pip_install([\n    \"--no-deps\", \"--upgrade\", \"--force-reinstall\",\n    \"git+https://github.com/MuscleMap/MuscleMap.git\",\n])",
+   "explanation": "On the user clicking 'Install MuscleMap dependencies', the module runs pip install from the mutable git default branch of an external repository. Whatever commit is on main at install time executes inside Slicer's Python, with no revision pin or hash check. A compromised or unreviewed upstream commit would therefore reach users without any change in this extension. The extension's own version (__version__ = '1.0.0') does not identify the installed MuscleMap code.",
+   "suggestion": "Pin the install to a tagged release or commit SHA (for example git+https://github.com/MuscleMap/MuscleMap.git@<tag-or-sha>), and document the pinned version alongside __version__.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Generic top-level 'scripts' package is used and installed into Slicer's site-packages",
+   "file": "WholeBodyMuscleSegmentation/WholeBodyMuscleSegmentation.py",
+   "line_start": 513,
+   "line_end": 513,
+   "evidence": "spec = importlib.util.find_spec(\"scripts\")",
+   "explanation": "The module locates and runs a package named 'scripts' (find_spec('scripts') and 'python -m scripts.mm_segment'). 'scripts' is a very generic top-level module name that other packages may also install, so the module may pick up or shadow a different package. The package is installed into Slicer's shared environment, where it is importable by any code in Slicer. This pollutes the shared namespace for users who never open the module.",
+   "suggestion": "Rely on the upstream package's real importable name, or verify that the found 'scripts' package is MuscleMap (for example by checking mm_util.py content or a version marker) before using it. Document the side effect of installing a top-level 'scripts' package.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Model weights downloaded from Zenodo without integrity verification in this repo",
+   "file": "WholeBodyMuscleSegmentation/WholeBodyMuscleSegmentation.py",
+   "line_start": 606,
+   "line_end": 615,
+   "evidence": "for f in self._fetch_json(url).get(\"files\", []):\n            if f.get(\"key\") == jsonFilename:\n                return self._fetch_json(f[\"links\"][\"self\"])",
+   "explanation": "Models (.pth weights and json) are fetched from Zenodo by the upstream mm_segment tool, and the json fallback is fetched directly by this module (lines 601-615). No checksum or pinned record hash is checked here. Loading a tampered .pth file with torch.load could execute code, and this extension has no visibility into that step.",
+   "suggestion": "Verify Zenodo file checksums (the Zenodo API exposes them) before use, and confirm upstream loads weights with weights_only=True or equivalent. Document the trust model for model downloads.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Blocking GUI-thread pip installation",
+   "file": "WholeBodyMuscleSegmentation/WholeBodyMuscleSegmentation.py",
+   "line_start": 372,
+   "line_end": 379,
+   "evidence": "self.logic.ensureDependencies()\n            self.updateModelComboBoxes()",
+   "explanation": "onInstallClicked calls ensureDependencies synchronously, which runs multiple slicer.util.pip_install calls (possibly large downloads such as scipy and scikit-learn) on the Qt main thread. The UI can freeze for minutes, and no progress updates are shown beyond the static dialog.",
+   "suggestion": "Run pip installs off the GUI thread or with explicit progress, and keep the progress dialog responsive.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Input volume copy left in temp dir on failure and export silently overwrites sidecar files",
+   "file": "WholeBodyMuscleSegmentation/WholeBodyMuscleSegmentation.py",
+   "line_start": 1088,
+   "line_end": 1111,
+   "evidence": "csvPath = base + \"_labels.csv\"\n        labelsJson = segmentationNode.GetAttribute(self.LABELS_ATTRIBUTE)",
+   "explanation": "On failure, runSegmentation keeps tempDir (containing the patient input volume) on disk and does not clean it up. Export writes _labels.csv and .ctbl next to the chosen path without a confirmation prompt, so existing files with those names are overwritten silently.",
+   "suggestion": "Ask before overwriting existing sidecar files, and clean up or warn about the temp dir containing patient data after failures.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No automated tests and no clinical-use disclaimer",
+   "file": "WholeBodyMuscleSegmentation/Testing/Python/CMakeLists.txt",
+   "line_start": 2,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The only test hook is commented out (Testing/Python/CMakeLists.txt line 2), so nothing verifies segmentation or export. The help text and README do not state that output is research-only and not for clinical decisions.",
+   "suggestion": "Add at least a smoke test (label-table parsing and export), and add a research-use disclaimer to the module help text.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Upstream MuscleMap source (github.com/MuscleMap/MuscleMap), including mm_segment.py, mm_util.py, and any torch.load calls.",
+  "Zenodo model records, their checksums, and their license terms.",
+  "The .ui file (Resources/UI/WholeBodyMuscleSegmentation.ui) contents and the icon, beyond existence.",
+  "The exact commit at scm_revision 'main' was not resolved; the review relies on the provided source reference.",
+  "CI or build results for the extension were not available.",
+  "Runtime behavior under Slicer was not run."
+ ],
+ "questions_for_author": []
+}

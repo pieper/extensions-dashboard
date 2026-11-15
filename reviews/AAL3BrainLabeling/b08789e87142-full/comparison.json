@@ -1,0 +1,1316 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Result exports overwrite files and trust volume names as paths",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "AAL3BrainLabeling.py",
+   "line": 320,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Result exports overwrite files and trust volume names as paths",
+     "file": "AAL3BrainLabeling.py",
+     "line_start": 320,
+     "line_end": 323,
+     "evidence": "        fileName = f\"{volName}_AAL3_Morphometry_Results.csv\"\n        csvPath = os.path.join(outDir, fileName)\n        \n        with open(csvPath, \"w\", newline='') as f:",
+     "explanation": "Rerunning an analysis with the same volume name in the chosen results folder silently truncates the previous morphometry CSV; the matrix export similarly overwrites its prior file. MRML node names can also contain absolute paths or parent-directory components, allowing a supplied or renamed volume to direct the generated filename outside the chosen folder and overwrite a matching file there.",
+     "suggestion": "Generate safe basename-only output names, check containment within the selected directory, and use unique outputs or explicit overwrite confirmation for both exports.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AAL3BrainLabeling.py",
+      "line": 320
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:320-323 opens f\"{volName}_AAL3_Morphometry_Results.csv\" with \"w\" in the user-chosen outDir, so a rerun overwrites the earlier CSV. Overwriting results of the same analysis is expected behaviour. Volume names come from the user's own scene or files, and I found no remote or untrusted-input path to harm. This is a hardening/robustness issue, not blocking safety."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:163 obtains `volName = inputVolume.GetName()`; lines 320-323 use `fileName = f\"{volName}_AAL3_Morphometry_Results.csv\"`, `csvPath = os.path.join(outDir, fileName)`, and `with open(csvPath, \"w\", newline='') as f:`. Lines 368-369 similarly write the matrix with `np.savetxt`. Existing matching output is overwritten without confirmation; an absolute or traversal-containing node name can direct the suffix-constrained output outside the chosen directory. This is a concrete potential loss of user data, though the missing template visible in this checkout currently prevents reaching export."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In AAL3BrainLabeling.py:320-323 and 368-369, `volName` (from `inputVolume.GetName()` at line 163) is formatted directly into `f\"{volName}_AAL3_Morphometry_Results.csv\"` and `f\"{volName}_Connectome_Matrix.csv\"` and opened with `\"w\"`. Rerunning with the same volume name overwrites the previous output in `outDir`, and `/` or `..` in a custom MRML node name is not sanitized. However, this is standard local file export behavior into a user-selected directory (`outDir`), not a blocking security vulnerability."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Centroid statistic is not enabled in SegmentStatisticsLogic, producing an all-zero connectome matrix",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AAL3BrainLabeling.py",
+   "line": 297,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Centroid statistic is not enabled in SegmentStatisticsLogic, producing an all-zero connectome matrix",
+     "file": "AAL3BrainLabeling.py",
+     "line_start": 297,
+     "line_end": 304,
+     "evidence": "    def volumeStatistics(self, segmentation, volume):\n        \"\"\"Utilizes Slicer's SegmentStatistics module for metric computation.\"\"\"\n        import SegmentStatistics\n        logic = SegmentStatistics.SegmentStatisticsLogic()\n        logic.getParameterNode().SetParameter(\"Segmentation\", segmentation.GetID())\n        logic.getParameterNode().SetParameter(\"ScalarVolume\", volume.GetID())\n        logic.computeStatistics()\n        return logic.getStatistics()",
+     "explanation": "`volumeStatistics` computes statistics via `SegmentStatisticsLogic` using default parameters, and `connectome()` then calls `self.getCentroid(stats, sid)` which searches for `'centroid'` in the statistics keys (`for k in stats.keys(): if len(k) == 2 and k[0] == sid and 'centroid' in k[1].lower(): return stats[k]`). In Slicer's `LabelmapSegmentStatisticsPlugin`, `centroid_ras` is NOT enabled by default (`centroid_ras` must be explicitly enabled via `logic.getParameterNode().SetParameter(\"LabelmapSegmentStatisticsPlugin.centroid_ras.enabled\", str(True))`). Because it is not enabled, `getCentroid` always falls back to `(0.0, 0.0, 0.0)` for every region, causing the exported `*_Connectome_Matrix.csv` to be an all-zero matrix.",
+     "suggestion": "Enable the centroid measurement before calling `logic.computeStatistics()`:\n`logic.getParameterNode().SetParameter(\"LabelmapSegmentStatisticsPlugin.centroid_ras.enabled\", str(True))`",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AAL3BrainLabeling.py",
+      "line": 297
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (2 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:297-304 and 312-316, 356-369: volumeStatistics never enables the centroid measurement. As far as I recall, the LabelmapSegmentStatisticsPlugin leaves centroid_ras off by default, though I could not run Slicer to check. If so, getCentroid falls back to (0,0,0) for every segment, and connectome() writes an all-zero matrix with no warning. The README (line 18) advertises the connectome."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "unsure",
+     "severity": null,
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:299-303 creates `logic = SegmentStatistics.SegmentStatisticsLogic()` and sets only `\"Segmentation\"` and `\"ScalarVolume\"` before `logic.computeStatistics()`. Lines 312-316 return the origin if no centroid key exists, and lines 360-366 calculate distances from those values. However, the Slicer SegmentStatistics implementation and its default enabled measurements are not present in the inspected repository, so I cannot verify the claim that the normal configuration always omits centroids or produces an all-zero matrix."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AAL3BrainLabeling.py:297-304, `volumeStatistics()` initializes `SegmentStatistics.SegmentStatisticsLogic()` and calls `computeStatistics()` without enabling `LabelmapSegmentStatisticsPlugin.centroid_ras.enabled` (which defaults to False in Slicer's LabelmapSegmentStatisticsPlugin). Consequently, no key containing `'centroid'` is present in `stats`, `getCentroid()` (lines 312-316) always returns `(0.0, 0.0, 0.0)`, and `connectome()` (lines 356-369) produces an all-zero distance matrix."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Listed template resource may be absent from the repository",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "info",
+    "info"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 35,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "major",
+     "title": "Listed template resource may be absent from the repository",
+     "file": "CMakeLists.txt",
+     "line_start": 35,
+     "line_end": 35,
+     "evidence": "Resources/Templates/MNI152_T1_1mm.nii.gz",
+     "explanation": "The CMake resource list includes the 10 MB MNI152 template. The file listing for Resources does not show it, although the scan hint says it exists. If it is missing, configure or install fails, or registration fails at runtime with 'Template missing'. The README tree does show the file.",
+     "suggestion": "Confirm the template is committed at the pinned revision. Alternatively download it on demand with a checksum, or use a template available from the Slicer sample data.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 35
+     }
+    },
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "10 MB template volume committed to git and unused inconsistent CSV resource",
+     "file": "CMakeLists.txt",
+     "line_start": 31,
+     "line_end": 37,
+     "evidence": "set(MODULE_PYTHON_RESOURCES\n  Resources/AAL3BrainLabeling.png\n  Resources/Atlas/AAL3v1_1mm.nii.gz\n  Resources/Atlas/AAL3_ColorTable.ctbl\n  Resources/Templates/MNI152_T1_1mm.nii.gz\n  Resources/Labels/AAL3_labels.csv\n)",
+     "explanation": "The repository commits a 10 MB NIfTI template (`Resources/Templates/MNI152_T1_1mm.nii.gz`) and a 1.7 MB screenshot (`Screenshots/Screenshot.png`) directly into git, and installs the template as a module resource. While functional, Slicer extensions generally prefer downloading large template/atlas data on demand (e.g., via `SampleData`) or hosting screenshots externally/in separate branches to keep git repositories and extension packages lightweight. Additionally, `Resources/Labels/AAL3_labels.csv` is installed but never referenced in `AAL3BrainLabeling.py` (and its label names for IDs 115–170 differ from the actual AAL3v1 color table in `Resources/Atlas/AAL3_ColorTable.ctbl`).",
+     "suggestion": "Consider downloading large template files on demand with caching, and remove or reconcile the unused `Resources/Labels/AAL3_labels.csv` file.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 31
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "info",
+     "title": "Bundled atlas redistribution terms need verification",
+     "file": "CMakeLists.txt",
+     "line_start": 31,
+     "line_end": 35,
+     "evidence": "  set(MODULE_PYTHON_RESOURCES\n    Resources/AAL3BrainLabeling.png\n    Resources/Atlas/AAL3v1_1mm.nii.gz\n    Resources/Atlas/AAL3_ColorTable.ctbl\n    Resources/Templates/MNI152_T1_1mm.nii.gz",
+     "explanation": "The package includes an AAL3 atlas and MNI template, but the inspected license identifies only the extension authors and the README cites an atlas paper without identifying asset-specific redistribution terms. This does not establish that permission is absent; it leaves the third-party distribution requirement unverified.",
+     "suggestion": "Document the exact source, copyright holders, and applicable redistribution permissions for each third-party image and derived label data.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 31
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (2 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "CMakeLists.txt:35 lists Resources/Templates/MNI152_T1_1mm.nii.gz. The directory listing of Resources shows no Templates folder, and the file is absent. Only the README tree (line 65) mentions it. The scripted-module macro copies listed resources, so the build or install will likely fail. If it doesn't, registration at AAL3BrainLabeling.py:203-205 fails with 'Template missing', and the core pipeline cannot run. Redistribution terms for the AAL3 atlas and the MNI template are also not stated; LICENSE.txt is MIT for the authors only. That is an unverified point, not a proven absence."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "unsure",
+     "severity": null,
+     "rating": null,
+     "reason": "CMakeLists.txt:31-36 includes `Resources/Templates/MNI152_T1_1mm.nii.gz`; AAL3BrainLabeling.py:201-205 checks that path and returns failure if absent. The available file listing has no Resources/Templates files, but the disputed item reports a contrary scan hint that the 10 MB file exists. The listing may not establish the complete Git contents, so absence and consequent package failure remain unverified. README.md:64-65 also lists the template. CMakeLists.txt:33 and LICENSE.txt:3-8 do not establish asset-specific atlas redistribution permission; that requires provenance and terms, not an assumption of missing permission."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In CMakeLists.txt:31-37, `Resources/Templates/MNI152_T1_1mm.nii.gz` is listed in `MODULE_PYTHON_RESOURCES`, and AAL3BrainLabeling.py:201-205 requires it at runtime (`if not os.path.exists(templatePath): slicer.util.errorDisplay(...)`). Listing `Resources/` via `list_files` shows only `AAL3BrainLabeling.png`, `Atlas/AAL3_ColorTable.ctbl`, `Atlas/AAL3v1_1mm.nii.gz`, and `Labels/AAL3_labels.csv` (though the tool platform may omit ~10 MB binaries from the checkout). Even if present, bundling a 10 MB MNI template and 1.7 MB screenshot in git and lacking explicit license provenance for the bundled MNI/AAL3 assets are worth noting as minor/info points."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Missing centroid measurements silently produce fabricated distances",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AAL3BrainLabeling.py",
+   "line": 312,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Missing centroid measurements silently produce fabricated distances",
+     "file": "AAL3BrainLabeling.py",
+     "line_start": 312,
+     "line_end": 316,
+     "evidence": "    def getCentroid(self, stats, sid):\n        \"\"\"Extracts 3D spatial center coordinates for distance matrix calculations.\"\"\"\n        for k in stats.keys():\n            if len(k) == 2 and k[0] == sid and 'centroid' in k[1].lower(): return stats[k]\n        return (0.0, 0.0, 0.0)",
+     "explanation": "The statistics setup does not explicitly enable a centroid measurement. If the active SegmentStatistics configuration does not provide it, the pipeline substitutes the origin and exports zero or otherwise incorrect distances as successful results, with no warning.",
+     "suggestion": "Explicitly enable the intended centroid measurement, verify each region has a valid centroid, and report missing measurements instead of substituting coordinates.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AAL3BrainLabeling.py",
+      "line": 312
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:312-316 returns (0.0, 0.0, 0.0) silently when no centroid key is found. Exported distances are then wrong, with no error or warning. This is the same root cause as D2."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:312-316 searches for `'centroid' in k[1].lower()` and otherwise executes `return (0.0, 0.0, 0.0)`. Lines 360-369 then compute and export distances from those coordinates without a missing-measurement warning. If any centroid is absent, the matrix contains fabricated distances, including all zeros if none are present. The actual default availability of centroid measurements was not verified."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AAL3BrainLabeling.py:297-304 and 312-316, `volumeStatistics()` does not enable `LabelmapSegmentStatisticsPlugin.centroid_ras.enabled`, and `getCentroid()` falls back to `(0.0, 0.0, 0.0)` without warning when no `'centroid'` key is found, causing `connectome()` (lines 356-369) to silently export an all-zero distance matrix CSV."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Non-standard CPACK override with undefined EXTENSION_NAME; missing extension config include",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 51,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "major",
+     "title": "Non-standard CPACK override with undefined EXTENSION_NAME; missing extension config include",
+     "file": "CMakeLists.txt",
+     "line_start": 49,
+     "line_end": 52,
+     "evidence": "set(CPACK_INSTALL_CMAKE_PROJECTS \"${CMAKE_BINARY_DIR};${EXTENSION_NAME};ALL;/\")\ninclude(${Slicer_EXTENSION_CPACK})",
+     "explanation": "The extension overrides CPACK_INSTALL_CMAKE_PROJECTS with an undefined EXTENSION_NAME and does not include Slicer_EXTENSION_GENERATE_CONFIG. This can break extension packaging in the factory build, or produce a package without the module.",
+     "suggestion": "Follow the standard extension template: include(${Slicer_EXTENSION_GENERATE_CONFIG}) before the CPACK include, and remove the manual CPACK_INSTALL_CMAKE_PROJECTS line.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 51
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, minor (2 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "CMakeLists.txt:51-52 sets CPACK_INSTALL_CMAKE_PROJECTS with ${EXTENSION_NAME}, which this file never defines. It also never includes Slicer_EXTENSION_GENERATE_CONFIG. This departs from the standard template and is sloppy. The include of Slicer_EXTENSION_CPACK follows the set and, as far as I recall, defines the same variable itself, so the override is probably harmless in the factory build. Not a confirmed breakage."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "unsure",
+     "severity": null,
+     "rating": null,
+     "reason": "CMakeLists.txt:51-52 does set `CPACK_INSTALL_CMAKE_PROJECTS \"${CMAKE_BINARY_DIR};${EXTENSION_NAME};ALL;/\"` and include `${Slicer_EXTENSION_CPACK}`; the inspected file does not explicitly define EXTENSION_NAME or include Slicer_EXTENSION_GENERATE_CONFIG. But CMakeLists.txt:19-20 also loads Slicer's build environment, whose variable definitions and packaging behavior are unavailable here. These observations alone do not prove the variable is undefined or packaging fails."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In CMakeLists.txt:3, `project(AAL3BrainLabeling)` sets `PROJECT_NAME`, not `EXTENSION_NAME`. Line 51 sets `CPACK_INSTALL_CMAKE_PROJECTS \"${CMAKE_BINARY_DIR};${EXTENSION_NAME};ALL;/\"` where `EXTENSION_NAME` is undefined (evaluating to empty), prior to `include(${Slicer_EXTENSION_CPACK})` at line 52 (which normally sets `EXTENSION_NAME` to `${PROJECT_NAME}` if not defined and sets `CPACK_INSTALL_CMAKE_PROJECTS` properly). Overriding `CPACK_INSTALL_CMAKE_PROJECTS` beforehand with an empty project name can break CPack packaging."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Registration transform direction maps moving subject to fixed MNI template, warping the MNI atlas in the wrong direction",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AAL3BrainLabeling.py",
+   "line": 183,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Registration transform direction maps moving subject to fixed MNI template, warping the MNI atlas in the wrong direction",
+     "file": "AAL3BrainLabeling.py",
+     "line_start": 183,
+     "line_end": 191,
+     "evidence": "        # 4. Volumetric feature extraction\n        self.updateUI(\"Step 4/5: Computing Regional Morphometry...\", 85, progress, statusLabel)\n        stats = self.volumeStatistics(segmentation, regVol)\n        \n        # 5. Multimodal Data Export\n        self.updateUI(\"Step 5/5: Exporting Results and Computing Matrices...\", 90, progress, statusLabel)\n        self.exportStats(stats, outDir, segmentation, volName)\n        self.asymmetry(stats, segmentation)\n        self.connectome(stats, outDir, volName)",
+     "explanation": "In `registration(self, volume, volName)`, Elastix registers the subject `volume` (moving) to `templateNode` (fixed: `MNI152_T1_1mm`). In Elastix/SlicerElastix, `outputTransformNode` represents the transform that maps moving (`volume`, subject space) to fixed (`templateNode`, MNI space) — i.e., in Slicer's transform convention, applying that transform to a node moves it from subject space to MNI space (or vice versa depending on Elastix's direction: Elastix computes a transform in fixed-to-moving pull / moving-to-fixed push in Slicer). Specifically, `SlicerElastix`'s `registerVolumes(movingVolumeNode=volume, fixedVolumeNode=templateNode, outputTransformNode=transformNode)` produces a transform that transforms the moving volume (`volume`, patient) into the fixed volume (`templateNode`, MNI152) space! Applying that same `transform` to `atlasNode` (which is already in MNI152 space) without inverting it (`transform.Inverse()`) warps the MNI atlas by the patient-to-MNI transform rather than the MNI-to-patient inverse transform, misaligning the atlas with the patient's anatomy. Furthermore, `regVol` returned from `registration` is just the untransformed `volN4` (`return volume, transformNode`).",
+     "suggestion": "Register the MNI template (moving) to the subject volume (fixed) — i.e. `logic.registerVolumes(templateNode, volume, ...)` — or invert the transform before applying and hardening it onto `atlasNode` so that the MNI atlas is mapped into the patient's native space.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AAL3BrainLabeling.py",
+      "line": 183
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "still disputed",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "no",
+     "severity": "info",
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:252 calls logic.registerVolumes(volume, templateNode, ...). SlicerElastix's signature is registerVolumes(fixedVolumeNode, movingVolumeNode, ...), so the subject is fixed and the MNI template is moving. The resulting transform maps template/atlas space onto the subject, and it is applied to the atlas at lines 280-281. That is the correct direction, so the finding is wrong."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "unsure",
+     "severity": null,
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:252 calls `logic.registerVolumes(volume, templateNode, parameterFilenames=paths, outputTransformNode=transformNode)` and lines 280-281 apply and harden that transform on the atlas. The SlicerElastix API signature and transform convention are not available in this checkout, so neither the finding's assignment of fixed versus moving arguments nor the alleged wrong direction is established. The pipeline's template-absence check at lines 201-205 also prevents verifying a run from these files."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "info",
+     "rating": null,
+     "reason": "In AAL3BrainLabeling.py:174, 207, 252, `registration()` calls `logic.registerVolumes(volume, templateNode, parameterFilenames=paths, outputTransformNode=transformNode)`. In SlicerElastix, `registerVolumes(fixedVolumeNode, movingVolumeNode, ...)` takes `fixedVolumeNode` as the first positional argument and `movingVolumeNode` as the second. Here `volume` (subject N4 volume) is passed first (fixed) and `templateNode` (MNI152) is passed second (moving), or if the author intended subject->MNI registration, the comment/README conflicts with the code; furthermore, `registration()` returns the untransformed `volume` as `regVol` (line 261), and `atlasMapping()` applies `transformNode` to `atlasNode` (lines 280-281). Because `SlicerElastix.registerVolumes(fixedVolumeNode=volume, movingVolumeNode=templateNode)` actually computes a transform that maps moving (`templateNode`/MNI) to fixed (`volume`/subject), wait—let's check SlicerElastix's `registerVolumes` signature: `def registerVolumes(self, fixedVolumeNode, movingVolumeNode, parameterFilenames=None, outputVolumeNode=None, outputTransformNode=None, ...)`. Passing `(volume, templateNode)` makes `volume` (subject) the FIXED volume and `templa"
+    }
+   }
+  },
+  {
+   "title": "Asymmetry results are only printed to stdout and default output path is not shown to the user",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AAL3BrainLabeling.py",
+   "line": 106,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Asymmetry results are only printed to stdout and default output path is not shown to the user",
+     "file": "AAL3BrainLabeling.py",
+     "line_start": 106,
+     "line_end": 111,
+     "evidence": "    def selectOutput(self):\n        \"\"\"Opens dialog to select the directory for saving clinical results.\"\"\"\n        directory = qt.QFileDialog.getExistingDirectory()\n        if directory:\n            self.outputPath = directory\n            self.outputButton.text = directory",
+     "explanation": "If the user runs the pipeline without clicking `Select Results Folder`, `self.outputPath` defaults to `slicer.app.temporaryPath` (line 77), and the UI does not show where the CSV files were written or save the hemispheric asymmetry indices to a file (they are only printed to the Python console in `asymmetry()`).",
+     "suggestion": "Display the output path in the UI and consider exporting the Hemispheric Asymmetry Indices to a CSV file alongside the morphometry and connectome CSVs.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "AAL3BrainLabeling.py",
+      "line": 106
+     }
+    }
+   ]
+  },
+  {
+   "title": "Bundled atlas and template redistribution terms not stated",
+   "category": "license",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 100,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "Bundled atlas and template redistribution terms not stated",
+     "file": "README.md",
+     "line_start": 99,
+     "line_end": 101,
+     "evidence": "If you use this pipeline in your research, please ensure you cite the foundational AAL3 atlas paper:",
+     "explanation": "The repository bundles the AAL3 atlas, its labels and the MNI152 template. LICENSE.txt covers only the authors' own code as MIT. The upstream licenses are not documented, and AAL3 is distributed under its own terms.",
+     "suggestion": "Add a NOTICE or license section for the AAL3 atlas and the MNI152 template, with sources and terms.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 100
+     }
+    }
+   ]
+  },
+  {
+   "title": "Distance matrix has no region identifiers",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AAL3BrainLabeling.py",
+   "line": 356,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Distance matrix has no region identifiers",
+     "file": "AAL3BrainLabeling.py",
+     "line_start": 356,
+     "line_end": 361,
+     "evidence": "    def connectome(self, stats, outDir, volName):\n        \"\"\"Generates a comprehensive Euclidean distance structural connectome matrix.\"\"\"\n        ids = stats['SegmentIDs']\n        n = len(ids)\n        matrix = np.zeros((n, n))\n        centroids = [self.getCentroid(stats, sid) for sid in ids]",
+     "explanation": "The matrix is saved as numbers only, without row or column names. Researchers cannot reliably associate its positions with anatomical regions from that file alone, particularly when regions are absent.",
+     "suggestion": "Write region names or IDs as row and column headers, or export an ordered companion mapping.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AAL3BrainLabeling.py",
+      "line": 356
+     }
+    }
+   ]
+  },
+  {
+   "title": "License terms for bundled MNI152 template and AAL3v1 atlas volumes are not documented in LICENSE.txt",
+   "category": "license",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "LICENSE.txt",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "License terms for bundled MNI152 template and AAL3v1 atlas volumes are not documented in LICENSE.txt",
+     "file": "LICENSE.txt",
+     "line_start": 1,
+     "line_end": 3,
+     "evidence": "MIT License\n \nCopyright (c) 2026 Mustafa Sakci, Niyazi Acer",
+     "explanation": "The extension's code is licensed under MIT (`LICENSE.txt`), and `README.md` cites Rolls et al. (2020) for the AAL3 atlas. However, the repository bundles third-party neuroimaging datasets (`Resources/Atlas/AAL3v1_1mm.nii.gz` and `Resources/Templates/MNI152_T1_1mm.nii.gz`) without documenting their upstream licenses or redistribution terms (e.g., the MNI152 template license and the AAL3v1 atlas distribution terms from GIN/SPM). Users and distributors need clarity on the license terms covering the bundled atlas and template data.",
+     "suggestion": "Add a section in `LICENSE.txt` or `README.md` stating the license and copyright/redistribution terms for the bundled `AAL3v1_1mm.nii.gz` atlas and `MNI152_T1_1mm.nii.gz` template.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "LICENSE.txt",
+      "line": 1
+     }
+    }
+   ]
+  },
+  {
+   "title": "Manual CPACK_INSTALL_CMAKE_PROJECTS uses undefined EXTENSION_NAME variable",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 5,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Manual CPACK_INSTALL_CMAKE_PROJECTS uses undefined EXTENSION_NAME variable",
+     "file": "CMakeLists.txt",
+     "line_start": 49,
+     "line_end": 52,
+     "evidence": "#-----------------------------------------------------------------------------\n# Extension Packaging (Slicer_extension_build yerine standart CPACK)\n#-----------------------------------------------------------------------------\nset(CPACK_INSTALL_CMAKE_PROJECTS \"${CMAKE_BINARY_DIR};${EXTENSION_NAME};ALL;/\")\ninclude(${Slicer_EXTENSION_CPACK})",
+     "explanation": "In CMakeLists.txt, the project name is set via `project(AAL3BrainLabeling)` (which sets `PROJECT_NAME`), and `EXTENSION_NAME` is never explicitly defined before `set(CPACK_INSTALL_CMAKE_PROJECTS \"${CMAKE_BINARY_DIR};${EXTENSION_NAME};ALL;/\")`. Furthermore, `include(${Slicer_EXTENSION_CPACK})` already sets `CPACK_INSTALL_CMAKE_PROJECTS` appropriately using `EXTENSION_NAME` (defaulted from `PROJECT_NAME`). Setting `CPACK_INSTALL_CMAKE_PROJECTS` manually with an undefined `${EXTENSION_NAME}` before `include(${Slicer_EXTENSION_CPACK})` can result in a malformed CPack project installation entry (`\"...;;ALL;/\"`) or conflict with Slicer's standard extension packaging macro.",
+     "suggestion": "Remove line 51 (`set(CPACK_INSTALL_CMAKE_PROJECTS ...)`) and rely solely on `include(${Slicer_EXTENSION_CPACK})`, which handles CPack configuration automatically.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "CMakeLists.txt",
+      "line": 5
+     }
+    }
+   ]
+  },
+  {
+   "title": "README inconsistent with code; no research-use disclaimer",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 87,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "README inconsistent with code; no research-use disclaimer",
+     "file": "README.md",
+     "line_start": 84,
+     "line_end": 88,
+     "evidence": "3. Click **Run FULL Pipeline**.",
+     "explanation": "The README names buttons and settings that differ from the code ('Run FULL Pipeline', 10,000 spatial samples; the code has 'PROCESS SINGLE VOLUME' and 15000). It describes manual installation instead of the extension manager. It does not say the output is for research only, and it gives no registration validation.",
+     "suggestion": "Align the documentation with the UI, add a research-use disclaimer and some validation or sample data.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 87
+     }
+    }
+   ]
+  },
+  {
+   "title": "Registration failure handling and GUI-thread processing",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AAL3BrainLabeling.py",
+   "line": 134,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "Registration failure handling and GUI-thread processing",
+     "file": "AAL3BrainLabeling.py",
+     "line_start": 253,
+     "line_end": 256,
+     "evidence": "        except Exception as e:\n            print(f\"Elastix Error: {str(e)}\")\n            slicer.mrmlScene.RemoveNode(transformNode)",
+     "explanation": "The Elastix exception is only printed. The caller then reports an error status, but the progress bar stays visible and no error dialog is shown. In batch mode, an exception in one file aborts the whole run. Long registration blocks the UI.",
+     "suggestion": "Show errors via slicer.util.errorDisplay, wrap per-file batch processing in try/except, and use a busy cursor or run the work off the GUI thread.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "AAL3BrainLabeling.py",
+      "line": 134
+     }
+    }
+   ]
+  },
+  {
+   "title": "Registration fallback modifies the shared Python import path",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AAL3BrainLabeling.py",
+   "line": 45,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Registration fallback modifies the shared Python import path",
+     "file": "AAL3BrainLabeling.py",
+     "line_start": 213,
+     "line_end": 219,
+     "evidence": "            try:\n                import Elastix\n            except ImportError:\n                elastix_dir = os.path.dirname(slicer.modules.elastix.path)\n                if elastix_dir not in sys.path:\n                    sys.path.append(elastix_dir)\n                import Elastix",
+     "explanation": "When the first import fails, registration permanently adds the Elastix module directory to the shared interpreter's import search path, potentially changing subsequent imports in other modules.",
+     "suggestion": "Use the supported SlicerElastix import mechanism without a permanent sys.path modification, or limit and restore any temporary path change.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "AAL3BrainLabeling.py",
+      "line": 45
+     }
+    }
+   ]
+  },
+  {
+   "title": "No automated module test included",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 27,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "No automated module test included",
+     "file": "CMakeLists.txt",
+     "line_start": 27,
+     "line_end": 29,
+     "evidence": "set(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n)",
+     "explanation": "The extension does not include a `ScriptedLoadableModuleTest` class or any automated self-tests in `CMakeLists.txt` or `AAL3BrainLabeling.py`.",
+     "suggestion": "Add a `AAL3BrainLabelingTest(ScriptedLoadableModuleTest)` class and register the test in `CMakeLists.txt` (`WITH_GENERIC_TESTS` or `slicer_add_python_unittest`).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 27
+     }
+    }
+   ]
+  },
+  {
+   "title": "Swallowed exceptions and default output path",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "AAL3BrainLabeling.py",
+   "line": 77,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "info",
+     "title": "Swallowed exceptions and default output path",
+     "file": "AAL3BrainLabeling.py",
+     "line_start": 77,
+     "line_end": 77,
+     "evidence": "        self.outputPath = slicer.app.temporaryPath",
+     "explanation": "The logo-loading and Segment Editor switch exceptions are silently ignored. The default output directory is the Slicer temporary path, so results can be lost without the user noticing.",
+     "suggestion": "Require the user to choose an output folder, or tell them where the files were written.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "AAL3BrainLabeling.py",
+      "line": 77
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Result exports overwrite files and trust volume names as paths",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "AAL3BrainLabeling.py",
+   "line": 320,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Result exports overwrite files and trust volume names as paths",
+     "file": "AAL3BrainLabeling.py",
+     "line_start": 320,
+     "line_end": 323,
+     "evidence": "        fileName = f\"{volName}_AAL3_Morphometry_Results.csv\"\n        csvPath = os.path.join(outDir, fileName)\n        \n        with open(csvPath, \"w\", newline='') as f:",
+     "explanation": "Rerunning an analysis with the same volume name in the chosen results folder silently truncates the previous morphometry CSV; the matrix export similarly overwrites its prior file. MRML node names can also contain absolute paths or parent-directory components, allowing a supplied or renamed volume to direct the generated filename outside the chosen folder and overwrite a matching file there.",
+     "suggestion": "Generate safe basename-only output names, check containment within the selected directory, and use unique outputs or explicit overwrite confirmation for both exports.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AAL3BrainLabeling.py",
+      "line": 320
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:320-323 opens f\"{volName}_AAL3_Morphometry_Results.csv\" with \"w\" in the user-chosen outDir, so a rerun overwrites the earlier CSV. Overwriting results of the same analysis is expected behaviour. Volume names come from the user's own scene or files, and I found no remote or untrusted-input path to harm. This is a hardening/robustness issue, not blocking safety."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:163 obtains `volName = inputVolume.GetName()`; lines 320-323 use `fileName = f\"{volName}_AAL3_Morphometry_Results.csv\"`, `csvPath = os.path.join(outDir, fileName)`, and `with open(csvPath, \"w\", newline='') as f:`. Lines 368-369 similarly write the matrix with `np.savetxt`. Existing matching output is overwritten without confirmation; an absolute or traversal-containing node name can direct the suffix-constrained output outside the chosen directory. This is a concrete potential loss of user data, though the missing template visible in this checkout currently prevents reaching export."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In AAL3BrainLabeling.py:320-323 and 368-369, `volName` (from `inputVolume.GetName()` at line 163) is formatted directly into `f\"{volName}_AAL3_Morphometry_Results.csv\"` and `f\"{volName}_Connectome_Matrix.csv\"` and opened with `\"w\"`. Rerunning with the same volume name overwrites the previous output in `outDir`, and `/` or `..` in a custom MRML node name is not sanitized. However, this is standard local file export behavior into a user-selected directory (`outDir`), not a blocking security vulnerability."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Centroid statistic is not enabled in SegmentStatisticsLogic, producing an all-zero connectome matrix",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AAL3BrainLabeling.py",
+   "line": 297,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Centroid statistic is not enabled in SegmentStatisticsLogic, producing an all-zero connectome matrix",
+     "file": "AAL3BrainLabeling.py",
+     "line_start": 297,
+     "line_end": 304,
+     "evidence": "    def volumeStatistics(self, segmentation, volume):\n        \"\"\"Utilizes Slicer's SegmentStatistics module for metric computation.\"\"\"\n        import SegmentStatistics\n        logic = SegmentStatistics.SegmentStatisticsLogic()\n        logic.getParameterNode().SetParameter(\"Segmentation\", segmentation.GetID())\n        logic.getParameterNode().SetParameter(\"ScalarVolume\", volume.GetID())\n        logic.computeStatistics()\n        return logic.getStatistics()",
+     "explanation": "`volumeStatistics` computes statistics via `SegmentStatisticsLogic` using default parameters, and `connectome()` then calls `self.getCentroid(stats, sid)` which searches for `'centroid'` in the statistics keys (`for k in stats.keys(): if len(k) == 2 and k[0] == sid and 'centroid' in k[1].lower(): return stats[k]`). In Slicer's `LabelmapSegmentStatisticsPlugin`, `centroid_ras` is NOT enabled by default (`centroid_ras` must be explicitly enabled via `logic.getParameterNode().SetParameter(\"LabelmapSegmentStatisticsPlugin.centroid_ras.enabled\", str(True))`). Because it is not enabled, `getCentroid` always falls back to `(0.0, 0.0, 0.0)` for every region, causing the exported `*_Connectome_Matrix.csv` to be an all-zero matrix.",
+     "suggestion": "Enable the centroid measurement before calling `logic.computeStatistics()`:\n`logic.getParameterNode().SetParameter(\"LabelmapSegmentStatisticsPlugin.centroid_ras.enabled\", str(True))`",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AAL3BrainLabeling.py",
+      "line": 297
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (2 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:297-304 and 312-316, 356-369: volumeStatistics never enables the centroid measurement. As far as I recall, the LabelmapSegmentStatisticsPlugin leaves centroid_ras off by default, though I could not run Slicer to check. If so, getCentroid falls back to (0,0,0) for every segment, and connectome() writes an all-zero matrix with no warning. The README (line 18) advertises the connectome."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "unsure",
+     "severity": null,
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:299-303 creates `logic = SegmentStatistics.SegmentStatisticsLogic()` and sets only `\"Segmentation\"` and `\"ScalarVolume\"` before `logic.computeStatistics()`. Lines 312-316 return the origin if no centroid key exists, and lines 360-366 calculate distances from those values. However, the Slicer SegmentStatistics implementation and its default enabled measurements are not present in the inspected repository, so I cannot verify the claim that the normal configuration always omits centroids or produces an all-zero matrix."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AAL3BrainLabeling.py:297-304, `volumeStatistics()` initializes `SegmentStatistics.SegmentStatisticsLogic()` and calls `computeStatistics()` without enabling `LabelmapSegmentStatisticsPlugin.centroid_ras.enabled` (which defaults to False in Slicer's LabelmapSegmentStatisticsPlugin). Consequently, no key containing `'centroid'` is present in `stats`, `getCentroid()` (lines 312-316) always returns `(0.0, 0.0, 0.0)`, and `connectome()` (lines 356-369) produces an all-zero distance matrix."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Listed template resource may be absent from the repository",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "info",
+    "info"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 35,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "major",
+     "title": "Listed template resource may be absent from the repository",
+     "file": "CMakeLists.txt",
+     "line_start": 35,
+     "line_end": 35,
+     "evidence": "Resources/Templates/MNI152_T1_1mm.nii.gz",
+     "explanation": "The CMake resource list includes the 10 MB MNI152 template. The file listing for Resources does not show it, although the scan hint says it exists. If it is missing, configure or install fails, or registration fails at runtime with 'Template missing'. The README tree does show the file.",
+     "suggestion": "Confirm the template is committed at the pinned revision. Alternatively download it on demand with a checksum, or use a template available from the Slicer sample data.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 35
+     }
+    },
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "10 MB template volume committed to git and unused inconsistent CSV resource",
+     "file": "CMakeLists.txt",
+     "line_start": 31,
+     "line_end": 37,
+     "evidence": "set(MODULE_PYTHON_RESOURCES\n  Resources/AAL3BrainLabeling.png\n  Resources/Atlas/AAL3v1_1mm.nii.gz\n  Resources/Atlas/AAL3_ColorTable.ctbl\n  Resources/Templates/MNI152_T1_1mm.nii.gz\n  Resources/Labels/AAL3_labels.csv\n)",
+     "explanation": "The repository commits a 10 MB NIfTI template (`Resources/Templates/MNI152_T1_1mm.nii.gz`) and a 1.7 MB screenshot (`Screenshots/Screenshot.png`) directly into git, and installs the template as a module resource. While functional, Slicer extensions generally prefer downloading large template/atlas data on demand (e.g., via `SampleData`) or hosting screenshots externally/in separate branches to keep git repositories and extension packages lightweight. Additionally, `Resources/Labels/AAL3_labels.csv` is installed but never referenced in `AAL3BrainLabeling.py` (and its label names for IDs 115–170 differ from the actual AAL3v1 color table in `Resources/Atlas/AAL3_ColorTable.ctbl`).",
+     "suggestion": "Consider downloading large template files on demand with caching, and remove or reconcile the unused `Resources/Labels/AAL3_labels.csv` file.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 31
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "info",
+     "title": "Bundled atlas redistribution terms need verification",
+     "file": "CMakeLists.txt",
+     "line_start": 31,
+     "line_end": 35,
+     "evidence": "  set(MODULE_PYTHON_RESOURCES\n    Resources/AAL3BrainLabeling.png\n    Resources/Atlas/AAL3v1_1mm.nii.gz\n    Resources/Atlas/AAL3_ColorTable.ctbl\n    Resources/Templates/MNI152_T1_1mm.nii.gz",
+     "explanation": "The package includes an AAL3 atlas and MNI template, but the inspected license identifies only the extension authors and the README cites an atlas paper without identifying asset-specific redistribution terms. This does not establish that permission is absent; it leaves the third-party distribution requirement unverified.",
+     "suggestion": "Document the exact source, copyright holders, and applicable redistribution permissions for each third-party image and derived label data.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 31
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (2 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "CMakeLists.txt:35 lists Resources/Templates/MNI152_T1_1mm.nii.gz. The directory listing of Resources shows no Templates folder, and the file is absent. Only the README tree (line 65) mentions it. The scripted-module macro copies listed resources, so the build or install will likely fail. If it doesn't, registration at AAL3BrainLabeling.py:203-205 fails with 'Template missing', and the core pipeline cannot run. Redistribution terms for the AAL3 atlas and the MNI template are also not stated; LICENSE.txt is MIT for the authors only. That is an unverified point, not a proven absence."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "unsure",
+     "severity": null,
+     "rating": null,
+     "reason": "CMakeLists.txt:31-36 includes `Resources/Templates/MNI152_T1_1mm.nii.gz`; AAL3BrainLabeling.py:201-205 checks that path and returns failure if absent. The available file listing has no Resources/Templates files, but the disputed item reports a contrary scan hint that the 10 MB file exists. The listing may not establish the complete Git contents, so absence and consequent package failure remain unverified. README.md:64-65 also lists the template. CMakeLists.txt:33 and LICENSE.txt:3-8 do not establish asset-specific atlas redistribution permission; that requires provenance and terms, not an assumption of missing permission."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In CMakeLists.txt:31-37, `Resources/Templates/MNI152_T1_1mm.nii.gz` is listed in `MODULE_PYTHON_RESOURCES`, and AAL3BrainLabeling.py:201-205 requires it at runtime (`if not os.path.exists(templatePath): slicer.util.errorDisplay(...)`). Listing `Resources/` via `list_files` shows only `AAL3BrainLabeling.png`, `Atlas/AAL3_ColorTable.ctbl`, `Atlas/AAL3v1_1mm.nii.gz`, and `Labels/AAL3_labels.csv` (though the tool platform may omit ~10 MB binaries from the checkout). Even if present, bundling a 10 MB MNI template and 1.7 MB screenshot in git and lacking explicit license provenance for the bundled MNI/AAL3 assets are worth noting as minor/info points."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Missing centroid measurements silently produce fabricated distances",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AAL3BrainLabeling.py",
+   "line": 312,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Missing centroid measurements silently produce fabricated distances",
+     "file": "AAL3BrainLabeling.py",
+     "line_start": 312,
+     "line_end": 316,
+     "evidence": "    def getCentroid(self, stats, sid):\n        \"\"\"Extracts 3D spatial center coordinates for distance matrix calculations.\"\"\"\n        for k in stats.keys():\n            if len(k) == 2 and k[0] == sid and 'centroid' in k[1].lower(): return stats[k]\n        return (0.0, 0.0, 0.0)",
+     "explanation": "The statistics setup does not explicitly enable a centroid measurement. If the active SegmentStatistics configuration does not provide it, the pipeline substitutes the origin and exports zero or otherwise incorrect distances as successful results, with no warning.",
+     "suggestion": "Explicitly enable the intended centroid measurement, verify each region has a valid centroid, and report missing measurements instead of substituting coordinates.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AAL3BrainLabeling.py",
+      "line": 312
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:312-316 returns (0.0, 0.0, 0.0) silently when no centroid key is found. Exported distances are then wrong, with no error or warning. This is the same root cause as D2."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:312-316 searches for `'centroid' in k[1].lower()` and otherwise executes `return (0.0, 0.0, 0.0)`. Lines 360-369 then compute and export distances from those coordinates without a missing-measurement warning. If any centroid is absent, the matrix contains fabricated distances, including all zeros if none are present. The actual default availability of centroid measurements was not verified."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AAL3BrainLabeling.py:297-304 and 312-316, `volumeStatistics()` does not enable `LabelmapSegmentStatisticsPlugin.centroid_ras.enabled`, and `getCentroid()` falls back to `(0.0, 0.0, 0.0)` without warning when no `'centroid'` key is found, causing `connectome()` (lines 356-369) to silently export an all-zero distance matrix CSV."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Non-standard CPACK override with undefined EXTENSION_NAME; missing extension config include",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 51,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "major",
+     "title": "Non-standard CPACK override with undefined EXTENSION_NAME; missing extension config include",
+     "file": "CMakeLists.txt",
+     "line_start": 49,
+     "line_end": 52,
+     "evidence": "set(CPACK_INSTALL_CMAKE_PROJECTS \"${CMAKE_BINARY_DIR};${EXTENSION_NAME};ALL;/\")\ninclude(${Slicer_EXTENSION_CPACK})",
+     "explanation": "The extension overrides CPACK_INSTALL_CMAKE_PROJECTS with an undefined EXTENSION_NAME and does not include Slicer_EXTENSION_GENERATE_CONFIG. This can break extension packaging in the factory build, or produce a package without the module.",
+     "suggestion": "Follow the standard extension template: include(${Slicer_EXTENSION_GENERATE_CONFIG}) before the CPACK include, and remove the manual CPACK_INSTALL_CMAKE_PROJECTS line.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 51
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, minor (2 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "CMakeLists.txt:51-52 sets CPACK_INSTALL_CMAKE_PROJECTS with ${EXTENSION_NAME}, which this file never defines. It also never includes Slicer_EXTENSION_GENERATE_CONFIG. This departs from the standard template and is sloppy. The include of Slicer_EXTENSION_CPACK follows the set and, as far as I recall, defines the same variable itself, so the override is probably harmless in the factory build. Not a confirmed breakage."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "unsure",
+     "severity": null,
+     "rating": null,
+     "reason": "CMakeLists.txt:51-52 does set `CPACK_INSTALL_CMAKE_PROJECTS \"${CMAKE_BINARY_DIR};${EXTENSION_NAME};ALL;/\"` and include `${Slicer_EXTENSION_CPACK}`; the inspected file does not explicitly define EXTENSION_NAME or include Slicer_EXTENSION_GENERATE_CONFIG. But CMakeLists.txt:19-20 also loads Slicer's build environment, whose variable definitions and packaging behavior are unavailable here. These observations alone do not prove the variable is undefined or packaging fails."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In CMakeLists.txt:3, `project(AAL3BrainLabeling)` sets `PROJECT_NAME`, not `EXTENSION_NAME`. Line 51 sets `CPACK_INSTALL_CMAKE_PROJECTS \"${CMAKE_BINARY_DIR};${EXTENSION_NAME};ALL;/\"` where `EXTENSION_NAME` is undefined (evaluating to empty), prior to `include(${Slicer_EXTENSION_CPACK})` at line 52 (which normally sets `EXTENSION_NAME` to `${PROJECT_NAME}` if not defined and sets `CPACK_INSTALL_CMAKE_PROJECTS` properly). Overriding `CPACK_INSTALL_CMAKE_PROJECTS` beforehand with an empty project name can break CPack packaging."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Registration transform direction maps moving subject to fixed MNI template, warping the MNI atlas in the wrong direction",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AAL3BrainLabeling.py",
+   "line": 183,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Registration transform direction maps moving subject to fixed MNI template, warping the MNI atlas in the wrong direction",
+     "file": "AAL3BrainLabeling.py",
+     "line_start": 183,
+     "line_end": 191,
+     "evidence": "        # 4. Volumetric feature extraction\n        self.updateUI(\"Step 4/5: Computing Regional Morphometry...\", 85, progress, statusLabel)\n        stats = self.volumeStatistics(segmentation, regVol)\n        \n        # 5. Multimodal Data Export\n        self.updateUI(\"Step 5/5: Exporting Results and Computing Matrices...\", 90, progress, statusLabel)\n        self.exportStats(stats, outDir, segmentation, volName)\n        self.asymmetry(stats, segmentation)\n        self.connectome(stats, outDir, volName)",
+     "explanation": "In `registration(self, volume, volName)`, Elastix registers the subject `volume` (moving) to `templateNode` (fixed: `MNI152_T1_1mm`). In Elastix/SlicerElastix, `outputTransformNode` represents the transform that maps moving (`volume`, subject space) to fixed (`templateNode`, MNI space) — i.e., in Slicer's transform convention, applying that transform to a node moves it from subject space to MNI space (or vice versa depending on Elastix's direction: Elastix computes a transform in fixed-to-moving pull / moving-to-fixed push in Slicer). Specifically, `SlicerElastix`'s `registerVolumes(movingVolumeNode=volume, fixedVolumeNode=templateNode, outputTransformNode=transformNode)` produces a transform that transforms the moving volume (`volume`, patient) into the fixed volume (`templateNode`, MNI152) space! Applying that same `transform` to `atlasNode` (which is already in MNI152 space) without inverting it (`transform.Inverse()`) warps the MNI atlas by the patient-to-MNI transform rather than the MNI-to-patient inverse transform, misaligning the atlas with the patient's anatomy. Furthermore, `regVol` returned from `registration` is just the untransformed `volN4` (`return volume, transformNode`).",
+     "suggestion": "Register the MNI template (moving) to the subject volume (fixed) — i.e. `logic.registerVolumes(templateNode, volume, ...)` — or invert the transform before applying and hardening it onto `atlasNode` so that the MNI atlas is mapped into the patient's native space.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AAL3BrainLabeling.py",
+      "line": 183
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "still disputed",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "no",
+     "severity": "info",
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:252 calls logic.registerVolumes(volume, templateNode, ...). SlicerElastix's signature is registerVolumes(fixedVolumeNode, movingVolumeNode, ...), so the subject is fixed and the MNI template is moving. The resulting transform maps template/atlas space onto the subject, and it is applied to the atlas at lines 280-281. That is the correct direction, so the finding is wrong."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "unsure",
+     "severity": null,
+     "rating": null,
+     "reason": "AAL3BrainLabeling.py:252 calls `logic.registerVolumes(volume, templateNode, parameterFilenames=paths, outputTransformNode=transformNode)` and lines 280-281 apply and harden that transform on the atlas. The SlicerElastix API signature and transform convention are not available in this checkout, so neither the finding's assignment of fixed versus moving arguments nor the alleged wrong direction is established. The pipeline's template-absence check at lines 201-205 also prevents verifying a run from these files."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "info",
+     "rating": null,
+     "reason": "In AAL3BrainLabeling.py:174, 207, 252, `registration()` calls `logic.registerVolumes(volume, templateNode, parameterFilenames=paths, outputTransformNode=transformNode)`. In SlicerElastix, `registerVolumes(fixedVolumeNode, movingVolumeNode, ...)` takes `fixedVolumeNode` as the first positional argument and `movingVolumeNode` as the second. Here `volume` (subject N4 volume) is passed first (fixed) and `templateNode` (MNI152) is passed second (moving), or if the author intended subject->MNI registration, the comment/README conflicts with the code; furthermore, `registration()` returns the untransformed `volume` as `regVol` (line 261), and `atlasMapping()` applies `transformNode` to `atlasNode` (lines 280-281). Because `SlicerElastix.registerVolumes(fixedVolumeNode=volume, movingVolumeNode=templateNode)` actually computes a transform that maps moving (`templateNode`/MNI) to fixed (`volume`/subject), wait—let's check SlicerElastix's `registerVolumes` signature: `def registerVolumes(self, fixedVolumeNode, movingVolumeNode, parameterFilenames=None, outputVolumeNode=None, outputTransformNode=None, ...)`. Passing `(volume, templateNode)` makes `volume` (subject) the FIXED volume and `templa"
+    }
+   }
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "claude": "ok",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (blocking, ok)",
+   "positions": {
+    "claude": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "I read the whole pipeline in AAL3BrainLabeling.py. It makes no network calls, uses no eval/exec/pickle, runs no downloads or subprocesses, and only writes CSVs to a user-chosen folder and parameter files to the temporary path. The only issue is the overwrite and filename hardening from D1, which is not a concrete path to harm. I rate safety minor, not blocking."
+    },
+    "gpt": {
+     "item": "D7",
+     "real": "yes",
+     "severity": null,
+     "rating": "blocking",
+     "reason": "AAL3BrainLabeling.py:163 takes the volume node name, while lines 320-323 join it directly to the selected directory and use `with open(csvPath, \"w\", newline='') as f:`. Matching existing results are silently truncated and path-bearing node names can escape the directory, creating a concrete data-loss path. I inspected the module, CMakeLists.txt and repository-wide searches for network, execution, deserialization and file-writing APIs; external SlicerElastix behavior and the exact revision were not independently verified."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Inspected AAL3BrainLabeling.py, CMakeLists.txt, README.md, and LICENSE.txt. There is no network communication, telemetry, unsafe deserialization, command injection, or hidden code execution. Writing CSV results to `outDir` using `volName` (D1) is ordinary local file output, not a blocking safety issue."
+    }
+   }
+  },
+  {
+   "title": "Rating of packaging",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D8",
+   "rating_dispute": {
+    "claude": "concern",
+    "gemini": "ok",
+    "gpt": "unknown"
+   },
+   "outcome": "settled: concern (concern)",
+   "positions": {
+    "claude": {
+     "item": "D8",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "CMakeLists.txt:35 lists a resource file that is missing from the repository (no Resources/Templates directory exists). That breaks the build or install, or the module at runtime. There are also the CPACK/config oddities at lines 51-52. I rate packaging blocking. I did not check EXTENSION_DEPENDS against the catalog entry's build_dependencies."
+    },
+    "gpt": {
+     "item": "D8",
+     "real": "unsure",
+     "severity": null,
+     "rating": "unknown",
+     "reason": "CMakeLists.txt:31-35 lists `Resources/Templates/MNI152_T1_1mm.nii.gz`, and AAL3BrainLabeling.py:201-205 refuses registration if it is absent. The accessible listing omits this resource, but the user reports a contrary scan hint, so its actual repository presence must be established. CMakeLists.txt:14 declares `set(EXTENSION_DEPENDS \"SlicerElastix\")`, but no catalog entry or dependency implementation is available to check the matching build dependency, source revision or packaging mechanics. Thus packaging admission cannot be fully assessed."
+    },
+    "gemini": {
+     "item": "D8",
+     "real": "yes",
+     "severity": null,
+     "rating": "concern",
+     "reason": "In CMakeLists.txt:51, `set(CPACK_INSTALL_CMAKE_PROJECTS \"${CMAKE_BINARY_DIR};${EXTENSION_NAME};ALL;/\")` uses `EXTENSION_NAME` before `include(${Slicer_EXTENSION_CPACK})` defines it, resulting in an empty project name in `CPACK_INSTALL_CMAKE_PROJECTS`. Additionally, `Resources/Templates/MNI152_T1_1mm.nii.gz` listed at line 35 is not visible in the workspace file listing."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "ok",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "ok",
+   "gemini": "ok",
+   "gpt": "minor"
+  },
+  "packaging": {
+   "claude": "concern",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "minor",
+   "gemini": "minor",
+   "gpt": "unknown"
+  },
+  "soundness": {
+   "claude": "concern",
+   "gemini": "concern",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "minor",
+   "gemini": "minor",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "needs fixes",
+  "gemini": "needs fixes",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 8,
+  "single": 15,
+  "unverified": 0,
+  "total": 16,
+  "open_disputes": 2
+ }
+}

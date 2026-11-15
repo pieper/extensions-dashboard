@@ -1,0 +1,125 @@
+{
+ "purpose": "AAL3BrainLabeling is a neuroimaging extension for 3D Slicer that performs N4 bias field correction, multi-stage Elastix registration against an MNI152 template, and automated parcellation of brain MRI volumes using the AAL3 atlas. It targets neuroimaging researchers seeking regional morphometric statistics, hemispheric asymmetry indices, and centroid-based Euclidean distance matrices for single subjects or batch cohorts.",
+ "summary": "AAL3BrainLabeling is a clean, self-contained scripted module for AAL3 brain atlas parcellation using SlicerElastix. From an Extensions Index admission perspective, it has no safety or environment issues, has an MIT license, and has a valid catalog entry matching its `CMakeLists.txt` dependencies. However, two soundness bugs in `AAL3BrainLabeling.py` should be addressed: `SegmentStatisticsLogic` does not enable `centroid_ras` (causing the exported connectome distance matrix to be all zeros), and `registerVolumes(volume, templateNode, ...)` registers moving subject to fixed MNI template without inverting the transform when warping the MNI atlas to subject space.\n\n🟢 Recommend merge (admission requirements met; non-blocking scientific correctness fixes strongly recommended).",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all text files in the repository (`CMakeLists.txt`, `AAL3BrainLabeling.py`, `LICENSE.txt`, `README.md`, `Resources/Atlas/AAL3_ColorTable.ctbl`, `Resources/Labels/AAL3_labels.csv`). There is no network communication, telemetry, command injection, unsafe deserialization, or malicious code; file writes are restricted to temporary Elastix parameter files and user-selected CSV output directories."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected `AAL3BrainLabeling.py` and `CMakeLists.txt`. No packages are installed via pip, no bundled packages are pinned or modified, and no global side effects occur at module import time (`Elastix` and `SegmentStatistics` are imported inside methods)."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected `CMakeLists.txt` and the catalog entry. `EXTENSION_DEPENDS` (`SlicerElastix`) matches `build_dependencies` in the catalog JSON, and all required scripts and resource files exist and are installed. A minor redundant `CPACK_INSTALL_CMAKE_PROJECTS` line in `CMakeLists.txt` was noted."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "Inspected `LICENSE.txt` and `README.md`. The repository has a clear MIT license for the extension code and cites the AAL3 paper, though the specific license terms for the bundled `MNI152_T1_1mm.nii.gz` and `AAL3v1_1mm.nii.gz` data files are not explicitly stated."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected `AAL3BrainLabeling.py`. Two functional bugs affect scientific output: (1) `volumeStatistics()` does not enable `LabelmapSegmentStatisticsPlugin.centroid_ras.enabled`, so `getCentroid()` always returns `(0.0, 0.0, 0.0)` and the exported connectome matrix is all zeros; (2) `registerVolumes(volume, templateNode, ...)` computes a subject-to-MNI transform and applies it directly to the MNI-space `atlasNode` without inversion."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "Inspected `README.md` and `AAL3BrainLabeling.py`. Documentation is clear and well-structured, and the workflow integrates N4 bias correction, Elastix registration, and SegmentStatistics, though automated tests are missing and the two soundness bugs currently prevent accurate atlas warping and connectome distance calculation."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Manual CPACK_INSTALL_CMAKE_PROJECTS uses undefined EXTENSION_NAME variable",
+   "file": "CMakeLists.txt",
+   "line_start": 49,
+   "line_end": 52,
+   "evidence": "#-----------------------------------------------------------------------------\n# Extension Packaging (Slicer_extension_build yerine standart CPACK)\n#-----------------------------------------------------------------------------\nset(CPACK_INSTALL_CMAKE_PROJECTS \"${CMAKE_BINARY_DIR};${EXTENSION_NAME};ALL;/\")\ninclude(${Slicer_EXTENSION_CPACK})",
+   "explanation": "In CMakeLists.txt, the project name is set via `project(AAL3BrainLabeling)` (which sets `PROJECT_NAME`), and `EXTENSION_NAME` is never explicitly defined before `set(CPACK_INSTALL_CMAKE_PROJECTS \"${CMAKE_BINARY_DIR};${EXTENSION_NAME};ALL;/\")`. Furthermore, `include(${Slicer_EXTENSION_CPACK})` already sets `CPACK_INSTALL_CMAKE_PROJECTS` appropriately using `EXTENSION_NAME` (defaulted from `PROJECT_NAME`). Setting `CPACK_INSTALL_CMAKE_PROJECTS` manually with an undefined `${EXTENSION_NAME}` before `include(${Slicer_EXTENSION_CPACK})` can result in a malformed CPack project installation entry (`\"...;;ALL;/\"`) or conflict with Slicer's standard extension packaging macro.",
+   "suggestion": "Remove line 51 (`set(CPACK_INSTALL_CMAKE_PROJECTS ...)`) and rely solely on `include(${Slicer_EXTENSION_CPACK})`, which handles CPack configuration automatically.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "10 MB template volume committed to git and unused inconsistent CSV resource",
+   "file": "CMakeLists.txt",
+   "line_start": 31,
+   "line_end": 37,
+   "evidence": "set(MODULE_PYTHON_RESOURCES\n  Resources/AAL3BrainLabeling.png\n  Resources/Atlas/AAL3v1_1mm.nii.gz\n  Resources/Atlas/AAL3_ColorTable.ctbl\n  Resources/Templates/MNI152_T1_1mm.nii.gz\n  Resources/Labels/AAL3_labels.csv\n)",
+   "explanation": "The repository commits a 10 MB NIfTI template (`Resources/Templates/MNI152_T1_1mm.nii.gz`) and a 1.7 MB screenshot (`Screenshots/Screenshot.png`) directly into git, and installs the template as a module resource. While functional, Slicer extensions generally prefer downloading large template/atlas data on demand (e.g., via `SampleData`) or hosting screenshots externally/in separate branches to keep git repositories and extension packages lightweight. Additionally, `Resources/Labels/AAL3_labels.csv` is installed but never referenced in `AAL3BrainLabeling.py` (and its label names for IDs 115–170 differ from the actual AAL3v1 color table in `Resources/Atlas/AAL3_ColorTable.ctbl`).",
+   "suggestion": "Consider downloading large template files on demand with caching, and remove or reconcile the unused `Resources/Labels/AAL3_labels.csv` file.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "License terms for bundled MNI152 template and AAL3v1 atlas volumes are not documented in LICENSE.txt",
+   "file": "LICENSE.txt",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "MIT License\n \nCopyright (c) 2026 Mustafa Sakci, Niyazi Acer",
+   "explanation": "The extension's code is licensed under MIT (`LICENSE.txt`), and `README.md` cites Rolls et al. (2020) for the AAL3 atlas. However, the repository bundles third-party neuroimaging datasets (`Resources/Atlas/AAL3v1_1mm.nii.gz` and `Resources/Templates/MNI152_T1_1mm.nii.gz`) without documenting their upstream licenses or redistribution terms (e.g., the MNI152 template license and the AAL3v1 atlas distribution terms from GIN/SPM). Users and distributors need clarity on the license terms covering the bundled atlas and template data.",
+   "suggestion": "Add a section in `LICENSE.txt` or `README.md` stating the license and copyright/redistribution terms for the bundled `AAL3v1_1mm.nii.gz` atlas and `MNI152_T1_1mm.nii.gz` template.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Centroid statistic is not enabled in SegmentStatisticsLogic, producing an all-zero connectome matrix",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 297,
+   "line_end": 304,
+   "evidence": "    def volumeStatistics(self, segmentation, volume):\n        \"\"\"Utilizes Slicer's SegmentStatistics module for metric computation.\"\"\"\n        import SegmentStatistics\n        logic = SegmentStatistics.SegmentStatisticsLogic()\n        logic.getParameterNode().SetParameter(\"Segmentation\", segmentation.GetID())\n        logic.getParameterNode().SetParameter(\"ScalarVolume\", volume.GetID())\n        logic.computeStatistics()\n        return logic.getStatistics()",
+   "explanation": "`volumeStatistics` computes statistics via `SegmentStatisticsLogic` using default parameters, and `connectome()` then calls `self.getCentroid(stats, sid)` which searches for `'centroid'` in the statistics keys (`for k in stats.keys(): if len(k) == 2 and k[0] == sid and 'centroid' in k[1].lower(): return stats[k]`). In Slicer's `LabelmapSegmentStatisticsPlugin`, `centroid_ras` is NOT enabled by default (`centroid_ras` must be explicitly enabled via `logic.getParameterNode().SetParameter(\"LabelmapSegmentStatisticsPlugin.centroid_ras.enabled\", str(True))`). Because it is not enabled, `getCentroid` always falls back to `(0.0, 0.0, 0.0)` for every region, causing the exported `*_Connectome_Matrix.csv` to be an all-zero matrix.",
+   "suggestion": "Enable the centroid measurement before calling `logic.computeStatistics()`:\n`logic.getParameterNode().SetParameter(\"LabelmapSegmentStatisticsPlugin.centroid_ras.enabled\", str(True))`",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Registration transform direction maps moving subject to fixed MNI template, warping the MNI atlas in the wrong direction",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 183,
+   "line_end": 191,
+   "evidence": "        # 4. Volumetric feature extraction\n        self.updateUI(\"Step 4/5: Computing Regional Morphometry...\", 85, progress, statusLabel)\n        stats = self.volumeStatistics(segmentation, regVol)\n        \n        # 5. Multimodal Data Export\n        self.updateUI(\"Step 5/5: Exporting Results and Computing Matrices...\", 90, progress, statusLabel)\n        self.exportStats(stats, outDir, segmentation, volName)\n        self.asymmetry(stats, segmentation)\n        self.connectome(stats, outDir, volName)",
+   "explanation": "In `registration(self, volume, volName)`, Elastix registers the subject `volume` (moving) to `templateNode` (fixed: `MNI152_T1_1mm`). In Elastix/SlicerElastix, `outputTransformNode` represents the transform that maps moving (`volume`, subject space) to fixed (`templateNode`, MNI space) — i.e., in Slicer's transform convention, applying that transform to a node moves it from subject space to MNI space (or vice versa depending on Elastix's direction: Elastix computes a transform in fixed-to-moving pull / moving-to-fixed push in Slicer). Specifically, `SlicerElastix`'s `registerVolumes(movingVolumeNode=volume, fixedVolumeNode=templateNode, outputTransformNode=transformNode)` produces a transform that transforms the moving volume (`volume`, patient) into the fixed volume (`templateNode`, MNI152) space! Applying that same `transform` to `atlasNode` (which is already in MNI152 space) without inverting it (`transform.Inverse()`) warps the MNI atlas by the patient-to-MNI transform rather than the MNI-to-patient inverse transform, misaligning the atlas with the patient's anatomy. Furthermore, `regVol` returned from `registration` is just the untransformed `volN4` (`return volume, transformNode`).",
+   "suggestion": "Register the MNI template (moving) to the subject volume (fixed) — i.e. `logic.registerVolumes(templateNode, volume, ...)` — or invert the transform before applying and hardening it onto `atlasNode` so that the MNI atlas is mapped into the patient's native space.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Asymmetry results are only printed to stdout and default output path is not shown to the user",
+   "file": "AAL3BrainLabeling.py",
+   "line_start": 106,
+   "line_end": 111,
+   "evidence": "    def selectOutput(self):\n        \"\"\"Opens dialog to select the directory for saving clinical results.\"\"\"\n        directory = qt.QFileDialog.getExistingDirectory()\n        if directory:\n            self.outputPath = directory\n            self.outputButton.text = directory",
+   "explanation": "If the user runs the pipeline without clicking `Select Results Folder`, `self.outputPath` defaults to `slicer.app.temporaryPath` (line 77), and the UI does not show where the CSV files were written or save the hemispheric asymmetry indices to a file (they are only printed to the Python console in `asymmetry()`).",
+   "suggestion": "Display the output path in the UI and consider exporting the Hemispheric Asymmetry Indices to a CSV file alongside the morphometry and connectome CSVs.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No automated module test included",
+   "file": "CMakeLists.txt",
+   "line_start": 27,
+   "line_end": 29,
+   "evidence": "set(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n)",
+   "explanation": "The extension does not include a `ScriptedLoadableModuleTest` class or any automated self-tests in `CMakeLists.txt` or `AAL3BrainLabeling.py`.",
+   "suggestion": "Add a `AAL3BrainLabelingTest(ScriptedLoadableModuleTest)` class and register the test in `CMakeLists.txt` (`WITH_GENERIC_TESTS` or `slicer_add_python_unittest`).",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Binary contents of Resources/Templates/MNI152_T1_1mm.nii.gz and Resources/Atlas/AAL3v1_1mm.nii.gz were not directly inspected.",
+  "Runtime execution in 3D Slicer with SlicerElastix was not performed (static code review only)."
+ ],
+ "questions_for_author": [
+  "In `registration()`, `logic.registerVolumes(volume, templateNode, ...)` passes the subject `volume` as `movingVolumeNode` and `templateNode` (MNI152) as `fixedVolumeNode`. Should `templateNode` be the moving volume and `volume` the fixed volume (or should `transform` be inverted) so that the MNI atlas is warped into the subject's native space?",
+  "Can you clarify the license and redistribution permissions for the bundled `MNI152_T1_1mm.nii.gz` and `AAL3v1_1mm.nii.gz` files in `LICENSE.txt`?"
+ ]
+}

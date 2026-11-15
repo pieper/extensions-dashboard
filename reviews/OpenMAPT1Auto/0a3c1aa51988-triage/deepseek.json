@@ -1,0 +1,217 @@
+{
+ "purpose": "A 3D Slicer scripted module that runs the OpenMAP-T1 deep-learning pipeline on a T1-weighted brain MRI to parcellate 280 anatomical regions, then loads the labelmap/segmentation into Slicer and exports per-region volumes to CSV/Excel. It targets neuroimaging researchers; the model weights (~1.5 GB) are downloaded separately from Google Drive under a non-commercial JHU license.",
+ "summary": "The wrapper code is small and contains no telemetry, no data upload, and no obfuscation; the model download is user-initiated behind a license dialog. However, the module installs PyTorch (and numpy/pandas/etc.) with `slicer.util.pip_install` at import time, i.e. at Slicer startup for every user, which is a blocking environment violation. Additional major issues: the installed layout does not match the code's `sys.path`/`labeled.txt` assumptions (pipeline likely cannot run from the catalog build), `os.chdir` on the whole Slicer process, a long GUI-thread pipeline with no progress/cancel, and an unverified binary payload extracted with `extractall` from a personal Google Drive. License for the code is MIT and the non-commercial model terms are disclosed. 🔴 Do not merge yet.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "No telemetry, upload, eval/exec or obfuscation found in the reviewed Python files. Concerns are the unverified ~1.5 GB archive from a personal Google Drive extracted with `z.extractall(self.moduleDir)` (OpenMAPT1AutoParcellation.py:216-224), `pickle.load` of the committed binary `split_map.pkl` (utils/postprocessing.py:8-9), and `shutil.rmtree(model_folder)` (line 205). `torch.load` correctly uses `weights_only=True` (utils/load_model.py:29-65)."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "`install_requirements()` is called at module import (OpenMAPT1AutoParcellation.py:28) and pip-installs torch, torchvision, numpy, pandas, nibabel, gdown, openpyxl, tqdm without asking; scripted modules are imported at Slicer startup, so this affects users who never open the module and bypasses the PyTorch extension. It also inserts a generic top-level package name `utils` at sys.path[0] (lines 42-45) and runs `pip_install(\"gdown --upgrade\")` (line 207)."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "CMake installs `OpenMAPT1AutoParcellationLib` and `labeled.txt` into `${Slicer_INSTALL_QTSCRIPTEDMODULES_LIB_DIR}` (OpenMAPT1AutoParcellation/CMakeLists.txt:20-28), while the code looks for both under `os.path.dirname(__file__)` (lines 43, 257); in the installed tree the sys.path entry does not exist and the package is nested one level deeper, so `from utils...` and `labeled.txt` loading are expected to fail. Catalog entry itself is minimal but valid; internal JSON still points at branch `master` while the index uses `main`."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE.txt grants MIT for the wrapper and documents the JHU non-commercial license for the model weights, which are not committed. Open question: the weights are redistributed through the author's personal Google Drive, and the license links are inconsistent (LICENSE.txt:39 TaikiNishimaki vs OpenMAPT1AutoParcellation.py:195 OishiLab)."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The whole 15-45 min pipeline runs on the GUI thread from a button slot (line 127) with only `slicer.app.processEvents()` in logMessage (line 174), no progress bar and no cancel; `os.chdir(self.moduleDir)` (line 298) changes the process-wide CWD and is never restored; `importlib.import_module(\"gdown>=4.6.0\")` (lines 17, 24) can never succeed as a module name; no parameter node and no tests beyond generic ones."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents install, usage, outputs, troubleshooting and citation, and screenshots exist. Missing: sample data or tutorial, any real test, a clinical/research-use disclaimer beyond the non-commercial note, and model provenance/validation (weights come from an anonymous Google Drive file ID with no checksum or version)."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "PyTorch and other packages pip-installed at module import (Slicer startup) without consent",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 10,
+   "line_end": 28,
+   "evidence": "    required = [\n        \"torch\",\n        \"torchvision\", \n        \"numpy\",",
+   "explanation": "`install_requirements()` is executed unconditionally at import time (line 28). Slicer imports every scripted module at startup to register it, so on first launch after installing the extension, every user gets `slicer.util.pip_install` runs for torch, torchvision, numpy, pandas, nibabel, gdown, openpyxl and tqdm — even users who never open the module. This installs PyTorch outside the Slicer PyTorch extension (no PyTorchUtils in EXTENSION_DEPENDS/build_dependencies), and `pip_install(\"numpy\")` can upgrade/downgrade the numpy that Slicer bundles, breaking Slicer and other extensions. It also blocks Slicer startup for minutes on a slow network.",
+   "suggestion": "Remove the import-time install entirely. Declare PyTorchUtils in EXTENSION_DEPENDS/build_dependencies and use `PyTorchUtils.PyTorchUtilsLogic().installTorch()`, and install the remaining pure-Python packages only after an explicit user action with a confirmation dialog (or list them in the extension metadata).",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Generic top-level package name `utils` inserted at sys.path[0]",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 42,
+   "line_end": 45,
+   "evidence": "lib_path = os.path.join(module_dir, \"OpenMAPT1AutoParcellationLib\")\nif lib_path not in sys.path:\n    sys.path.insert(0, lib_path)",
+   "explanation": "The inserted directory contains a top-level package literally named `utils`. Because it is placed at position 0 of the shared Slicer Python `sys.path`, any other module or extension that does `import utils` (a very common name) will silently get this package instead of its own, causing hard-to-diagnose failures in unrelated code. This is a process-wide side effect that persists for the whole Slicer session.",
+   "suggestion": "Rename the package to something unique (e.g. `OpenMAPT1AutoLib`) and import it as `from OpenMAPT1AutoLib.utils...`, or load the modules via importlib from an explicit path without modifying sys.path.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "`pip_install(\"gdown --upgrade\")` passes a flag inside a single requirement string",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 207,
+   "line_end": 210,
+   "evidence": "            slicer.util.pip_install(\"gdown --upgrade\")\n            import importlib\n            import gdown\n            importlib.reload(gdown)",
+   "explanation": "`slicer.util.pip_install` forwards its arguments to pip; `\"gdown --upgrade\"` is a single argument and is not a valid requirement specifier, so pip will error out (caught by the broad except and only logged). Even if it worked, it would silently upgrade a package in Slicer's environment during a download action.",
+   "suggestion": "Use `slicer.util.pip_install(\"gdown\")` (or `pip_install(\"--upgrade\", \"gdown\")` if an upgrade is really needed) and only after user confirmation.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Unverified 1.5 GB archive from a personal Google Drive extracted with extractall into the extension directory",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 216,
+   "line_end": 226,
+   "evidence": "            temp_zip = os.path.join(self.moduleDir, \"models_temp.zip\")\n            url = \"https://drive.google.com/uc?id=\" + self.GDRIVE_FILE_ID",
+   "explanation": "The model payload is fetched from a single Google Drive file ID owned by the author (line 72), with no checksum, signature or version pin, and then `z.extractall(self.moduleDir)` (line 224) writes every archive member into the extension's install directory without validating member paths (zip-slip) or contents. A replaced or compromised Drive file would silently overwrite files inside the extension directory, and the extracted `.pth` files are then loaded by `torch.load` (mitigated by `weights_only=True`, but the archive can contain arbitrary other files). Users cannot verify that the weights are the upstream OpenMAP-T1 release.",
+   "suggestion": "Download from the official OpenMAP-T1 release location, verify a published SHA-256 of the archive before extraction, extract into a dedicated user-writable model directory (not the extension install dir), and validate each member path stays inside that directory.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "pickle.load of a committed binary blob (split_map.pkl)",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellationLib/utils/postprocessing.py",
+   "line_start": 7,
+   "line_end": 9,
+   "evidence": "    split_map_path = os.path.join(os.path.dirname(__file__), \"split_map.pkl\")\n    with open(split_map_path, \"rb\") as tf:\n        dictionary = pickle.load(tf)",
+   "explanation": "The lookup table is deserialized with `pickle`, which can execute arbitrary code. The file is committed in the repository (7 KB binary) and cannot be audited by reading it, so any future replacement of that file — or a tampered build — becomes code execution inside Slicer. The data is a simple key→value mapping that needs no pickle.",
+   "suggestion": "Store the mapping as JSON or .npz and load it with `json.load`/`numpy.load`, or at minimum document and hash-pin the pickle.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Model folder deleted recursively without confirmation",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 203,
+   "line_end": 205,
+   "evidence": "        model_folder = os.path.join(self.moduleDir, \"MODEL_FOLDER\")\n        if os.path.exists(model_folder):\n            shutil.rmtree(model_folder)",
+   "explanation": "Pressing \"Re-download Models\" deletes the whole MODEL_FOLDER recursively. The README instructs users to place manually downloaded models there (README.md:44), so a user who manually populated that folder loses it without any confirmation prompt. The path is fixed inside the extension directory, so the blast radius is limited, but the deletion is still unannounced.",
+   "suggestion": "Ask for confirmation before deleting, and move models to a user-chosen data directory instead of the extension install directory (which is replaced on extension update).",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Installed layout does not match the code's sys.path assumption for OpenMAPT1AutoParcellationLib",
+   "file": "OpenMAPT1AutoParcellation/CMakeLists.txt",
+   "line_start": 19,
+   "line_end": 23,
+   "evidence": "install(\n  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/OpenMAPT1AutoParcellationLib\n  DESTINATION ${Slicer_INSTALL_QTSCRIPTEDMODULES_LIB_DIR}\n)",
+   "explanation": "The module file is installed to the qt-scripted-modules directory, but the library goes to the qt-scripted-modules *lib* directory. The code then inserts `os.path.join(os.path.dirname(__file__), \"OpenMAPT1AutoParcellationLib\")` into sys.path (OpenMAPT1AutoParcellation.py:43) — a path that does not exist in an installed extension — and imports `from utils.cropping import ...`. In the installed tree the package is `.../qt-scripted-modules/OpenMAPT1AutoParcellationLib/utils`, so `import utils` cannot resolve; `utils_import_error` is set and `runPipeline` raises `RuntimeError(\"utils import failed: ...\")` (line 296). The module UI loads but the pipeline cannot run from a catalog build.",
+   "suggestion": "Install the library so that the imported package name matches (e.g. install `OpenMAPT1AutoParcellationLib/utils` as `utils` into the lib dir that Slicer already puts on PYTHONPATH), or import via a unique package name resolved from the lib directory, and verify with an installed (not build-tree) test.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "labeled.txt installed to the lib directory but read from the module directory",
+   "file": "OpenMAPT1AutoParcellation/CMakeLists.txt",
+   "line_start": 25,
+   "line_end": 28,
+   "evidence": "install(\n  FILES ${CMAKE_CURRENT_SOURCE_DIR}/labeled.txt\n  DESTINATION ${Slicer_INSTALL_QTSCRIPTEDMODULES_LIB_DIR}\n  OPTIONAL",
+   "explanation": "`loadLabels()` reads `os.path.join(self.moduleDir, \"labeled.txt\")` (OpenMAPT1AutoParcellation.py:257), where moduleDir is the directory of the module .py (qt-scripted-modules). CMake installs labeled.txt into the separate lib directory, so in an installed extension the file is not found: the log shows \"labeled.txt not found\", the CSV `LabelName` column is empty and no segments are renamed. The `OPTIONAL` keyword also hides a missing file at build time.",
+   "suggestion": "Install labeled.txt next to the module file (or into the same lib directory the code actually searches) and drop `OPTIONAL` so a missing file fails the build.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Long pipeline runs on the GUI thread with no progress or cancel",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 172,
+   "line_end": 174,
+   "evidence": "    def logMessage(self, text):\n        self.log.append(text)\n        slicer.app.processEvents()",
+   "explanation": "`onRunClicked` -> `runPipeline` -> `_runPipelineSteps` executes N4 correction, seven model loads and hundreds of 2D forward passes directly in the button slot. The README itself states 15-45 minutes on CPU. The only event processing is inside `logMessage`, so the UI is frozen between log lines, the progress bar is never used for the run, and there is no way to cancel; users will likely force-quit Slicer mid-run. Errors are only written to the log widget, not shown as a message box.",
+   "suggestion": "Run the pipeline in a `slicer.util.ProgressDialog`/`qSlicerCLIProgressBar`-style worker (e.g. `qt.QTimer`-driven or `slicer.util.runInBackground`-style thread) with progress reporting and a cancel flag, and report failures with `slicer.util.errorDisplay`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "os.chdir changes the working directory of the whole Slicer process",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 298,
+   "line_end": 298,
+   "evidence": "        os.chdir(self.moduleDir)",
+   "explanation": "The working directory is changed to the extension directory and never restored. Every other module and library in the same Slicer process that resolves relative paths (including Slicer's own file dialogs' last-directory behaviour and other extensions) is affected for the rest of the session. It is also the reason the bundled `make_csv.py` can use relative paths like `\"level/Level5.txt\"`.",
+   "suggestion": "Remove the `os.chdir`; pass absolute paths to the pipeline functions (they already accept `work_folder`/`output_dir`).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Version specifier passed to importlib.import_module, so gdown is reinstalled every startup",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 22,
+   "line_end": 26,
+   "evidence": "    for package in required:\n        try:\n            importlib.import_module(package)\n        except ImportError:\n            slicer.util.pip_install(package)",
+   "explanation": "`required` contains `\"gdown>=4.6.0\"` (line 17). `importlib.import_module(\"gdown>=4.6.0\")` can never succeed because that is not a module name, so the ImportError branch runs `pip_install(\"gdown>=4.6.0\")` on every Slicer start, adding network traffic and startup delay even when gdown is already installed. `torchvision` and `tqdm` are installed but never imported anywhere in the extension.",
+   "suggestion": "Separate module names from requirement specifiers (dict of name -> spec), and drop unused packages.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Redistribution of JHU-licensed weights via a personal Google Drive is undocumented; license links inconsistent",
+   "file": "LICENSE.txt",
+   "line_start": 39,
+   "line_end": 48,
+   "evidence": "**Original Repository:** https://github.com/TaikiNishimaki/OpenMAP-T1\n\n**License:** JHU Research Software License Agreement",
+   "explanation": "The extension code is MIT (fine), and the non-commercial model terms are disclosed in the UI, README and metadata. However the weights are re-hosted on the author's own Google Drive (OpenMAPT1AutoParcellation.py:72) rather than linked from the upstream release, and nothing states that the JHU license permits this redistribution. The license link in the module dialog points to `OishiLab/OpenMAP-T1` (line 195) while LICENSE.txt and the metadata point to `TaikiNishimaki/OpenMAP-T1`, so users cannot be sure which terms apply.",
+   "suggestion": "State explicitly whether the JHU license permits re-hosting the weights, or download from the upstream official location; make the license URL consistent across LICENSE.txt, README, metadata and the dialog.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Internal metadata references branch `master` while the index selects `main`",
+   "file": "OpenMAPT1Auto.json",
+   "line_start": 26,
+   "line_end": 32,
+   "evidence": "  \"repository\": {\n    \"type\": \"git\",\n    \"url\": \"https://github.com/niyaziacer/SlicerOpenMAPT1Auto\",\n    \"branch\": \"master\"",
+   "explanation": "The catalog entry pins `scm_revision: \"main\"`, but the extension's own metadata, README links and CMake icon/screenshot URLs all use `master`. If the default branch is `main`, the raw.githubusercontent `master` URLs for the icon and screenshots 404, and the metadata is misleading. The root `OpenMAPT1Auto.json` is also not a file the Slicer extension build consumes.",
+   "suggestion": "Align all branch references with the branch actually used by the index, and remove or relocate the non-standard root JSON if it is not used by the build.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No tests, no sample data, no research-use disclaimer, weak model provenance",
+   "file": "OpenMAPT1AutoParcellation/CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 17,
+   "evidence": "slicerMacroBuildScriptedModule(\n  NAME ${MODULE_NAME}\n  SCRIPTS ${MODULE_PYTHON_SCRIPTS}\n  RESOURCES ${MODULE_PYTHON_RESOURCES}\n  WITH_GENERIC_TESTS\n)",
+   "explanation": "Only the generic load test is built; there is no test of the pipeline, no sample T1 volume, and no tutorial beyond the README steps. For a deep-learning tool producing anatomical measurements there is no statement of validation/accuracy, no model version or checksum, and no explicit research-use-only / not-for-clinical-diagnosis disclaimer (only the non-commercial note).",
+   "suggestion": "Add a small sample dataset and a smoke test, document the model version/checksum and any published validation, and add an explicit research-use-only disclaimer in the module UI and README.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Binary content of Screenshots/Screenshot2.png and images/img2.png (not readable in this environment)",
+  "Binary content of OpenMAPT1AutoParcellationLib/utils/split_map.pkl — the pickle payload cannot be audited by reading, so its safety is unverified",
+  "Contents of the Google Drive model archive (file ID 1YEE65X5Cx8LHK-C070TbZARHp1C08KxA) — not downloadable here; whether it contains only the expected .pth weights is unknown",
+  "The actual JHU Research Software License text and whether it permits re-hosting the weights on a personal Google Drive",
+  "Whether the repository's default branch is `main` or `master`, and whether the raw.githubusercontent `master` URLs for icon/screenshots resolve",
+  "CI/build results for this revision and whether the extension actually builds and loads on the Slicer build farm",
+  "Runtime behaviour in a real Slicer session (the packaging findings about the installed layout are inferred from CMake install destinations and the code's path assumptions, not executed)"
+ ],
+ "questions_for_author": [
+  "Why is PyTorch installed with `slicer.util.pip_install` at module import instead of through the Slicer PyTorch extension (PyTorchUtils in EXTENSION_DEPENDS)?",
+  "Can you confirm that the JHU Research Software License permits you to re-host the OpenMAP-T1 weights on your personal Google Drive, and can you publish a checksum for the archive?",
+  "Have you tested the extension as installed from a build (not from the source tree)? The code looks for `OpenMAPT1AutoParcellationLib` and `labeled.txt` next to the module file, but CMake installs both into the qt-scripted-modules lib directory.",
+  "Is the default branch `main` or `master`? The index entry uses `main` while your metadata and raw URLs use `master`.",
+  "Can the pipeline be moved off the GUI thread with progress and cancel, given the documented 15-45 minute CPU runtime?"
+ ]
+}

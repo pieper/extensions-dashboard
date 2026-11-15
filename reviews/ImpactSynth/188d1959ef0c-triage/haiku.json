@@ -1,0 +1,101 @@
+{
+ "purpose": "ImpactSynth is a thin Slicer scripted module (ImpactSynth/ImpactSynth.py) that registers KonfAI-based app tabs for synthetic CT generation from MRI/CBCT and for segmentation of the sCT. It is aimed at radiotherapy and imaging researchers who want to run TotalSynth models inside 3D Slicer.",
+ "summary": "The repository itself is small: a CMake wrapper, a ~150-line ScriptedLoadableModule that builds two KonfAI app widgets, Apache-2.0 license, and docs. The real behaviour (installing konfai-apps into Slicer's Python, downloading Hugging Face weights, running subprocesses, optional remote-server transfer of images) lives in the KonfAI/SlicerKonfAI dependency, which was not in the review scope. The entry is mechanically plausible (build_dependencies matches EXTENSION_DEPENDS, license present). Safety and environment cannot be closed without reviewing the dependency's install and network code, so the review is incomplete.",
+ "overall": "incomplete",
+ "ratings": {
+  "safety": {
+   "rating": "unknown",
+   "rationale": "Inspected ImpactSynth/ImpactSynth.py and root CMakeLists.txt; no obfuscation, no network calls or subprocesses in this repo. The README says konfai-apps is pip-installed on first open and models are fetched from Hugging Face, and remote-server inference sends images to a user-specified host; these live in the KonfAI dependency, which was not inspected."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "README.md line 134 states that on first opening 'konfai-apps is installed into Slicer's Python', a package install into the shared environment triggered from the module rather than at extension install. Whether it asks for confirmation and whether it pins or pulls torch/opencv/vtk could not be checked in KonfAI. No PyTorch pin appears in this repo."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMakeLists.txt line 13 sets EXTENSION_DEPENDS 'KonfAI', matching build_dependencies in the entry; ImpactSynth/CMakeLists.txt installs ImpactSynth.py and the icon. Minor: a 5 MB tutorial mp4 and duplicate PNG icons are committed. Catalog scm_revision is 'main' (branch), not a pinned commit."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is the full Apache-2.0 text (lines 1-201) and the .py header states Apache-2.0. Model weights on Hugging Face and the TotalSegmentator/MRSegmentator/IMPACT-Seg apps have their own terms, which were not checked."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "setup() at ImpactSynth.py lines 100-109 gates on KONFAI_SLICER_API_VERSION and shows an error dialog, which is good. The private helper _is_reload_setup is imported from KonfAI (line 18), which couples to internals. The Testing/Python test is commented out (ImpactSynth/Testing/Python/CMakeLists.txt), so there are no automated tests."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md and TUTORIAL.md give a step-by-step walkthrough with screenshots, a video, a model table, and a clinical caveat (README line 113: 'Validate on your own data before any clinical use'). The tier is 3 and the description is clear."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Python package installation into Slicer's environment is triggered by the module, per the docs",
+   "file": "README.md",
+   "line_start": 134,
+   "line_end": 134,
+   "evidence": "2. Restart Slicer and open **Impact Synth** (category **Image Synthesis**). On the first opening, `konfai-apps` is installed into Slicer's Python.",
+   "explanation": "README.md line 134 says 'On the first opening, konfai-apps is installed into Slicer's Python', and TUTORIAL.md line 12-13 repeats this. Installing a large dependency set (with its own transitive requirements) into the shared Slicer Python on first module use can change versions of packages Slicer and other extensions rely on. The module code here does not show whether it asks the user for confirmation or pins versions; that logic is in the KonfAI dependency and was not reviewed.",
+   "suggestion": "Document exactly which packages and versions are installed, confirm with the user before a large download, and confirm no Slicer-bundled packages (numpy, SimpleITK, torch, vtk, opencv) are downgraded or pulled in with bundled Qt/VTK. Provide the KonfAI install-logic source for review.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "Patient images can be sent to a user-specified remote inference server",
+   "file": "README.md",
+   "line_start": 75,
+   "line_end": 76,
+   "evidence": "- **Local GPU, CPU or remote server**\n  The batch size is measured on the card (8 GB of VRAM is enough). A `konfai-apps-server` on a GPU workstation does the computation instead",
+   "explanation": "README.md line 76 and TUTORIAL.md line 64-66 describe a remote konfai-apps-server that performs inference. Input medical images would be transmitted to that host. This is a user-chosen, explicit setting, not hidden telemetry, but the docs should say that patient data leaves the workstation, and whether transfer is encrypted or authenticated is not visible here.",
+   "suggestion": "Add a clear warning that images are sent to the remote host, that the connection is unencrypted unless configured otherwise, and recommend only trusted servers.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Module depends on a private KonfAI helper and the test is disabled",
+   "file": "ImpactSynth/ImpactSynth.py",
+   "line_start": 18,
+   "line_end": 18,
+   "evidence": "from KonfAI import KonfAIAppTemplateWidget, KonfAICoreWidget, _is_reload_setup",
+   "explanation": "ImpactSynth.py imports `_is_reload_setup` (underscore-prefixed, so private) from KonfAI at line 18, which can break silently on KonfAI changes. The only test registration is commented out in ImpactSynth/Testing/Python/CMakeLists.txt, so there are no automated tests for the module's setup logic.",
+   "suggestion": "Use a public API from KonfAI or document the coupling, and enable a basic test that checks module load and the API-version gate.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Catalog pins the branch 'main' rather than a reviewed commit",
+   "file": "",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "\"scm_revision\": \"main\",",
+   "explanation": "The catalog entry uses scm_revision 'main', so the code built by the index can change without review. This is a reproducibility concern, not a defect; the reviewed source is commit 188d1959 per the review request.",
+   "suggestion": "Pin scm_revision to a reviewed commit SHA for stable builds, or accept the branch and rely on later re-review of updates.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Large binary media committed to the repository",
+   "file": "README.md",
+   "line_start": 40,
+   "line_end": 40,
+   "evidence": "**[Watch the walkthrough](Screenshots/SlicerImpactSynth-tutorial.mp4)** (2 min, with captions)",
+   "explanation": "The repo carries a 5 MB tutorial video and several large PNG/JPG images (ImpactSynth.png is duplicated at root and in Resources/Icons). These add to clone size but do not break loading.",
+   "suggestion": "Host the video externally (the README already uses a user-attachments URL) and avoid duplicate binaries.",
+   "confidence": "low"
+  }
+ ],
+ "not_checked": [
+  "KonfAI and SlicerKonfAI source (the actual install logic, subprocess calls, Hugging Face download code, remote-server transport, and KONFAI_SLICER_API_VERSION definition) was not available in the review scope.",
+  "Scm source at commit 188d1959 was not fetched; only the files shown in the prompt were inspected, and no repo file listing beyond the module folder was checked for hidden files.",
+  "Hugging Face model licenses and terms for VBoussot/ImpactSynth, TotalSegmentator, MRSegmentator and ImpactSeg were not verified.",
+  "No CI build, Slicer load test, or runtime check was run; the .mp4 video and JPG/PNG screenshots were not viewed.",
+  "The ArXiv/paper claims (performance, challenge ranks) were not verified."
+ ],
+ "questions_for_author": []
+}

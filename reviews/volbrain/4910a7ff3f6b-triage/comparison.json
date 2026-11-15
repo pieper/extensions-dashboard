@@ -1,0 +1,890 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Deprecated `returnNode=True` loadVolume call likely breaks volume loading on Slicer 5.x",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 568,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Deprecated `returnNode=True` loadVolume call likely breaks volume loading on Slicer 5.x",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 568,
+     "line_end": 570,
+     "evidence": "        # Load NIfTI file\n        volumeNode = slicer.util.loadVolume(filePath, returnNode=True)[1]\n        volumeNode.SetName(nodeName)",
+     "explanation": "In Slicer 5.x `slicer.util.loadVolume` returns the loaded node directly and the `returnNode` argument is deprecated/ignored, so indexing the result with `[1]` raises TypeError ('vtkMRMLScalarVolumeNode' object is not subscriptable). Because the exception is caught in onApplyButton (lines 255-258) and only printed, the user would see the module finish with 'Complete! 0 structures calculated' instead of an error. Even if `returnNode` is still honoured, a failed load yields None and `SetName` raises AttributeError with the same silent outcome.",
+     "suggestion": "Use `volumeNode = slicer.util.loadVolume(filePath)` and check for None, reporting failure with slicer.util.errorDisplay.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 568
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Per-file failures are swallowed; UI reports success with zero results",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 255,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Per-file failures are swallowed; UI reports success with zero results",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 255,
+     "line_end": 258,
+     "evidence": "            except Exception as e:\n                print(f\"ERROR {category}: {str(e)}\")\n                import traceback\n                traceback.print_exc()",
+     "explanation": "Any failure while loading or computing a category (bad file, unsupported API, empty label map causing np.max to raise at line 594) is only written to the Python console. The user, who typically does not have the console open, then gets 'Complete! {len(allResults)} structures calculated' and a message box at lines 277/285, so a total failure looks like a successful run with no structures.",
+     "suggestion": "Collect errors and show them with slicer.util.errorDisplay / warningDisplay, and set the status label to an error state.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 255
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Repeated calculations accumulate nodes and duplicate entries",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 245,
+     "line_end": 253,
+     "evidence": "if segNode:\n                            self.loadedNodes.append(segNode)\n                            if not self.currentSegmentationNode:",
+     "explanation": "Each run of onApplyButton appends the segmentation node to self.loadedNodes without de-duplication. calculateVolumes removes only the volume node named volBrain_<cat> and never removes the previous labelmap '<name>_labels', color table, or segmentation nodes. Repeated use clutters the MRML scene and can leave stale nodes, and onClear/updateSegmentSelector may then act on duplicates.",
+     "suggestion": "Remove previous labelmap, color, and segmentation nodes for the category before creating new ones, and avoid duplicate entries in loadedNodes.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 250
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Segment name/color assignment likely never matches (Label_N lookup)",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 651,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Segment renaming lookup uses a name that does not exist",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 649,
+     "line_end": 654,
+     "evidence": "            for labelInt in uniqueLabels:\n                labelName = labelNames.get(int(labelInt), f\"Label_{int(labelInt)}\")\n                segmentId = segmentation.GetSegmentIdBySegmentName(f\"Label_{int(labelInt)}\")",
+     "explanation": "ImportLabelmapToSegmentationNode names segments after the label map's color node entries (the anatomical names set at lines 620/625), not 'Label_<n>', so GetSegmentIdBySegmentName returns an empty string and the renaming/coloring block is dead code. It happens to be harmless only because the color table already carries the names.",
+     "suggestion": "Iterate over the segmentation's segments and match by label value (GetSegment.GetLabelValue()) instead of by name.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 649
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Segment name/color assignment likely never matches (Label_N lookup)",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 648,
+     "line_end": 659,
+     "evidence": "segmentId = segmentation.GetSegmentIdBySegmentName(f\"Label_{int(labelInt)}\")\n                  if segmentId:\n                      segment = segmentation.GetSegment(segmentId)\n                      segment.SetName(labelName)",
+     "explanation": "After ImportLabelmapToSegmentationNode, the code searches for segments named 'Label_<n>'. Slicer normally names imported segments from the labelmap color table (which this code sets just before), so the lookup returns no ID, and the 'if segmentId:' branch is skipped. The 3D segments then keep non-volBrain names, and the segment selector shows wrong names. This is a correctness issue, not a safety issue. Not verified by running Slicer.",
+     "suggestion": "Look up segments by the label value or by segment index after import (or use the color table name), and verify with a test on a small synthetic labelmap.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 651
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Closed-surface generation for 100+ labels runs on the GUI thread without progress",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 661,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Closed-surface generation for 100+ labels runs on the GUI thread without progress",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 661,
+     "line_end": 662,
+     "evidence": "            # Activate 3D display\n            segmentationNode.CreateClosedSurfaceRepresentation()",
+     "explanation": "Building closed surfaces for the 108+ cortical labels of a full-brain label map can take tens of seconds to minutes; it runs synchronously in the button handler, so Slicer appears frozen and the progress bar stays at the per-file value. Users may force-quit and lose work.",
+     "suggestion": "Run the conversion in a slicer.util.ProgressDialog / CLI-style background task, or at least show a busy cursor and update the status label before the call.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 661
+     }
+    }
+   ]
+  },
+  {
+   "title": "Excel fallback may write tab-separated data into a file without .csv extension",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 535,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Excel fallback may write tab-separated data into a file without .csv extension",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 535,
+     "line_end": 536,
+     "evidence": "                    fileName = fileName.replace('.xlsx', '.csv')\n                    with open(fileName, 'w', encoding='utf-8-sig') as f:",
+     "explanation": "If the user typed a name without the .xlsx suffix (the dialog does not force it), replace() changes nothing and tab-separated content is saved under the user's original name, which Excel will not open as a table.",
+     "suggestion": "Use os.path.splitext(fileName)[0] + '.csv'.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 535
+     }
+    }
+   ]
+  },
+  {
+   "title": "Heavy per-label NumPy scan on the GUI thread and empty-label crash path",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 594,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Heavy per-label NumPy scan on the GUI thread and empty-label crash path",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 594,
+     "line_end": 603,
+     "evidence": "colorNode.SetNumberOfColors(int(np.max(uniqueLabels)) + 1)\n        colorNode.NamesInitialisedOn()",
+     "explanation": "calculateVolumes runs np.sum(array == label) once per label on the full volume on the GUI thread, which is slow for large volumes and freezes Slicer with no progress updates inside the loop. If the volume has only background, np.max(uniqueLabels) raises on an empty array; the exception is caught and printed, so the user sees no error dialog.",
+     "suggestion": "Use np.bincount for counts in one pass, guard the empty case, and report errors to the user via the status label or a message box.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 594
+     }
+    }
+   ]
+  },
+  {
+   "title": "Missing display node causes AttributeError in 3D controls",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 383,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Missing display node causes AttributeError in 3D controls",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 383,
+     "line_end": 385,
+     "evidence": "        segmentation = self.currentSegmentationNode.GetSegmentation()\n        displayNode = self.currentSegmentationNode.GetDisplayNode()",
+     "explanation": "GetDisplayNode() can return None (e.g. if the segmentation display node was deleted or 3D display was never created), and the code immediately calls displayNode.SetSegmentVisibility3D / SetOpacity3D (lines 390, 445) without a None check, raising an unhandled exception in the Qt slot.",
+     "suggestion": "Guard with `if not displayNode: return` (or create the display node) in onSegmentSelected, onShowAll, onHideAll and onToggleOpacity.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 383
+     }
+    }
+   ]
+  },
+  {
+   "title": "Module cleanup method is empty",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "flash-lite"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 181,
+   "findings": [
+    {
+     "reviewer": "flash-lite",
+     "severity": "minor",
+     "title": "Module cleanup method is empty",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 181,
+     "line_end": 183,
+     "evidence": "    def cleanup(self):\n        \"\"\"Cleanup operations.\"\"\"\n        pass",
+     "explanation": "The widget overrides cleanup() but does not remove VTK/MRML observers or clean up dynamically added nodes/scenes when the module is exited or reloaded, which can lead to memory leaks or dangling scene observers.",
+     "suggestion": "Implement proper cleanup of observers and temporary UI/scene resources in the cleanup method.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 181
+     }
+    }
+   ]
+  },
+  {
+   "title": "No research-use disclaimer, sample data or functional test",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Readme.md",
+   "line": 149,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No research-use disclaimer, sample data or functional test",
+     "file": "Readme.md",
+     "line_start": 149,
+     "line_end": 153,
+     "evidence": "## Requirements\n\n- **3D Slicer**: Version 5.0 or later\n- **Python packages**: NumPy (included in Slicer)",
+     "explanation": "The module produces volumetric measurements that could be mistaken for clinical results, but the README contains no statement that it is for research use only and not a medical device, and there is no sample volBrain output or tutorial dataset so a new user cannot verify the label mapping or the numbers.",
+     "suggestion": "Add a short research-use-only disclaimer and a small sample dataset (or a synthetic label map) with expected volumes.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Readme.md",
+      "line": 149
+     }
+    }
+   ]
+  },
+  {
+   "title": "Readme describes features that the code does not implement",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Readme.md",
+   "line": 108,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Readme describes features that the code does not implement",
+     "file": "Readme.md",
+     "line_start": 107,
+     "line_end": 110,
+     "evidence": "- **📊 Excel**: Save as HTML table (.xls) - opens directly in Excel/LibreOffice\n- **💾 CSV**: Export as comma-separated values",
+     "explanation": "The Readme promises an .xls HTML Excel export, a 0-100% opacity slider, and a multi-select structure list, and names an 'Auto-Load from Folder' button. The code writes a real .xlsx (openpyxl), cycles opacity with a button (1.0 -> 0.5 -> 0.2), uses a single-selection combobox, and labels the button 'Load Automatically from Folder'. Users will be confused by the mismatch.",
+     "suggestion": "Update the Readme to match the actual controls and export formats (.xlsx with openpyxl, fallback to CSV).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Readme.md",
+      "line": 108
+     }
+    }
+   ]
+  },
+  {
+   "title": "Repeated runs accumulate stale nodes and the module tracks the old segmentation",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 558,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Repeated runs accumulate stale nodes and the module tracks the old segmentation",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 558,
+     "line_end": 566,
+     "evidence": "        nodeName = f\"volBrain_{category}\"\n        \n        # Remove old node if exists\n        try:\n            oldNode = slicer.util.getNode(nodeName)",
+     "explanation": "Only the volume node named `volBrain_<category>` is removed before recomputation; the label map (`volBrain_<category>_labels`), the color table and the segmentation node created at lines 577-578, 591-592 and 641-642 are never removed. On a second run Slicer renames the new segmentation to `..._Segmentation_1`, and `slicer.util.getFirstNodeByName(segNodeName)` at line 249 returns the stale first node, so the 3D controls act on outdated data and the scene fills with duplicates. onClear (lines 349-353) also leaves the label maps and color tables behind.",
+     "suggestion": "Remove the previously created label map, color table and segmentation nodes for the category before recomputing, and remove them in onClear.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 558
+     }
+    }
+   ]
+  },
+  {
+   "title": "Segment selector only controls the last loaded segmentation node",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 351,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Segment selector only controls the last loaded segmentation node",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 369,
+     "line_end": 376,
+     "evidence": "        for node in self.loadedNodes:\n            if node.IsA('vtkMRMLSegmentationNode'):\n                self.currentSegmentationNode = node",
+     "explanation": "updateSegmentSelector adds segments from every loaded segmentation node into one combo box but overwrites self.currentSegmentationNode with the last node, so selecting a structure that belongs to an earlier category (e.g. 'structures' after 'macro' was loaded) toggles visibility on the wrong node and appears to do nothing.",
+     "suggestion": "Store the owning segmentation node as item data for each entry and use it in onSegmentSelected/onShowAll/onHideAll/onToggleOpacity.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 351
+     }
+    }
+   ]
+  },
+  {
+   "title": "Standalone test file is not installed or registered",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/CMakeLists.txt",
+   "line": 5,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Standalone test file is not installed or registered",
+     "file": "VolBrainVolumeCalculator/CMakeLists.txt",
+     "line_start": 5,
+     "line_end": 11,
+     "evidence": "set(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n  )",
+     "explanation": "VolBrainVolumeCalculator/Testing/Python/VolBrainVolumeCalculatorTest.py is not listed in MODULE_PYTHON_SCRIPTS and no slicer_add_python_unittest call exists, so it is never installed or executed; only the trivial in-module test class (VolBrainVolumeCalculator.py:964-966) runs via WITH_GENERIC_TESTS.",
+     "suggestion": "Either register the test file with slicer_add_python_unittest or remove it, and add a real test that computes volumes from a small synthetic label map.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/CMakeLists.txt",
+      "line": 5
+     }
+    }
+   ]
+  },
+  {
+   "title": "Table sorting enabled before rows are inserted scrambles results",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 108,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Table sorting enabled before rows are inserted scrambles results",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 108,
+     "line_end": 108,
+     "evidence": "        self.resultsTable.setSortingEnabled(True)",
+     "explanation": "With sorting enabled, QTableWidget re-sorts while items are inserted one cell at a time in updateResultsTable (lines 289-298), which is a well-known cause of rows whose Category/Label/Name/Volume cells no longer belong together. The displayed volumes can therefore be attributed to the wrong structure.",
+     "suggestion": "Disable sorting while filling the table and re-enable it afterwards (or use setSortingEnabled(False) around the loop).",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 108
+     }
+    }
+   ]
+  },
+  {
+   "title": "Test class does not test functionality",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 964,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Test class does not test functionality",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 964,
+     "line_end": 966,
+     "evidence": "def test_VolBrainVolumeCalculator1(self):\n        self.delayDisplay(\"Starting test\")\n        self.delayDisplay('Test completed')",
+     "explanation": "The only test method just calls delayDisplay and checks nothing, so the volume calculation and label mapping are untested. Regressions such as the segment-naming issue would go unnoticed.",
+     "suggestion": "Add a test that builds a small synthetic labelmap (or a tiny NIfTI fixture), runs calculateVolumes, and checks voxel-based volumes and label names.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 964
+     }
+    }
+   ]
+  },
+  {
+   "title": "Contributor metadata inconsistent across files",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "SlicerVolBrain/SlicerVolBrain.s4ext",
+   "line": 11,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Contributor metadata inconsistent across files",
+     "file": "SlicerVolBrain/SlicerVolBrain.s4ext",
+     "line_start": 11,
+     "line_end": 11,
+     "evidence": "contributors Nimet Iyazi Acer (Gaziantep University)",
+     "explanation": "CMakeLists.txt:9 says 'Niyazi Acer (Erciyes University, Retired)' and VolBrainVolumeCalculator.py:18 says 'Niyazi Acer (Sanko University)', while the legacy .s4ext file names a different person and affiliation. The .s4ext file is a Slicer 4 leftover that is not used by the extension build.",
+     "suggestion": "Align the contributor strings and delete the unused .s4ext file.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerVolBrain/SlicerVolBrain.s4ext",
+      "line": 11
+     }
+    }
+   ]
+  },
+  {
+   "title": "Large screenshots and a duplicated icon are committed",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "Readme.md",
+   "line": 8,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Large screenshots and a duplicated icon are committed",
+     "file": "Readme.md",
+     "line_start": 8,
+     "line_end": 8,
+     "evidence": "![SlicerVolBrain Interface](Screenshots/interface.png)",
+     "explanation": "Screenshots/interface.png (973 KB) and Screenshots/3d_visualization.png (935 KB) plus two copies of the module icon (Resources/Icons/VolBrainVolumeCalculator.png and VolBrainVolumeCalculator/Resources/Icons/VolBrainVolumeCalculator.png) are stored in the repository. This is not a functional problem, just repository weight.",
+     "suggestion": "Downscale the screenshots and keep a single copy of the icon.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Readme.md",
+      "line": 8
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Deprecated `returnNode=True` loadVolume call likely breaks volume loading on Slicer 5.x",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 568,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Deprecated `returnNode=True` loadVolume call likely breaks volume loading on Slicer 5.x",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 568,
+     "line_end": 570,
+     "evidence": "        # Load NIfTI file\n        volumeNode = slicer.util.loadVolume(filePath, returnNode=True)[1]\n        volumeNode.SetName(nodeName)",
+     "explanation": "In Slicer 5.x `slicer.util.loadVolume` returns the loaded node directly and the `returnNode` argument is deprecated/ignored, so indexing the result with `[1]` raises TypeError ('vtkMRMLScalarVolumeNode' object is not subscriptable). Because the exception is caught in onApplyButton (lines 255-258) and only printed, the user would see the module finish with 'Complete! 0 structures calculated' instead of an error. Even if `returnNode` is still honoured, a failed load yields None and `SetName` raises AttributeError with the same silent outcome.",
+     "suggestion": "Use `volumeNode = slicer.util.loadVolume(filePath)` and check for None, reporting failure with slicer.util.errorDisplay.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 568
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Per-file failures are swallowed; UI reports success with zero results",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 255,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Per-file failures are swallowed; UI reports success with zero results",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 255,
+     "line_end": 258,
+     "evidence": "            except Exception as e:\n                print(f\"ERROR {category}: {str(e)}\")\n                import traceback\n                traceback.print_exc()",
+     "explanation": "Any failure while loading or computing a category (bad file, unsupported API, empty label map causing np.max to raise at line 594) is only written to the Python console. The user, who typically does not have the console open, then gets 'Complete! {len(allResults)} structures calculated' and a message box at lines 277/285, so a total failure looks like a successful run with no structures.",
+     "suggestion": "Collect errors and show them with slicer.util.errorDisplay / warningDisplay, and set the status label to an error state.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 255
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Repeated calculations accumulate nodes and duplicate entries",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 245,
+     "line_end": 253,
+     "evidence": "if segNode:\n                            self.loadedNodes.append(segNode)\n                            if not self.currentSegmentationNode:",
+     "explanation": "Each run of onApplyButton appends the segmentation node to self.loadedNodes without de-duplication. calculateVolumes removes only the volume node named volBrain_<cat> and never removes the previous labelmap '<name>_labels', color table, or segmentation nodes. Repeated use clutters the MRML scene and can leave stale nodes, and onClear/updateSegmentSelector may then act on duplicates.",
+     "suggestion": "Remove previous labelmap, color, and segmentation nodes for the category before creating new ones, and avoid duplicate entries in loadedNodes.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 250
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Segment name/color assignment likely never matches (Label_N lookup)",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+   "line": 651,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Segment renaming lookup uses a name that does not exist",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 649,
+     "line_end": 654,
+     "evidence": "            for labelInt in uniqueLabels:\n                labelName = labelNames.get(int(labelInt), f\"Label_{int(labelInt)}\")\n                segmentId = segmentation.GetSegmentIdBySegmentName(f\"Label_{int(labelInt)}\")",
+     "explanation": "ImportLabelmapToSegmentationNode names segments after the label map's color node entries (the anatomical names set at lines 620/625), not 'Label_<n>', so GetSegmentIdBySegmentName returns an empty string and the renaming/coloring block is dead code. It happens to be harmless only because the color table already carries the names.",
+     "suggestion": "Iterate over the segmentation's segments and match by label value (GetSegment.GetLabelValue()) instead of by name.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 649
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Segment name/color assignment likely never matches (Label_N lookup)",
+     "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+     "line_start": 648,
+     "line_end": 659,
+     "evidence": "segmentId = segmentation.GetSegmentIdBySegmentName(f\"Label_{int(labelInt)}\")\n                  if segmentId:\n                      segment = segmentation.GetSegment(segmentId)\n                      segment.SetName(labelName)",
+     "explanation": "After ImportLabelmapToSegmentationNode, the code searches for segments named 'Label_<n>'. Slicer normally names imported segments from the labelmap color table (which this code sets just before), so the lookup returns no ID, and the 'if segmentId:' branch is skipped. The 3D segments then keep non-volBrain names, and the segment selector shows wrong names. This is a correctness issue, not a safety issue. Not verified by running Slicer.",
+     "suggestion": "Look up segments by the label value or by segment index after import (or use the color table name), and verify with a test on a small synthetic labelmap.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "VolBrainVolumeCalculator/VolBrainVolumeCalculator.py",
+      "line": 651
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of utility",
+   "category": "utility",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "environment": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "packaging": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "minor issues"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 5,
+  "single": 15,
+  "unverified": 0,
+  "total": 17
+ }
+}

@@ -1,0 +1,1128 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Binary ONNX model downloaded and loaded without user confirmation or integrity verification",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 405,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Binary ONNX model downloaded and loaded without user confirmation or integrity verification",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 396,
+     "line_end": 409,
+     "evidence": "            # Download\n            urllib.request.urlretrieve(self.MODEL_URL, modelPath)\n            \n            logging.info(f\"Model downloaded successfully: {modelPath}\")\n            return True",
+     "explanation": "On the first click of 'Start Segmentation' the module silently downloads a binary model from https://github.com/cuneytozdemir/SlicerFootSegmentation/releases/download/v1.0.0/foot_segmentation.onnx into the extension's own installation directory and immediately loads it with onnxruntime (line 447). The user is never told that a download of unknown size is starting, and there is no size or SHA-256 check, so a replaced/corrupted release asset or a truncated transfer is loaded without detection. Writing into the module directory also fails or is shared when Slicer is installed system-wide or multi-user.",
+     "suggestion": "Show a confirmation dialog stating the source, size and destination before downloading; verify a published SHA-256 of the model; download to a temporary file and move it into place only after verification; prefer a user-writable cache directory (e.g. under the Slicer settings/temporary folder) instead of the module install path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 405
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Interrupted model download leaves a truncated file that is reused forever",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 401,
+     "line_end": 417,
+     "evidence": "urllib.request.urlretrieve(self.MODEL_URL, modelPath)",
+     "explanation": "downloadModel calls urllib.request.urlretrieve directly to the final modelPath (line 406) with no timeout and no temporary file. If the transfer fails midway, the partial file remains; the existence check at lines 387-390 and 437 then skips re-download, and ort.InferenceSession fails on every later run until the user manually deletes the file. The user sees a cryptic ONNX load error rather than a download error.",
+     "suggestion": "Download to modelPath + '.part' with a timeout, verify size and/or SHA-256 against a published value, then os.replace into place; delete the partial file on exception.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 406
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Downloaded model is executed without any integrity verification",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 357,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Hard-coded patch size contradicts the documented model input size",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 365,
+     "line_end": 368,
+     "evidence": "        # Model configuration - must match ONNX model input shape (batch, depth, height, width, channels)\n        # Based on error analysis: index 2 expects 64, index 3 expects 128\n        # So model expects (1, 64, 64, 128, 1) -> patchSize = (depth=64, height=64, width=128)\n        self.patchSize = (64, 64, 128)",
+     "explanation": "The patch size is a hard-coded constant derived from 'error analysis' rather than read from the loaded model's input shape, and it disagrees with README.md:71 ('Input Size | 64 x 128 x 128'). If the release asset is ever replaced with a model of a different input shape, inference fails at runtime with an opaque onnxruntime error.",
+     "suggestion": "Derive the patch size from self.session.get_inputs()[0].shape after loading, and make the README consistent with the code.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 365
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Downloaded model is executed without any integrity verification",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 355,
+     "line_end": 358,
+     "evidence": "MODEL_URL = \"https://github.com/cuneytozdemir/SlicerFootSegmentation/releases/download/v1.0.0/foot_segmentation.onnx\"",
+     "explanation": "The ONNX model is fetched from a GitHub release URL (line 357) and then loaded into onnxruntime with no checksum or signature check (line 447). A compromised release, or a MITM on an unverified path, would feed arbitrary model content into the user's process. The risk is limited because ONNX is not pickle, but there is no integrity control and no user confirmation before a large download.",
+     "suggestion": "Publish a SHA-256 for the model in the code and verify it before loading; ask the user to confirm the download; consider pinning the catalog scm_revision to a commit.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 357
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "No license terms for the downloaded model weights or the sample CT data",
+   "category": "license",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "README.md",
+   "line": 96,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "No license terms for the downloaded model weights or the sample CT data",
+     "file": "README.md",
+     "line_start": 96,
+     "line_end": 98,
+     "evidence": "## License\n\nThis project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.",
+     "explanation": "The MIT LICENSE covers the source code only. The extension downloads two author-distributed binary/data assets - foot_segmentation.onnx (FootSegmentation.py:357) and sample_foot_ct.nrrd (FootSegmentation.py:104) - and neither the README nor any other file states their license, provenance, or the consent/ethics basis for the training and sample CT data ('Training Data | Foot CT scans', README.md:73). Users and the index therefore have no stated permission to redistribute or use these assets, and no way to judge whether the sample data is anonymised.",
+     "suggestion": "Add an explicit license and provenance statement for the model weights and the sample data (including confirmation that the sample CT is anonymised and may be redistributed), and reference it from the README and the module help text.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 96
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Segment rename and recolor affects a pre-existing segment, not the new one",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 609,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Segment rename and recolor affects a pre-existing segment, not the new one",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 598,
+     "line_end": 611,
+     "evidence": "segment = segmentation.GetNthSegment(0)\n            segment.SetName(\"Foot\")\n            segment.SetColor(0.9, 0.2, 0.2)  # Red color",
+     "explanation": "ImportLabelmapToSegmentationNode appends the new segment to the output segmentation, which may already contain user segments. The code then renames and recolors segment index 0, which is the first pre-existing segment if one exists. This silently mislabels user data.",
+     "suggestion": "Record segment IDs before the import and rename only the newly added segment (or the one with the imported labelmap value), then check for an existing 'Foot' segment.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 609
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Sliding-window inference runs on the GUI thread and can be re-entered",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 522,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Sliding-window inference runs on the GUI thread and can be re-entered",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 522,
+     "line_end": 536,
+     "evidence": "        for i, (z, y, x) in enumerate(patch_locations):\n            patch = volume_padded[z:z+pd, y:y+ph, x:x+pw]\n            patch_input = patch[np.newaxis, ..., np.newaxis].astype(np.float32)\n            \n            # Run inference\n            result = self.session.run([self.outputName], {self.inputName: patch_input})",
+     "explanation": "runSegmentation is called directly from the button slot (line 318) and the whole patch loop executes on the main thread; progress is only pumped every 5 patches (line 534) and updateProgress calls slicer.app.processEvents() (line 343). A full CT volume with 64x64x128 patches on CPU can take many minutes, during which the UI is unresponsive, and because processEvents() is pumped while segmentButton is still enabled (it is only toggled by updateButtonState on node change, line 284) the user can click Segment again and start a second, nested inference that writes into the same segmentation node and scene.",
+     "suggestion": "Run the inference in a worker thread (e.g. a ctk.ctkWorkers/qSlicerScriptedLoadableModuleLogic-style worker) or at minimum disable the button and use a modal progress dialog with a cancel option while the loop runs.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 522
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "onnxruntime installed into Slicer's shared Python environment without asking and unpinned",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 38,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "onnxruntime installed into Slicer's shared Python environment without asking and unpinned",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 38,
+     "line_end": 45,
+     "evidence": "    except ImportError:\n        logging.info(\"Installing onnxruntime...\")\n        try:\n            slicer.util.pip_install('onnxruntime')\n            import onnxruntime",
+     "explanation": "The first segmentation run (loadModel -> ensureOnnxruntimeInstalled, lines 429/567) runs `pip install onnxruntime` into the Slicer Python environment shared by all extensions, with no confirmation dialog and no version constraint. Because the requirement is unpinned, a future onnxruntime release whose numpy requirement exceeds Slicer's bundled numpy can cause pip to upgrade numpy inside Slicer, breaking Slicer and unrelated extensions for users who never open this module. The user is not informed that a package will be installed.",
+     "suggestion": "Ask the user for explicit confirmation before installing (slicer.util.confirmOkCancelDisplay), pin a version known to work with the targeted Slicer release, and document the dependency in the README/extension metadata.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 38
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "minor",
+     "title": "Automatic dependency installation at runtime",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 31,
+     "line_end": 49,
+     "evidence": "            slicer.util.pip_install('onnxruntime')",
+     "explanation": "",
+     "suggestion": "Declare onnxruntime in EXTENSION_DEPENDS in CMakeLists.txt or prompt the user before silent installation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 41
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "'Use GPU' option cannot work: only CPU onnxruntime is installed",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 441,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "'Use GPU' option cannot work: only CPU onnxruntime is installed",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 441,
+     "line_end": 447,
+     "evidence": "        if useGPU:\n            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']\n        else:\n            providers = ['CPUExecutionProvider']\n        \n        logging.info(f\"Loading ONNX model: {modelPath}\")\n        self.session = ort.InferenceSession(modelPath, providers=providers)",
+     "explanation": "The module only ever installs the CPU wheel `onnxruntime` (line 41), which does not ship CUDAExecutionProvider, so checking 'Use GPU' silently falls back to CPU. Users who tick the box expecting acceleration get no error and no speedup, and the README advertises 'GPU Support: Optional CUDA acceleration'.",
+     "suggestion": "Either install onnxruntime-gpu when the user opts in (with confirmation and a CUDA availability check), or detect the available providers via ort.get_available_providers() and tell the user when CUDA is unavailable.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 441
+     }
+    }
+   ]
+  },
+  {
+   "title": "Catalog pins a moving branch rather than a reviewed commit",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "FootSegmentation.json",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Catalog pins a moving branch rather than a reviewed commit",
+     "file": "FootSegmentation.json",
+     "line_start": 1,
+     "line_end": 6,
+     "evidence": "\"scm_revision\": \"main\"",
+     "explanation": "scm_revision is 'main', so the code that users receive can change after this review without a catalog update. This is allowed by policy but means the approval covers only the reviewed commit at the time of review.",
+     "suggestion": "Pin scm_revision to a specific commit hash that has been reviewed.",
+     "confidence": "high",
+     "verification": {
+      "status": "file not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Model weights and training data have no stated license or provenance",
+   "category": "license",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "LICENSE",
+   "line": 3,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Model weights and training data have no stated license or provenance",
+     "file": "LICENSE",
+     "line_start": 1,
+     "line_end": 3,
+     "evidence": "Copyright (c) 2026 [Cüneyt ÖZDEMİR]",
+     "explanation": "The MIT license covers the code only. The ONNX model is downloaded from the release, and the training data (foot CT scans) is not described. Users and redistributors cannot tell whether the model may be redistributed or used commercially. The copyright line also has bracket placeholders.",
+     "suggestion": "State a license for the model weights and describe the training data source and consent/ethics approval; remove the brackets from the copyright line.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "LICENSE",
+      "line": 3
+     }
+    }
+   ]
+  },
+  {
+   "title": "Module test does not test anything",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 633,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Module test does not test anything",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 633,
+     "line_end": 637,
+     "evidence": "    def test_FootSegmentation1(self):\n        self.delayDisplay(\"Starting the test\")\n        \n        # Test logic instantiation\n        logic = FootSegmentationLogic()",
+     "explanation": "The only test instantiates the logic class and displays 'Test passed'; it never loads a volume, runs inference, or checks the produced segmentation, so CI green tells nothing about whether the module works. WITH_GENERIC_TESTS is enabled in FootSegmentation/CMakeLists.txt:21, so this test is what runs in the extension build.",
+     "suggestion": "Add a test that loads the registered sample data (or a small synthetic volume) and asserts that a non-empty segment is produced, or at least that model download/loading and array handling succeed.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 633
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Test does not exercise segmentation; no validation or clinical disclaimer",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 633,
+     "line_end": 639,
+     "evidence": "logic = FootSegmentationLogic()\n        \n        self.delayDisplay(\"Test passed\")",
+     "explanation": "The only test (lines 633-639) instantiates FootSegmentationLogic and asserts nothing. There are no performance or validation metrics for the model, and no statement that the output is not for clinical use, which matters for a medical AI tool.",
+     "suggestion": "Add a test with a small synthetic volume and a mocked session; add a research-use disclaimer in the help text and README.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 135
+     }
+    }
+   ]
+  },
+  {
+   "title": "No clinical-use disclaimer and no validation information for the AI model",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 68,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No clinical-use disclaimer and no validation information for the AI model",
+     "file": "README.md",
+     "line_start": 68,
+     "line_end": 73,
+     "evidence": "| Property | Value |\n|----------|-------|\n| Architecture | 3D U-Net |\n| Input Size | 64 × 128 × 128 |\n| Format | ONNX |\n| Training Data | Foot CT scans |",
+     "explanation": "The README markets the module to 'medical professionals' (README.md:20) and describes it as AI-powered segmentation, but gives no dataset size, no accuracy/Dice metrics, no external validation, and no statement that the output is not for clinical diagnosis. Users cannot judge whether the segmentation is trustworthy for their anatomy or scanner.",
+     "suggestion": "Add a short 'Intended use / limitations' section with a research-use-only disclaimer, the training data description, and any reported validation metrics.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 68
+     }
+    }
+   ]
+  },
+  {
+   "title": "No parameter node; widget state is not saved and cleanup is empty",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 277,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No parameter node; widget state is not saved and cleanup is empty",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 277,
+     "line_end": 279,
+     "evidence": "    def cleanup(self):\n        \"\"\"Clean up when module is closed.\"\"\"\n        pass",
+     "explanation": "The widget keeps threshold, overlap, GPU flag and node selections only in Qt widgets, so nothing is persisted in the MRML scene and the module cannot be driven from a parameter node or scripted reproducibly. VTKObservationMixin is initialised (line 126) but no observers are added or removed, so the mixin is unused.",
+     "suggestion": "Add a vtkMRMLScriptedModuleNode parameter node with setDefaultModuleLocation/updateGUIFromParameterNode/updateParameterNodeFromGUI, as in the Slicer scripted-module template.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 277
+     }
+    }
+   ]
+  },
+  {
+   "title": "Output geometry copied from volume without checking the labelmap array axes",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 573,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Output geometry copied from volume without checking the labelmap array axes",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 572,
+     "line_end": 596,
+     "evidence": "volumeArray = slicer.util.arrayFromVolume(inputVolume)",
+     "explanation": "slicer.util.arrayFromVolume returns a (k,j,i) array and the model is fed (depth, height, width) patches. Only the origin, spacing and IJK matrix are copied (lines 590-596); the array orientation is not validated against the model's expected axis order, so a mis-oriented result could be produced silently. This should be verified on real data.",
+     "suggestion": "Document the expected axis order and check it against a known-good sample; add a test that compares output geometry with input.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 573
+     }
+    }
+   ]
+  },
+  {
+   "title": "Truncated model download is later treated as a valid model",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 387,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Truncated model download is later treated as a valid model",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 387,
+     "line_end": 390,
+     "evidence": "        # Skip download if model already exists\n        if os.path.exists(modelPath):\n            logging.info(f\"Model already exists: {modelPath}\")\n            return True",
+     "explanation": "urlretrieve writes directly to the final path (line 406). If the transfer is interrupted, a partial file remains and every later run short-circuits on os.path.exists and hands the corrupt file to ort.InferenceSession, producing a confusing load error instead of re-downloading.",
+     "suggestion": "Download to a temporary file, verify size/hash, then rename atomically; delete the partial file on failure.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 387
+     }
+    }
+   ]
+  },
+  {
+   "title": "README claims a Turkish interface that does not exist",
+   "category": "utility",
+   "severity": "info",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "info",
+    "info"
+   ],
+   "file": "README.md",
+   "line": 20,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "README claims a Turkish interface that does not exist",
+     "file": "README.md",
+     "line_start": 20,
+     "line_end": 20,
+     "evidence": "- 🌍 Multi-language UI: Turkish interface for medical professionals",
+     "explanation": "All widget strings in FootSegmentation.py (e.g. 'Input Settings', 'Start Segmentation', 'Threshold') are English, so the advertised Turkish UI is not present; this is a documentation inaccuracy only.",
+     "suggestion": "Remove the claim or implement the translation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 20
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "README says the UI is Turkish, but the UI is in English",
+     "file": "README.md",
+     "line_start": 20,
+     "line_end": 20,
+     "evidence": "- 🌍 Multi-language UI: Turkish interface for medical professionals",
+     "explanation": "README line 20 claims a Turkish interface, but all widget labels in FootSegmentation.py (lines 147-262) are English. This is a documentation inaccuracy and does not affect safety.",
+     "suggestion": "Correct the README or add the Turkish translation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 20
+     }
+    }
+   ]
+  },
+  {
+   "title": "Sample data source registered at module load for every Slicer user",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 101,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Sample data source registered at module load for every Slicer user",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 101,
+     "line_end": 104,
+     "evidence": "            SampleData.SampleDataLogic.registerCustomSampleDataSource(\n                category='FootSegmentation',\n                sampleName='FootCT',\n                uris=\"https://github.com/cuneytozdemir/SlicerFootSegmentation/releases/download/v1.0.0/sample_foot_ct.nrrd\",",
+     "explanation": "This runs in the module class __init__ (line 92), i.e. at Slicer startup for every user, adding a global Sample Data entry. This is standard practice and downloads only on user request, but it is a global side effect worth noting; failures are swallowed at debug level (line 112).",
+     "suggestion": "No change required; consider logging registration failure at warning level so a broken URL is noticed.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 101
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unused SSL context suggests custom certificate handling that is not applied",
+   "category": "safety",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 402,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Unused SSL context suggests custom certificate handling that is not applied",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 402,
+     "line_end": 406,
+     "evidence": "            # SSL context\n            context = ssl.create_default_context()\n            \n            # Download\n            urllib.request.urlretrieve(self.MODEL_URL, modelPath)",
+     "explanation": "The created SSL context is never passed to urlretrieve, so it is dead code. It is not a vulnerability (urlretrieve still uses HTTPS with default verification), but it misleadingly implies certificate handling that does not happen and would hide a future attempt to disable verification.",
+     "suggestion": "Remove the unused context, or use urllib.request.urlopen(self.MODEL_URL, context=context) explicitly.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 402
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Binary ONNX model downloaded and loaded without user confirmation or integrity verification",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 405,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Binary ONNX model downloaded and loaded without user confirmation or integrity verification",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 396,
+     "line_end": 409,
+     "evidence": "            # Download\n            urllib.request.urlretrieve(self.MODEL_URL, modelPath)\n            \n            logging.info(f\"Model downloaded successfully: {modelPath}\")\n            return True",
+     "explanation": "On the first click of 'Start Segmentation' the module silently downloads a binary model from https://github.com/cuneytozdemir/SlicerFootSegmentation/releases/download/v1.0.0/foot_segmentation.onnx into the extension's own installation directory and immediately loads it with onnxruntime (line 447). The user is never told that a download of unknown size is starting, and there is no size or SHA-256 check, so a replaced/corrupted release asset or a truncated transfer is loaded without detection. Writing into the module directory also fails or is shared when Slicer is installed system-wide or multi-user.",
+     "suggestion": "Show a confirmation dialog stating the source, size and destination before downloading; verify a published SHA-256 of the model; download to a temporary file and move it into place only after verification; prefer a user-writable cache directory (e.g. under the Slicer settings/temporary folder) instead of the module install path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 405
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Interrupted model download leaves a truncated file that is reused forever",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 401,
+     "line_end": 417,
+     "evidence": "urllib.request.urlretrieve(self.MODEL_URL, modelPath)",
+     "explanation": "downloadModel calls urllib.request.urlretrieve directly to the final modelPath (line 406) with no timeout and no temporary file. If the transfer fails midway, the partial file remains; the existence check at lines 387-390 and 437 then skips re-download, and ort.InferenceSession fails on every later run until the user manually deletes the file. The user sees a cryptic ONNX load error rather than a download error.",
+     "suggestion": "Download to modelPath + '.part' with a timeout, verify size and/or SHA-256 against a published value, then os.replace into place; delete the partial file on exception.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 406
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Downloaded model is executed without any integrity verification",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 357,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Hard-coded patch size contradicts the documented model input size",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 365,
+     "line_end": 368,
+     "evidence": "        # Model configuration - must match ONNX model input shape (batch, depth, height, width, channels)\n        # Based on error analysis: index 2 expects 64, index 3 expects 128\n        # So model expects (1, 64, 64, 128, 1) -> patchSize = (depth=64, height=64, width=128)\n        self.patchSize = (64, 64, 128)",
+     "explanation": "The patch size is a hard-coded constant derived from 'error analysis' rather than read from the loaded model's input shape, and it disagrees with README.md:71 ('Input Size | 64 x 128 x 128'). If the release asset is ever replaced with a model of a different input shape, inference fails at runtime with an opaque onnxruntime error.",
+     "suggestion": "Derive the patch size from self.session.get_inputs()[0].shape after loading, and make the README consistent with the code.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 365
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Downloaded model is executed without any integrity verification",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 355,
+     "line_end": 358,
+     "evidence": "MODEL_URL = \"https://github.com/cuneytozdemir/SlicerFootSegmentation/releases/download/v1.0.0/foot_segmentation.onnx\"",
+     "explanation": "The ONNX model is fetched from a GitHub release URL (line 357) and then loaded into onnxruntime with no checksum or signature check (line 447). A compromised release, or a MITM on an unverified path, would feed arbitrary model content into the user's process. The risk is limited because ONNX is not pickle, but there is no integrity control and no user confirmation before a large download.",
+     "suggestion": "Publish a SHA-256 for the model in the code and verify it before loading; ask the user to confirm the download; consider pinning the catalog scm_revision to a commit.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 357
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "No license terms for the downloaded model weights or the sample CT data",
+   "category": "license",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "README.md",
+   "line": 96,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "No license terms for the downloaded model weights or the sample CT data",
+     "file": "README.md",
+     "line_start": 96,
+     "line_end": 98,
+     "evidence": "## License\n\nThis project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.",
+     "explanation": "The MIT LICENSE covers the source code only. The extension downloads two author-distributed binary/data assets - foot_segmentation.onnx (FootSegmentation.py:357) and sample_foot_ct.nrrd (FootSegmentation.py:104) - and neither the README nor any other file states their license, provenance, or the consent/ethics basis for the training and sample CT data ('Training Data | Foot CT scans', README.md:73). Users and the index therefore have no stated permission to redistribute or use these assets, and no way to judge whether the sample data is anonymised.",
+     "suggestion": "Add an explicit license and provenance statement for the model weights and the sample data (including confirmation that the sample CT is anonymised and may be redistributed), and reference it from the README and the module help text.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 96
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Segment rename and recolor affects a pre-existing segment, not the new one",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 609,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Segment rename and recolor affects a pre-existing segment, not the new one",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 598,
+     "line_end": 611,
+     "evidence": "segment = segmentation.GetNthSegment(0)\n            segment.SetName(\"Foot\")\n            segment.SetColor(0.9, 0.2, 0.2)  # Red color",
+     "explanation": "ImportLabelmapToSegmentationNode appends the new segment to the output segmentation, which may already contain user segments. The code then renames and recolors segment index 0, which is the first pre-existing segment if one exists. This silently mislabels user data.",
+     "suggestion": "Record segment IDs before the import and rename only the newly added segment (or the one with the imported labelmap value), then check for an existing 'Foot' segment.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 609
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Sliding-window inference runs on the GUI thread and can be re-entered",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 522,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Sliding-window inference runs on the GUI thread and can be re-entered",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 522,
+     "line_end": 536,
+     "evidence": "        for i, (z, y, x) in enumerate(patch_locations):\n            patch = volume_padded[z:z+pd, y:y+ph, x:x+pw]\n            patch_input = patch[np.newaxis, ..., np.newaxis].astype(np.float32)\n            \n            # Run inference\n            result = self.session.run([self.outputName], {self.inputName: patch_input})",
+     "explanation": "runSegmentation is called directly from the button slot (line 318) and the whole patch loop executes on the main thread; progress is only pumped every 5 patches (line 534) and updateProgress calls slicer.app.processEvents() (line 343). A full CT volume with 64x64x128 patches on CPU can take many minutes, during which the UI is unresponsive, and because processEvents() is pumped while segmentButton is still enabled (it is only toggled by updateButtonState on node change, line 284) the user can click Segment again and start a second, nested inference that writes into the same segmentation node and scene.",
+     "suggestion": "Run the inference in a worker thread (e.g. a ctk.ctkWorkers/qSlicerScriptedLoadableModuleLogic-style worker) or at minimum disable the button and use a modal progress dialog with a cancel option while the loop runs.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 522
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "onnxruntime installed into Slicer's shared Python environment without asking and unpinned",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "FootSegmentation/FootSegmentation.py",
+   "line": 38,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "onnxruntime installed into Slicer's shared Python environment without asking and unpinned",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 38,
+     "line_end": 45,
+     "evidence": "    except ImportError:\n        logging.info(\"Installing onnxruntime...\")\n        try:\n            slicer.util.pip_install('onnxruntime')\n            import onnxruntime",
+     "explanation": "The first segmentation run (loadModel -> ensureOnnxruntimeInstalled, lines 429/567) runs `pip install onnxruntime` into the Slicer Python environment shared by all extensions, with no confirmation dialog and no version constraint. Because the requirement is unpinned, a future onnxruntime release whose numpy requirement exceeds Slicer's bundled numpy can cause pip to upgrade numpy inside Slicer, breaking Slicer and unrelated extensions for users who never open this module. The user is not informed that a package will be installed.",
+     "suggestion": "Ask the user for explicit confirmation before installing (slicer.util.confirmOkCancelDisplay), pin a version known to work with the targeted Slicer release, and document the dependency in the README/extension metadata.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 38
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "minor",
+     "title": "Automatic dependency installation at runtime",
+     "file": "FootSegmentation/FootSegmentation.py",
+     "line_start": 31,
+     "line_end": 49,
+     "evidence": "            slicer.util.pip_install('onnxruntime')",
+     "explanation": "",
+     "suggestion": "Declare onnxruntime in EXTENSION_DEPENDS in CMakeLists.txt or prompt the user before silent installation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FootSegmentation/FootSegmentation.py",
+      "line": 41
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of license",
+   "category": "license",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D8",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "minor"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D9",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of utility",
+   "category": "utility",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D10",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8",
+  "D9",
+  "D10"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "minor",
+   "haiku": "minor"
+  },
+  "packaging": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 10,
+  "single": 12,
+  "unverified": 1,
+  "total": 17
+ }
+}

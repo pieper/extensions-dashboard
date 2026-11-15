@@ -1,0 +1,156 @@
+{
+ "purpose": "ImpactSynth (IMPACT-Synth) is a thin 3D Slicer front end for the TotalSynth synthetic-CT models: it registers KetFusion-free KonfAI app templates so users can run MRI/CBCT-to-CT synthesis, evaluate an sCT against a reference CT, estimate uncertainty, and run segmentation models on the sCT. Its target users are radiotherapy / medical-imaging researchers working with MR-only or CBCT-based workflows.",
+ "summary": "The extension repository is a small, readable wrapper: one scripted module (~150 lines) that delegates all logic to the KonfAI extension's widgets and registers four TotalSynth apps by name plus three segmentation apps. Code is Apache-2.0 with a matching LICENSE, the catalog entry's build_dependencies match EXTENSION_DEPENDS (\"KonfAI\"), every Python file is installed by CMake, and there is no data upload, telemetry, download-and-exec or credential handling in this repository. Non-blocking issues: a top-level `from KonfAI import ...` (including a private helper) runs at Slicer startup and makes the whole module unloadable if KonfAI's private API changes; PyTorch is only mentioned in the README, not declared as a dependency; no real tests; heavy behaviour (installing konfai-apps, Hugging Face weight download, remote-server inference) lives in the KonfAI/SlicerKonfAI extensions which I could not inspect. 🟢 Recommend merge: no blocking safety, licence or catalog issues found in the inspected source.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read all Python (ImpactSynth/ImpactSynth.py 1-147), CMakeLists.txt files, .pre-commit-config.yaml, README.md and TUTORIAL.md; a full-text search for requests/urllib/subprocess/pip_install/eval/exec/token/upload/telemetry returned no hits in this repo, and the only network activity described (Hugging Face weight download, optional `konfai-apps-server`) is user-initiated and implemented in the KonfAI extension, which is not in this repository."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "This module installs nothing itself, but ImpactSynth/ImpactSynth.py:18 imports KonfAI at module import time (executed by Slicer's scripted-module scan at startup), and README.md:134 states `konfai-apps` is installed into Slicer's Python on first module opening - that install path is in the KonfAI extension and could not be inspected."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "ImpactSynth/CMakeLists.txt installs ImpactSynth.py and the icon, CMakeLists.txt:13 sets EXTENSION_DEPENDS \"KonfAI\" matching the catalog build_dependencies, and the icon/screenshot files exist; but PyTorch, which README.md:133 requires, is not declared as an extension dependency, and the entry pins scm_revision \"main\" (a moving branch)."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is the full Apache-2.0 text and ImpactSynth/ImpactSynth.py:3,15 carry Apache-2.0 headers/SPDX, which permits distribution; the licence of the Hugging Face weights and of the `impact_synth_konfai` pip package is not stated in this repository and was not verifiable."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "The ScriptedLoadableModule structure is correct, the KonfAI API-version check (lines 100-109) reports mismatches to the user, and enter/exit/cleanup delegate to the KonfAI widget; weaknesses are the top-level import of the private helper `_is_reload_setup`, a `QWidget | None` annotation requiring Python >= 3.10, state kept entirely outside Slicer parameter nodes, and no actual test being registered."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md and TUTORIAL.md document the workflow with eight screenshots, a video link, model selection guidance, a performance table with held-out metrics, a model card/paper reference and an explicit warning to validate on own data before clinical use (README.md:113); overlap with existing modules is limited to segmentation apps reused from KonfAI."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "KonfAI imported at top level, so the dependency is loaded for every Slicer startup",
+   "file": "ImpactSynth/ImpactSynth.py",
+   "line_start": 17,
+   "line_end": 22,
+   "evidence": "import slicer\nfrom KonfAI import KonfAIAppTemplateWidget, KonfAICoreWidget, _is_reload_setup\nfrom qt import QWidget",
+   "explanation": "Slicer imports scripted-module Python files when it scans the extension module paths at startup, so this top-level import executes for every user of that Slicer installation, including users who never open Impact Synth. Whatever KonfAI pulls in at import time (its widgets, and potentially torch/other heavy dependencies) then affects startup time and memory for everyone. The same file re-imports KonfAI inside setup() (line 100), which suggests the author was aware heavy imports belong in setup() but the top-level import was left in place.",
+   "suggestion": "Move the KonfAI imports into ImpactSynthWidget.setup() (and store the classes on the instance) or into a try/except that reports a clear message, so that importing the module file has no third-party side effects.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Module fails to load entirely if KonfAI renames its private helper `_is_reload_setup`",
+   "file": "ImpactSynth/ImpactSynth.py",
+   "line_start": 18,
+   "line_end": 18,
+   "evidence": "from KonfAI import KonfAIAppTemplateWidget, KonfAICoreWidget, _is_reload_setup",
+   "explanation": "The module depends on an underscore-prefixed private symbol of KonfAI in a top-level import. A refactor of KonfAI's internals produces an ImportError while Slicer imports this file, so the module disappears from the module selector with only a console traceback instead of a readable diagnostic, even though the public API version check at lines 102-109 would otherwise have handled incompatibilities gracefully.",
+   "suggestion": "Import `_is_reload_setup` defensively (e.g. getattr on the KonfAI module inside setup(), defaulting to a no-op or reporting the incompatibility through the existing API-version message).",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "`konfai-apps` is pip-installed into Slicer's Python on first module opening (implemented in the dependency extension)",
+   "file": "README.md",
+   "line_start": 133,
+   "line_end": 134,
+   "evidence": "2. Restart Slicer and open **Impact Synth** (category **Image Synthesis**). On the first opening, `konfai-apps` is installed into Slicer's Python.",
+   "explanation": "Opening the module modifies Slicer's shared Python environment; TUTORIAL.md:12-14 repeats this. The actual install code lives in the KonfAI extension, which is not in this repository, so I could not verify whether the user is asked before installing, whether pinned versions of Slicer-bundled packages (numpy, scipy, SimpleITK) are downgraded, or whether PyTorch is pulled via pip rather than the SlicerPyTorch extension. The README does correctly state that PyTorch comes from SlicerPyTorch.",
+   "suggestion": "State in the module help/UI that a Python package will be installed into Slicer on first use, and confirm in the KonfAI review that the install is confirmed by the user and does not pin Slicer-bundled packages.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "PyTorch required by the README but not declared as an extension dependency",
+   "file": "CMakeLists.txt",
+   "line_start": 13,
+   "line_end": 13,
+   "evidence": "set(EXTENSION_DEPENDS \"KonfAI\")",
+   "explanation": "README.md:133 instructs users to install the PyTorch extension manually and KonfAI inference needs torch, but neither the catalog entry ('build_dependencies': ['KonfAI']) nor EXTENSION_DEPENDS mentions PyTorch. A user who installs only ImpactSynth and misses step 1 gets an inference failure instead of having the dependency pulled in by the Extensions Manager (unless the separate KonfAI entry already declares PyTorch).",
+   "suggestion": "Add PyTorch (and keep it consistent with the catalog entry's build_dependencies) if the KonfAI entry does not already declare it, or document explicitly that PyTorch is an indirect dependency satisfied by KonfAI.",
+   "confidence": "low"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "No automated tests: the module test file is commented out and the module defines no test class",
+   "file": "ImpactSynth/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "ImpactSynth/CMakeLists.txt:26 registers `slicer_add_python_unittest(SCRIPT ImpactSynth.py)`, but ImpactSynth.py contains no test class, and the dedicated test CMake entry is commented out. Consequently nothing exercises the widget construction, the KonfAI API-version guard, or the app registration in CI, so a broken dependency or a wrong app identifier would only be discovered by a user opening the module.",
+   "suggestion": "Add a minimal module test (instantiate the widget / check the app identifiers resolve) and enable it in ImpactSynth/Testing/Python/CMakeLists.txt.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "PEP 604 annotation `QWidget | None` requires Python >= 3.10 at import time",
+   "file": "ImpactSynth/ImpactSynth.py",
+   "line_start": 85,
+   "line_end": 85,
+   "evidence": "def __init__(self, parent: QWidget | None = None) -> None:",
+   "explanation": "Without `from __future__ import annotations` this annotation is evaluated when the class body is executed, i.e. while Slicer imports the module file; on a Slicer built with Python 3.9 this raises TypeError and the module never loads. The README requires Slicer >= 5.10, so the practical risk depends on which Python that Slicer bundles - I could not verify it here. The pre-commit config (`--py310-plus`) confirms 3.10 is the intended minimum.",
+   "suggestion": "Either add `from __future__ import annotations` or use `typing.Optional[QWidget]` to keep the module importable on older Python builds, and state the minimum Slicer/Python version in the README.",
+   "confidence": "low"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Catalog entry follows a moving branch",
+   "file": "CMakeLists.txt",
+   "line_start": 7,
+   "line_end": 13,
+   "evidence": "set(EXTENSION_HOMEPAGE \"https://github.com/vboussot/SlicerImpactSynth\")",
+   "explanation": "The catalog entry uses \"scm_revision\": \"main\"; branch references are supported, but an approval then covers only the commit reviewed (188d1959... as given in the review request), not future code on main. Combined with the fact that the effective behaviour lives in KonfAI (downloaded apps and weights), users should be aware that the installed extension may change without a new index review.",
+   "suggestion": "Consider pinning a tag per release if reproducible builds are desired.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Licence of downloaded model weights and pip package not stated in this repository",
+   "file": "README.md",
+   "line_start": 58,
+   "line_end": 58,
+   "evidence": "TotalSynth covers the brain, head and neck, thorax, abdomen and pelvis",
+   "explanation": "The extension code is Apache-2.0, but the pretrained TotalSynth apps are downloaded from huggingface.co/VBoussot/ImpactSynth and the CLI is distributed as `impact_synth_konfai` (README.md:151); neither licence is mentioned in the README, and I could not inspect the Hugging Face model card. This does not block the index (no weights are bundled), but users lack a statement of terms for the downloaded artefacts.",
+   "suggestion": "Add a short licence/inference-terms note for the TotalSynth weights and the pip package in the README.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Module icon is a 700 KB PNG duplicated at the repository root",
+   "file": "ImpactSynth/CMakeLists.txt",
+   "line_start": 9,
+   "line_end": 11,
+   "evidence": "set(MODULE_PYTHON_RESOURCES\n  Resources/Icons/${MODULE_NAME}.png\n  )",
+   "explanation": "ImpactSynth/Resources/Icons/ImpactSynth.png and the root ImpactSynth.png are both 723764 bytes; the icon is installed and loaded at module listing time, so a smaller PNG would reduce package size and module-browser memory slightly. This is cosmetic, not a defect.",
+   "suggestion": "Downscale the icon to the usual 128x128/256x256 size.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "KonfAI and SlicerKonfAI extension source (https://github.com/vboussot/SlicerKonfAI, https://github.com/fideus-labs/KonfAI): the `konfai-apps` pip install on first use, torch usage/pinning, Hugging Face weight download logic, the optional `konfai-apps-server` remote inference (whether images are sent",
+  "Hugging Face model card and licence for VBoussot/ImpactSynth and the pip package impact_synth_konfai.",
+  "No build or CI result was available; the extension's configure/build on the supported platforms was not verified.",
+  "Which Python version the targeted 3D Slicer (>= 5.10) bundles, needed to judge the `QWidget | None` annotation risk.",
+  "The tutorial video Screenshots/SlicerImpactSynth-tutorial.mp4 (5 MB) was not readable, so its content was not reviewed; the README links were not checked for reachability.",
+  "Binary images (ImpactSynth.png, Screenshots/*.jpg) were not inspected for embedded metadata or steganographic content."
+ ],
+ "questions_for_author": [
+  "Does the KonfAI extension ask the user before pip-installing `konfai-apps` into Slicer's Python, and does that install pin or downgrade any package Slicer bundles (numpy, scipy, SimpleITK, pydicom, requests)?",
+  "Does the KonfAI catalog entry declare the PyTorch extension as a dependency, so that installing ImpactSynth pulls PyTorch automatically?",
+  "What licence applies to the TotalSynth weights on huggingface.co/VBoussot/ImpactSynth and to `impact_synth_konfai`?",
+  "Which Slicer version and Python version does the extension officially support, given the `QWidget | None` annotation and the README's 'Slicer >= 5.10' requirement?",
+  "When the optional remote server (`konfai-apps-server`) is used, what exactly is transmitted and does the UI tell the user that the image leaves the machine?"
+ ]
+}

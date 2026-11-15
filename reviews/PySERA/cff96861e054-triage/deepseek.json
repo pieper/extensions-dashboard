@@ -1,0 +1,205 @@
+{
+ "purpose": "SlicerPySERA is a 3D Slicer scripted module that wraps the external PySERA radiomics library, letting researchers configure handcrafted or deep radiomics parameters in a GUI and run single-case or folder-batch feature extraction, writing timestamped CSVs. It targets radiomics researchers who want a Slicer-native front end instead of scripting PySERA directly.",
+ "summary": "Reviewed the catalog entry, CMake files, PySera.py, the CLI wrapper, parameter files, README and licenses at commit cff9686. No malicious behavior, telemetry, data upload, eval/exec or unsafe deserialization found; the extension only writes CSVs to a user-chosen folder. Main problems are environmental and packaging: `pysera` is pip-installed into Slicer's shared Python without any user confirmation and without a version pin (deep mode implies torch-class dependencies), and `parameters.yaml`/`parameters.json` are not listed in MODULE_PYTHON_RESOURCES, so an installed extension silently loses its whole parameter/CLI mapping. Also: PySeraCLI is never built, heavy work runs on the GUI thread, and a CC BY-NC phantom is bundled without a non-commercial note in the README. 🔴 Do not merge yet: fix the unconfirmed pip install and the missing parameter resources first.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Read PySera.py, PySeraCLIModule.py and searched for network/eval/exec/pickle/subprocess: no data transmission, no obfuscation, no credential access; the only network activity is pip. A committed binary __pycache__/PySera.cpython-312.pyc cannot be verified against the source."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "PySera.py:209 and PySeraCLIModule.py:32 call slicer.util.pip_install('pysera') into Slicer's shared Python with no confirmation dialog and no version pin; README:231 states deep mode needs 'deep learning dependencies used by PySERA', which typically means torch pulled from PyPI rather than via the PyTorch extension. I could not inspect the pysera package metadata to confirm its dependency chain."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "PySERA/CMakeLists.txt lists only the icon in MODULE_PYTHON_RESOURCES, so parameters.yaml/parameters.json that PySera.py reads at import are never installed; PySERA/PySeraCLI is never added via add_subdirectory, so that module is dead code; a .pyc, .idea/ and ~11 MB of screenshots are committed."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "Top-level LICENSE is MIT (permits distribution) but names 'CPSC210-2025S' as copyright holder; the bundled Data/ct_radiomics_phantom is CC BY-NC 3.0 (non-commercial) and the README never states that restriction. The external pysera package's license could not be checked."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read PySera.py end to end: extraction runs synchronously on the GUI thread with only processEvents (README:568 admits Slicer 'may temporarily appear unresponsive'), there is no parameter node or scene node selectors, and the CLI wrapper passes report twice. The missing parameter resources also mean user settings are silently dropped."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README is thorough (install, batch rules, parameters, troubleshooting, privacy note, citation) and a CT radiomics phantom is provided, but the only test instantiates the logic class, and the module works on file paths rather than Slicer scene nodes."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "parameters.yaml / parameters.json are not installed, so an installed extension loses all configuration",
+   "file": "PySERA/CMakeLists.txt",
+   "line_start": 9,
+   "line_end": 11,
+   "evidence": "Resources/Icons/SlicerPySERA_png_icon.png",
+   "explanation": "PySera.py:123-124 resolves YAML_PATH/JSON_PATH next to the module file and load_parameters() (PySera.py:145-174) is executed at import. MODULE_PYTHON_RESOURCES installs only the icon, so in a catalog-installed extension neither parameter file exists: CFG_FILE, RDEF and CLI_MAP all become {} and _build_cli_kwargs (PySera.py:265-293) returns essentially only extraction_mode/categories/dimensions. Every advanced setting the user picks in the GUI (BinSize, DataType, interpolation, resegmentation, IVH, num_workers, ...) is silently dropped and PySERA runs with its own defaults, producing results that do not match the displayed parameters.",
+   "suggestion": "Add parameters.yaml and parameters.json to MODULE_PYTHON_RESOURCES in PySERA/CMakeLists.txt (and to the CLI module's resources), and show a visible error instead of silently falling back to empty defaults.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Unpinned pip install of 'pysera' into Slicer's shared Python without user confirmation",
+   "file": "PySERA/PySera.py",
+   "line_start": 207,
+   "line_end": 213,
+   "evidence": "slicer.util.pip_install(package_name)",
+   "explanation": "On the first Run, _ensure_package_available installs the PyPI package 'pysera' into Slicer's Python environment with no confirmation dialog, no version pin and no hash. This affects the shared interpreter used by all modules and persists after the extension is uninstalled; a future or compromised PyPI release is installed automatically. The same pattern is in PySeraCLIModule.py:32. The README (line 223) documents the auto-install but the user is never asked at runtime.",
+   "suggestion": "Ask the user for explicit confirmation before installing, pin a known-good version (or install from a reviewed wheel/URL), and document the exact package and version in the README.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Deep-feature mode implies PyTorch-class dependencies installed via pip, not via the PyTorch extension",
+   "file": "README.md",
+   "line_start": 229,
+   "line_end": 231,
+   "evidence": "deep learning dependencies used by PySERA (if you enable deep features)",
+   "explanation": "The UI offers resnet50/vgg16/densenet121 (PySera.py:1289) and the README tells users to preinstall 'deep learning dependencies used by PySERA'. If pysera declares torch/torchvision as requirements, `pip_install('pysera')` will pull PyTorch from PyPI into Slicer's environment, which the review policy forbids (PyTorch must come through the PyTorch extension / PyTorchUtils). I could not read pysera's metadata, so this is unverified but plausible and needs an author answer before admission.",
+   "suggestion": "Confirm pysera's declared dependencies. If it requires torch, install it through PyTorchUtils, add PyTorch to build_dependencies/EXTENSION_DEPENDS, and gate deep mode behind that.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "PySeraCLI module is never built or installed",
+   "file": "PySERA/CMakeLists.txt",
+   "line_start": 14,
+   "line_end": 19,
+   "evidence": "slicerMacroBuildScriptedModule(",
+   "explanation": "PySERA/CMakeLists.txt only builds the PySera scripted module; there is no add_subdirectory(PySeraCLI), so PySeraCLI/CMakeLists.txt, PySeraCLI.xml and PySeraCLIModule.py are dead code that never reaches users, while the README (lines 394-397) documents the CLI wrapper configuration files as part of the extension.",
+   "suggestion": "Either add add_subdirectory(PySeraCLI) and verify the CLI module works, or remove the CLI directory and its README references.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Feature extraction runs on the GUI thread with no progress reporting",
+   "file": "PySERA/PySera.py",
+   "line_start": 1434,
+   "line_end": 1440,
+   "evidence": "output_csv, result = self.logic.run_single_case(image_path, mask_path, params)",
+   "explanation": "onCompute calls the whole PySERA pipeline synchronously after a single processEvents(); for batch folders or deep features this freezes Slicer for minutes to hours with no progress bar and no cancel. README:568 confirms 'Slicer may temporarily appear unresponsive'. Additionally _wait_for_readable_file (PySera.py:464-476) sleeps up to 40 s inside a QTimer callback, blocking the event loop again.",
+   "suggestion": "Run the extraction in a CLI node or a worker thread with slicer.util.progress / a progress dialog, and poll the CSV asynchronously without time.sleep on the GUI thread.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "CLI wrapper passes 'report' twice and forwards non-parameter YAML keys as kwargs",
+   "file": "PySERA/PySeraCLI/PySeraCLIModule.py",
+   "line_start": 124,
+   "line_end": 132,
+   "evidence": "report=True,",
+   "explanation": "_load_default_params() returns the whole parameters.yaml, which contains a 'report' entry (PySERA/parameters.yaml:202-206) plus the top-level 'radiomics' and 'radiomics_meta' blocks. main() therefore builds params containing 'report' and passes it together with report=True, and also passes radiomics/radiomics_meta as unexpected keywords, so pysera.process_batch raises TypeError. Currently masked because the CLI module is not built.",
+   "suggestion": "Only forward keys from the radiomics_meta block, and drop 'report' from params (or stop passing report=True explicitly).",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Default output location falls back to ~/Desktop/output_result or the process working directory",
+   "file": "PySERA/PySera.py",
+   "line_start": 310,
+   "line_end": 315,
+   "evidence": "os.path.expanduser(\"~\"), \"Desktop\", \"output_result\"",
+   "explanation": "If no output folder is set, _make_output_csv creates ~/Desktop/output_result; the UI default is the relative path './output_result' (PySera.py:888), which resolves against Slicer's working directory. Files are then written to locations the user did not choose, which is contrary to the Slicer convention of writing to a user-selected or temporary folder.",
+   "suggestion": "Default to a user-selected folder or slicer.app.temporaryPath, and refuse to run when the output folder is empty.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Committed compiled bytecode and IDE files that cannot be verified",
+   "file": "PySERA/__pycache__/PySera.cpython-312.pyc",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "",
+   "explanation": "An 83 KB .pyc plus .idea/ project files are committed. The bytecode is a binary blob whose content cannot be compared with PySera.py by inspection, and it is not installed by CMake, so it serves no purpose in the repository. It is not evidence of malice, but it is unverifiable content in a distributed source tree.",
+   "suggestion": "Remove __pycache__/ and .idea/ from the repository and add them to .gitignore.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Bundled CT radiomics phantom is CC BY-NC 3.0 (non-commercial) and the restriction is not surfaced",
+   "file": "Data/ct_radiomics_phantom/README.md",
+   "line_start": 11,
+   "line_end": 12,
+   "evidence": "The phantom is licensed under the Creative Commons Attribution-NonCommercial 3.0 Unported Licence.",
+   "explanation": "The repository ships 61 DICOM files and a NIfTI phantom under CC BY-NC 3.0. Redistribution is permitted with attribution, but the non-commercial restriction applies to users, and the top-level README (which lists Data/ct_radiomics_phantom in the repository structure) never mentions it. Users in commercial settings could unknowingly use NC-licensed data.",
+   "suggestion": "State the CC BY-NC 3.0 terms and attribution for the phantom in the top-level README, or move the data to a separately downloaded resource.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "MIT copyright holder line looks like a course identifier",
+   "file": "LICENSE",
+   "line_start": 3,
+   "line_end": 3,
+   "evidence": "Copyright (c) 2025  CPSC210-2025S",
+   "explanation": "The MIT text permits distribution, but the copyright holder 'CPSC210-2025S' appears to be a course code rather than the authors or their institution, which weakens the provenance of the license grant. This is not a distribution blocker but should be clarified.",
+   "suggestion": "Replace the holder with the actual authors or institution.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Large binary assets committed to the source repository",
+   "file": "PySERA/Resources/Screenshots/0_screenshot_title_with_categories.png",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "",
+   "explanation": "Eight screenshots of ~1.3-1.6 MB each (~11 MB total), a 3 MB NIfTI phantom and 61 DICOM files are committed. Only one icon is installed by CMake, so the rest is repository weight that slows clones and extension builds without being needed at runtime.",
+   "suggestion": "Downscale the screenshots and host the phantom as a downloadable sample-data resource instead of committing it.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "No parameter node and no Slicer scene integration",
+   "file": "PySERA/PySera.py",
+   "line_start": 867,
+   "line_end": 872,
+   "evidence": "self.imagePathEdit = ctk.ctkPathLineEdit()",
+   "explanation": "Inputs are file paths on disk rather than MRML volume/segmentation node selectors, and no parameter node is used, so the module state is not saved with the scene and users must export images and masks to NIfTI before running. This is a usability deviation from Slicer conventions rather than a defect.",
+   "suggestion": "Offer node selectors (with an option to save to a temporary NIfTI) and store settings in a parameter node.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Test only instantiates the logic class",
+   "file": "PySERA/PySera.py",
+   "line_start": 1482,
+   "line_end": 1488,
+   "evidence": "logic = PySERALogic()",
+   "explanation": "PySeraTest.runTest only constructs PySERALogic and asserts it is not None; no extraction is exercised, so the generic tests built by WITH_GENERIC_TESTS cannot catch the missing parameter files or a broken pysera install.",
+   "suggestion": "Add a test that runs extraction on the bundled phantom (or a synthetic volume) and asserts a non-empty CSV.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The external PyPI package 'pysera' (its metadata, declared dependencies, whether it pulls torch, and its license) could not be inspected; no network access was available.",
+  "The upstream PySERA library repository (github.com/radiuma-com/PySERA) and its license terms were not inspected.",
+  "The committed binary PySERA/__pycache__/PySera.cpython-312.pyc could not be decompiled or compared with PySera.py.",
+  "The 61 DICOM files and the 3 MB NIfTI phantom under Data/ct_radiomics_phantom were not opened; only their license/README were read.",
+  "PySERA/PySeraCLI/pysera_cli_lib/parameters.yaml and parameters.json were not read (same byte sizes as the PySERA copies, so the duplicate-'report' finding assumes identical content).",
+  "No build or runtime test was performed; the claim that parameters.yaml is not installed follows from reading PySERA/CMakeLists.txt, not from an actual install.",
+  "The catalog entry's scm_revision 'main' was not resolved to a specific commit; the review covers the snapshot provided (cff96861e0541080592bc2be99cba02d8d72f837)."
+ ],
+ "questions_for_author": [
+  "What are the declared dependencies of the PyPI package 'pysera'? Does it require torch/torchvision, and if so, why is PyTorch not installed through the PyTorch extension (PyTorchUtils)?",
+  "Is the PyPI package 'pysera' published by the same team as github.com/radiuma-com/PySERA, and which version should the extension pin?",
+  "Why are parameters.yaml and parameters.json missing from MODULE_PYTHON_RESOURCES in PySERA/CMakeLists.txt, given that PySera.py loads them at import?",
+  "Is PySeraCLI intended to be shipped? It is not added via add_subdirectory in PySERA/CMakeLists.txt.",
+  "Can the CC BY-NC 3.0 phantom in Data/ct_radiomics_phantom be documented in the top-level README, or moved to a separately downloaded sample dataset?"
+ ]
+}

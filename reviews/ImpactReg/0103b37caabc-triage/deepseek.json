@@ -1,0 +1,168 @@
+{
+ "purpose": "A 3D Slicer front-end (GUI wrapper around the `impact-reg-konfai` CLI) for multimodal deformable image registration driven by the IMPACT deep-feature similarity metric through KonfAI, running elastix / ConvexAdam / FireANTs presets, optionally ensembling them, and evaluating the result on images, segmentations or landmarks or estimating uncertainty from the ensemble spread. Aimed at researchers and clinical users registering MRI/CT/CBCT of the same patient inside Slicer.",
+ "summary": "Well-documented thin GUI over `impact-reg-konfai` plus the KonfAI extension; no malicious, obfuscated or data-exfiltrating code was found in the reviewed module, and the module code is Apache-2.0. Two environment questions are the main open issues: on every module open the widget pip-installs `impact-reg-konfai`, which (per the author's own comment) pins/pulls `konfai`/`konfai-apps`, and PyTorch is not declared as a dependency even though it is required — the catalog entry and CMake list only KonfAI, so torch may come from PyPI instead of PyTorchUtils. Ordinary bugs (None passed as a CLI filename, unchecked output file) are minor. 🔴 Do not merge yet: Review incomplete — confirm `impact-reg-konfai`'s dependency resolution (torch via PyTorchUtils, no konfai downgrade).",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Read all of ImpactReg/ImpactReg.py: no obfuscation, eval/exec/pickle, or hidden network calls; data leaves the machine only via a user-selected RemoteServer or via the documented Hugging Face/PyPI downloads of presets. Minor concerns: remote token passed on the command line, and concurrent writes/reads of files whose names derive from downloaded app manifests."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "ImpactReg.py:482 calls `install_package(\"impact-reg-konfai\", \"IMPACT-Reg\")` on every `enter()`, i.e. pip installs into Slicer's shared Python; the preceding comment states the package 'pins and pulls the matching konfai / konfai-apps', which risks downgrading the package the KonfAI extension owns. Neither CMakeLists.txt:13 nor the catalog entry declares PyTorch, although it is a hard requirement (README.md:140)."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMakeLists.txt installs ImpactReg.py and the icon via `slicerMacroBuildScriptedModule` (ImpactReg/CMakeLists.txt:5-19); the only imported file is the module script itself and `EXTENSION_DEPENDS \"KonfAI\"` (CMakeLists.txt:13) matches the entry's build_dependencies. Concerns are non-blocking: catalog `scm_revision` is the branch `main` rather than the reviewed commit, and a 9 MB tutorial mp4 is committed."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE is the verbatim Apache-2.0 text and ImpactReg.py:15 carries `SPDX-License-Identifier: Apache-2.0`, so the module code is redistributable. The licenses of the material it installs/downloads (impact-reg-konfai from PyPI, Hugging Face preset apps and model weights, fireants, elastix-IMPACT binary) are not in this repository; README.md:103 only says FireANTs' NOTICE ships inside the presets."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Structure follows Slicer conventions (ScriptedLoadableModule/Widget, observer cleanup delegated to KonfAICoreWidget.cleanup, long work in a separate process, results into user-visible nodes). Found ordinary bugs: the fallback evaluation path appends possibly-None filenames to the CLI argument list (ImpactReg.py:304-306) and `Moved.mha` is loaded without an existence check (ImpactReg.py:224-226)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md and TUTORIAL.md give a complete step-by-step workflow with screenshots on a public dataset (SynthRAD2025 1ABA005), cite the method paper, and README.md:124-134 reports one-case timings/Dice with an explicit 'validate on your own data' caveat. No automated test exists (ImpactReg/Testing/Python/CMakeLists.txt:2 is commented out and ImpactReg.py defines no test class), and no research/clinical-use disclaimer is present."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "pip-installs impact-reg-konfai (with pinned konfai/konfai-apps) into Slicer's shared Python on every module open",
+   "file": "ImpactReg/ImpactReg.py",
+   "line_start": 479,
+   "line_end": 482,
+   "evidence": "install_package(\"impact-reg-konfai\", \"IMPACT-Reg\")",
+   "explanation": "ImpactRegWidget.enter() runs the KonfAI extension's shared `install_package` for a package fetched from PyPI. The author's own comment above the call says that package 'pins and pulls the matching konfai / konfai-apps': if the pin is older than the installed KonfAI extension package, opening Impact Reg can silently downgrade the package another extension depends on, affecting every user of that extension, not only Impact Reg users. The install/prompt behavior lives in the KonfAI extension, which is not in this repository, so whether the user is asked and whether the pin can downgrade KonfAI could not be verified here.",
+   "suggestion": "State the exact `impact-reg-konfai` version range and confirm on the KonfAI/pip side that its requirements are `>=` (never `==`) for konfai/konfai-apps, that the install is user-confirmed and version-checked, and that a failed install surfaces to the user. If the dependency cannot be relaxed, install it in a dedicated venv instead of Slicer's interpreter, or ship it through the extension build.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "PyTorch is a hard requirement but is not declared; torch may be pulled from PyPI instead of PyTorchUtils",
+   "file": "CMakeLists.txt",
+   "line_start": 13,
+   "line_end": 13,
+   "evidence": "set(EXTENSION_DEPENDS \"KonfAI\")",
+   "explanation": "The extension only declares KonfAI (`set(EXTENSION_DEPENDS \"KonfAI\")`, build_dependencies [\"KonfAI\"]), while README.md:140-141 tells users to install the SlicerPyTorch extension and states that `impact-reg-konfai` is then pip-installed into Slicer's Python on first open. If `impact-reg-konfai` declares torch in its requirements (its whole purpose is running torch-based presets), pip will pull a PyPI torch build on Impact Reg's first open — exactly the pattern the review policy asks to prevent (torch must come through PyTorchUtils/SlicerPyTorch, declared in build_dependencies and EXTENSION_DEPENDS). I could not read impact-reg-konfai's requirements.txt, so this is flagged as a probable rather than proven path to a duplicated/CUDA-mismatched torch in Slicer's environment.",
+   "suggestion": "Add PyTorch to EXTENSION_DEPENDS/build_dependencies, and make `impact-reg-konfai` install torch only through PyTorchUtils (or declare torch as an already-satisfied dependency). Point to the exact requirements file in a follow-up message so it can be verified.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Remote-server access token is passed on the command line (visible in the process list)",
+   "file": "ImpactReg/ImpactReg.py",
+   "line_start": 205,
+   "line_end": 206,
+   "evidence": "args += [\"--token\", remote_server.token]",
+   "explanation": "When a remote server is selected, the login token is appended as a plain CLI argument to the `impact-reg-konfai` process: any local user able to list processes (`ps`) on the same machine can read the credential, and it may also end up in log files or shell history. The same block also chooses the host that receives the fixed/moving images, so the destination is worth documenting explicitly for users.",
+   "suggestion": "Pass the token through an environment variable or a stdin/temporary file with restrictive permissions instead of argv, and document in the UI that images are uploaded to the chosen host.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Presets, model weights and a GPU-specific binary are downloaded and executed on first use without per-item confirmation or visible verification",
+   "file": "ImpactReg/ImpactReg.py",
+   "line_start": 92,
+   "line_end": 92,
+   "evidence": "\"Registration presets are distributed as KonfAI Apps (downloaded automatically from Hugging Face),\"",
+   "explanation": "The first run of a preset triggers downloads that are executed locally: the preset apps from Hugging Face (`VBoussot/ImpactReg`, whose python/yaml configs drive the run), the TorchScript feature models, `pip install fireants`, and the elastix-IMPACT binary built for the installed CUDA (README.md:103, README.md:141). This is the advertised function and is documented, but nothing in this repository shows hash/signature verification of these payloads; that logic, if any, is in impact-reg-konfai and could not be inspected. A compromised upstream hub repo would therefore run code inside the user's registrations.",
+   "suggestion": "Surface a confirmation before the first download of each preset/binary and state (in the UI or README) whether downloads are integrity-checked and from which exact repository/revision.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Output file names derive from downloaded app-manifest keys and are joined to the temp folder without sanitization",
+   "file": "ImpactReg/ImpactReg.py",
+   "line_start": 321,
+   "line_end": 321,
+   "evidence": "file_name = self._export_node(selector.currentNode(), key)",
+   "explanation": "The evaluation export uses the manifest key as a filename base: `file_name = self._export_node(selector.currentNode(), key)` and then `self._work_dir / f\"{base}.mha\"`. Keys come from the preset `app.json` fetched from Hugging Face rather than from this repository, so a manifest containing `../` segments would make `slicer.util.saveNode`/`_write_volume` write outside the temporary folder. Impact is bounded by the fixed `.mha`/`.fcsv` suffixes and requires a compromised or malicious upstream manifest, hence low confidence and minor severity.",
+   "suggestion": "Whitelist/escape the manifest keys (e.g. take os.path.basename and allow only [A-Za-z0-9_-]) before using them as file names.",
+   "confidence": "low"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Fallback evaluation path can pass None as a CLI argument and crash the run",
+   "file": "ImpactReg/ImpactReg.py",
+   "line_start": 304,
+   "line_end": 306,
+   "evidence": "fixed_file = self._export_node(self.ui.referenceVolumeSelector.currentNode(), \"FixedImage\")",
+   "explanation": "When no evaluation tab is active, `_export_node` can return None (nothing selected in the reference or moving selectors), yet the code unconditionally appends the value to the argument list, so `impact-reg-konfai eval -f None -m None` is constructed or the process launcher raises. The user gets a traceback instead of the 'select a reference image' message; also a failed `slicer.util.saveNode` is ignored and a non-existent filename is forwarded.",
+   "suggestion": "Check for None (and the boolean return of `saveNode`) and report a clear message with `set_running(False)`, as the registration panel does for missing inputs.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Registration end callback loads Moved.mha without checking that the file exists",
+   "file": "ImpactReg/ImpactReg.py",
+   "line_start": 224,
+   "line_end": 226,
+   "evidence": "moved_node = sitkUtils.PushVolumeToSlicer(",
+   "explanation": "Only `Transform.h5` is checked before continuing; `Moved.mha` is read and pushed with no existence test, and per-preset fields are globbed with `sorted((case_dir / \"Ensemble\").glob(\"*.h5\"))`, which silently yields an empty sequence if `--keep-fields` produced nothing. A partial CLI run therefore raises inside the completion callback (leaving the panel without a message) or leaves an empty DVF sequence behind while the log still reports success.",
+   "suggestion": "Verify the presence of `Moved.mha` (and warn when `Ensemble/` is empty although uncertainty was ticked) and report the problem through `_update_logs(..., False)`.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No automated test despite the CMake test entry",
+   "file": "ImpactReg/Testing/Python/CMakeLists.txt",
+   "line_start": 2,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "`slicer_add_python_unittest(SCRIPT ${MODULE_NAME}.py)` registers ImpactReg.py as a CTest, but the module file contains no `ScriptedLoadableModuleTest` subclass (only module/widget classes), and the extra Python test is commented out. The registered test can therefore report nothing or fail as 'no test found', and no regression coverage exists for the argument construction that is the heart of the module. The video/tutorial manual workflow is the only validation.",
+   "suggestion": "Add a ModuleTest class that at least instantiates the widget and, with small synthetic volumes, checks the generated `register`/`eval` argument lists.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No research-only / clinical-use disclaimer",
+   "file": "README.md",
+   "line_start": 134,
+   "line_end": 134,
+   "evidence": "One case: validate the presets on your own data before drawing conclusions from this table.",
+   "explanation": "The module is positioned for radiotherapy-style CT/CBCT and MR/CT registration and the README reports Dice/TRE improvements on one case, but nothing states that results are research outputs that must be verified before clinical use (README.md:134 only says 'One case: validate the presets on your own data before drawing conclusions from this table'). Users may otherwise treat the automatic transform as clinically validated.",
+   "suggestion": "Add an explicit disclaimer (README and module help/acknowledgment text) that the module is not a certified medical device and that registration results must be checked by a qualified user.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "9 MB tutorial video committed to the repository",
+   "file": "README.md",
+   "line_start": 37,
+   "line_end": 37,
+   "evidence": "<!-- Drop Screenshots/SlicerImpactReg-tutorial.mp4 into the README editor on GitHub and paste the user-attachments URL it gives here: GitHub then embeds a player. -->",
+   "explanation": "The repository carries `Screenshots/SlicerImpactReg-tutorial.mp4` (9 MB) in git history; it is not needed for building or running the module and only bloats the checkout and the archive the index fetches. Non-blocking packaging observation.",
+   "suggestion": "Host the video on a release asset or external page and link to it, rather than committing it.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "KonfAI extension source (install_package, KonfAICoreWidget/process.run, RemoteServer host/port/token handling, temporary `_work_dir` creation and cleanup, IPython/main-thread behaviour of the completion callbacks) - not part of this repository",
+  "impact-reg-konfai PyPI package contents and requirements (torch/konfai pins, download/integrity verification, `--host/--port/--token` transport security) - no access to PyPI",
+  "Hugging Face preset apps (VBoussot/ImpactReg) and feature models (VBoussot/impact-torchscript-models): their code, revisions, hashes and licenses",
+  "Licenses of fireants, itk-impact and the elastix-IMPACT binary mentioned in the README",
+  "Build/CTest results: not built or run; no CI reports available in this environment",
+  "Binary/asset files (ImpactReg.png, Screenshots/*.jpg, Screenshots/SlicerImpactReg-tutorial.mp4) not read",
+  "Verification that the reviewed commit 0103b37caabcb4431f7cc4570156b5b627dd4249 is what the catalog's `scm_revision: \"main\"` currently resolves to"
+ ],
+ "questions_for_author": [
+  "What are the exact requirements of `impact-reg-konfai` (especially torch, konfai, konfai-apps) and are they declared with `>=` ranges so an existing PyTorch-extension / KonfAI install is never replaced or downgraded?",
+  "Does the shared `install_package` in the KonfAI extension ask the user before installing, and does it reuse an already-installed compatible version instead of reinstalling on every module open?",
+  "Are the Hugging Face preset apps, the TorchScript feature models, the elastix-IMPACT binary and `fireants` integrity-checked (hash/signature) and pinned to a revision?",
+  "Under which licenses are the presets/model weights and the downloaded elastix-IMPACT and fireants binaries distributed, and can those licenses be added to the repository (e.g. a NOTICE file)?"
+ ]
+}

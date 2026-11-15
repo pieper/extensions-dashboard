@@ -1,0 +1,168 @@
+{
+ "purpose": "A 3D Slicer module (MuscleMap) that runs the external MuscleMap deep-learning models to segment whole-body and regional muscles from CT/MRI volumes, showing results as a segmentation and exporting labelmap/CSV/color table. It targets researchers and clinicians doing quantitative muscle analysis.",
+ "summary": "The module is an honest pip/progress-dialog wrapper around an external `mm_segment` package and Zenodo-hosted models; it avoids installing torch itself, pins numpy/torch via a constraints file, runs the subprocess without a shell, writes to a temp dir, and uses MIT licensing. Main issues are environment-level: the user-triggered installer does an unpinned `pip install --force-reinstall git+https://github.com/MuscleMap/MuscleMap.git` into Slicer's shared Python (so the code that runs later is not what was reviewed at this commit), plus unpinned installs of Slicer-bundled scipy/scikit-learn/pandas, a generic top-level package name `scripts`, an unpackaged logo resource, and a declared but nonexistent test. No telemetry, no data exfiltration, no prompt-injection text found.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Reviewed the whole module file: no network destinations other than zenodo.org (urllib) and github.com via pip, no telemetry, no eval/exec/pickle, subprocess uses a list argv with shell=False (line 838), temp dir removed on success/cancel. Model weights are fetched from Zenodo without checksum verification, which is a supply-chain risk but not concealed behavior."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "ensureDependencies installs into Slicer's shared site-packages only after an explicit button click, but installs the MuscleMap package from an unpinned git branch with --force-reinstall, and installs scipy/scikit-learn/pandas unpinned (constraints file only pins numpy and torch, lines 756-759). No import-time installation, no sys.path changes, no global warning/logging suppression."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists installs the single .py plus declared resources, EXTENSION_DEPENDS \"PyTorch\" matches build_dependencies [\"PyTorch\"], category matches; but the module refers to WholeBodyMuscleSegmentation/MuscleMap.png for its UI logo (line 114) which is not listed in MODULE_PYTHON_RESOURCES, and slicer_add_python_unittest is declared while Testing/Python has the test commented out and no test class exists."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is a standard MIT text ('Copyright (c) 2023 MuscleMap') permitting redistribution; the extension bundles no third-party code or weights in the repo. Licensing of the Zenodo model records and of the pip-installed MuscleMap package could not be verified from this repository."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Uses ScriptedLoadableModule/Widget conventions, heavy imports inside functions, subprocess output streamed to a queue with progress and cancel, temp dir cleaned, errors surfaced via errorDisplay. Weaker points: no parameter node (state in QSettings), process return code not checked, and the installed MuscleMap package puts a generically named top-level module 'scripts' in Slicer's site-packages that is then located with find_spec('scripts') and executed as -m scripts.mm_segment."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.MD documents install steps, model/version selection, expected runtimes, exports and troubleshooting, and the module lists citations and model provenance via Zenodo records; there is no automated test, no bundled sample data (external OSF links) and no explicit research-use/clinical disclaimer."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Installer pip-installs MuscleMap from an unpinned git branch into Slicer's shared Python",
+   "file": "WholeBodyMuscleSegmentation/WholeBodyMuscleSegmentation.py",
+   "line_start": 802,
+   "line_end": 805,
+   "evidence": "            slicer.util.pip_install([\n                \"--no-deps\", \"--upgrade\", \"--force-reinstall\",\n                \"git+https://github.com/MuscleMap/MuscleMap.git\",\n            ])",
+   "explanation": "Clicking 'Install MuscleMap dependencies' runs pip against the head of MuscleMap's default branch with --force-reinstall. The code that ends up in Slicer's site-packages is therefore not the code pinned to this review (b578f90...), and it is imported/executed by Slicer's interpreter on every run. A force-push, a compromised upstream repo/account, or a plain upstream commit changes what users execute inside their Slicer process without any new extension review or version bump. It also requires git on the user's machine, otherwise pip fails with a confusing error.",
+   "suggestion": "Install a pinned source (release tag or commit hash, e.g. 'git+https://github.com/MuscleMap/MuscleMap.git@v1.0.0') or a PyPI release with a version specifier, and update that pin through the extension release process.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Unpinned install of packages Slicer bundles (scipy, scikit-learn, pandas) with a constraints file that only pins numpy and torch",
+   "file": "WholeBodyMuscleSegmentation/WholeBodyMuscleSegmentation.py",
+   "line_start": 780,
+   "line_end": 792,
+   "evidence": "        segmentation_packages = [\n            \"monai\",\n            \"nibabel\",\n            \"scikit-learn\",\n            \"scipy\",",
+   "explanation": "The constraints file protects numpy and torch only; scipy, scikit-learn and pandas are requested with no version bound. Slicer ships its own scipy/scikit-learn, and pip will leave them alone only as long as the installed versions satisfy the requirements pulled in transitively (e.g. by monai or scikit-learn). If a newer upstream requirement exceeds Slicer's version, pip upgrades those bundled packages in place, which is exactly the ABI-fragility the authors' own comment warns about for numpy/scipy. The environment is shared with every other Slicer extension.",
+   "suggestion": "Add scipy, scikit-learn, pandas and other Slicer-bundled packages to the same constraints file (pinned to the installed versions), or use the SlicerWizard/PyTorch-extension-style helpers that only install what is missing.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "pip-installed MuscleMap registers a top-level package named 'scripts' in Slicer's site-packages",
+   "file": "WholeBodyMuscleSegmentation/WholeBodyMuscleSegmentation.py",
+   "line_start": 511,
+   "line_end": 516,
+   "evidence": "    def _musclemap_package_dirs(self):\n        \"\"\"Directories of the installed MuscleMap package ('scripts'), without importing it.\"\"\"\n        spec = importlib.util.find_spec(\"scripts\")",
+   "explanation": "The logic discovers the installed package with importlib.util.find_spec('scripts') and runs it as 'python -m scripts.mm_segment'. 'scripts' is a generic top-level name: any other installed distribution (or leftover directory) providing a 'scripts' package with an mm_util.py would be treated as MuscleMap, its ZENODO_MODELS table read (ast.literal_eval) and its code executed from this module. The check `os.path.isfile(os.path.join(d, 'mm_util.py'))` is weak protection against such a collision.",
+   "suggestion": "Have the upstream package expose a unique top-level name (e.g. 'musclemap') and/or verify the located package with importlib.metadata.distribution('musclemap') before executing it.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Model weights are downloaded from Zenodo at runtime without any integrity verification",
+   "file": "WholeBodyMuscleSegmentation/WholeBodyMuscleSegmentation.py",
+   "line_start": 601,
+   "line_end": 615,
+   "evidence": "        model_info = self._read_zenodo_models().get(region)\n        if not model_info:\n            raise RuntimeError(f\"No cached model json and no Zenodo record known for region '{region}'.\")",
+   "explanation": "On first use the module (via the external mm_segment) downloads .pth weights from Zenodo and caches them under site-packages. Nothing in this repository verifies a hash or signature of the downloaded file, and PyTorch checkpoints are historically unpickled, so whatever the Zenodo record currently serves is executed/loaded inside the user's process. The download is announced in the progress dialog, so it is not concealed, but there is no integrity pinning.",
+   "suggestion": "Record expected SHA-256 checksums for each published model version and verify them before use, and prefer torch.load(..., weights_only=True) in the upstream loader.",
+   "confidence": "low"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "UI logo file is not installed by CMake",
+   "file": "WholeBodyMuscleSegmentation/WholeBodyMuscleSegmentation.py",
+   "line_start": 113,
+   "line_end": 117,
+   "evidence": "        logoLabel = qt.QLabel()\n        logoPath = os.path.join(os.path.dirname(__file__), \"MuscleMap.png\")\n        pixmap = qt.QPixmap(logoPath)",
+   "explanation": "The widget loads its logo from the module source directory ('MuscleMap.png' next to the .py), but MODULE_PYTHON_RESOURCES only installs Resources/Icons/MuscleMap.png and Resources/UI/....ui. In an installed extension build the plain MuscleMap.png is not copied next to WholeBodyMuscleSegmentation.py, so qt.QPixmap(logoPath) yields a null pixmap and the module shows a blank logo area.",
+   "suggestion": "Use Resources/Icons/MuscleMap.png (which is installed) for the logo, or add the file to MODULE_PYTHON_RESOURCES.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Python unit test is declared but does not exist",
+   "file": "WholeBodyMuscleSegmentation/CMakeLists.txt",
+   "line_start": 21,
+   "line_end": 23,
+   "evidence": "if(BUILD_TESTING)\n  slicer_add_python_unittest(SCRIPT ${MODULE_NAME}.py)\n  add_subdirectory(Testing)\nendif()",
+   "explanation": "The module CMakeLists calls slicer_add_python_unittest on the module script, and Testing/Python/CMakeLists.txt has the corresponding line commented out. No test class (e.g. WholeBodyMuscleSegmentationTest) exists in WholeBodyMuscleSegmentation.py, so the generated test cannot instantiate the test class and the extension's test suite will report a failure on the build dashboard even though nothing is actually tested.",
+   "suggestion": "Either add a minimal WholeBodyMuscleSegmentationTest (e.g. instantiate the widget logic / check getAvailableModels parsing) or drop the slicer_add_python_unittest call.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Bundled .ui file is the unused Slicer template with unrelated widgets",
+   "file": "WholeBodyMuscleSegmentation/Resources/UI/WholeBodyMuscleSegmentation.ui",
+   "line_start": 59,
+   "line_end": 59,
+   "evidence": "         <widget class=\"ctkSliderWidget\" name=\"imageThresholdSliderWidget\">",
+   "explanation": "Resources/UI/WholeBodyMuscleSegmentation.ui still contains the template widgets (inputSelector, imageThresholdSliderWidget, applyButton, invertedOutputSelector) for a thresholding algorithm; the module never calls slicer.util.loadUI and builds its entire UI in setup(). Dead, misleading UI definition shipped with the module.",
+   "suggestion": "Remove the unused .ui (and its CMake resource entry) or move the real widget tree into it.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Input image left in the system temp directory when segmentation fails",
+   "file": "WholeBodyMuscleSegmentation/WholeBodyMuscleSegmentation.py",
+   "line_start": 943,
+   "line_end": 950,
+   "evidence": "            # keep tempDir for debugging",
+   "explanation": "On failure the temp working directory is intentionally kept and its path shown to the user, leaving a copy of the patient volume (input.nii.gz) in the OS temp folder. This is deliberate for debugging and disclosed, but on shared workstations it leaves identifiable medical data outside the user's chosen location.",
+   "suggestion": "Mention in the error message that the folder can be deleted, and offer a button/setting to remove it.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No research-use/clinical disclaimer and no bundled sample data",
+   "file": "README.MD",
+   "line_start": 18,
+   "line_end": 24,
+   "evidence": "### Usage",
+   "explanation": "README.MD links external OSF datasets for testing and the module text asks for citations, but neither README nor the module states that output is for research use and not for clinical diagnosis, and there is no validation/performance information in the repository for the Zenodo models. This matters for an AI-based segmentation tool at tier 1.",
+   "suggestion": "Add a short 'Research use only - not a medical device' note and a pointer to the validation publications for each model region.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Large PNG committed three times",
+   "file": "WholeBodyMuscleSegmentation/CMakeLists.txt",
+   "line_start": 9,
+   "line_end": 12,
+   "evidence": "set(MODULE_PYTHON_RESOURCES\n  Resources/Icons/MuscleMap.png",
+   "explanation": "The same ~570 KB image is committed at MuscleMap.png, WholeBodyMuscleSegmentation/MuscleMap.png and WholeBodyMuscleSegmentation/Resources/Icons/MuscleMap.png (the first two report the identical size 570294 bytes). Only the Resources/Icons copy is actually installed. Not harmful, just redundant binary weight in the repository.",
+   "suggestion": "Keep one copy under Resources/Icons and reference it from both the module widget and the extension metadata.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "The external MuscleMap package (github.com/MuscleMap/MuscleMap, installed at runtime from an unpinned branch) and its mm_segment/mm_util implementation, including how model checkpoints are loaded (torch.load usage), what mm_segment imports, and how it downloads from Zenodo.",
+  "The Zenodo records themselves: model file hashes, licensing of the model weights, and training-data provenance.",
+  "The licensing terms of the MuscleMap pip package and of its dependencies (MONAI, nibabel, scikit-learn, psutil).",
+  "Whether the git branch 'main' currently resolves to the stated commit b578f909ab47f6033acfedc3ea6a900dde71f596 (network access not available); I reviewed the file contents supplied for that commit.",
+  "Runtime behavior: I could not run Slicer, the module, pip, or the extension build, so the missing-logo and missing-test-class conclusions are from reading CMake/module code rather than observing a build.",
+  "Whether Slicer's build dashboard currently reports test failures for this extension."
+ ],
+ "questions_for_author": [
+  "Can the MuscleMap package be installed from a pinned release tag or commit instead of the head of the default branch, ideally with a published version and hash?",
+  "Can scipy, scikit-learn and pandas be added to the pip constraints file alongside numpy and torch so Slicer's bundled versions can never be upgraded?",
+  "Does the upstream package plan to expose a uniquely named top-level module instead of 'scripts', so the extension cannot pick up an unrelated 'scripts' package?",
+  "What license covers the Zenodo-hosted model weights, and are their checksums published so they can be verified after download?",
+  "Is a WholeBodyMuscleSegmentationTest intended, given that CMake currently declares one? The bundled .ui file appears to be the unused template - can it be removed?"
+ ]
+}

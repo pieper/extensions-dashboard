@@ -1,0 +1,996 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Heavy voxel-wise fitting runs on the GUI thread and errors are silently swallowed",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 406,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Heavy voxel-wise fitting runs on the GUI thread and errors are silently swallowed",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 920,
+     "line_end": 942,
+     "evidence": "            except: pass\n        return start_idx, res\n        \n    with ThreadPoolExecutor(max_workers=4) as ex:",
+     "explanation": "run_fitting is called from the button handler on the main thread; only processEvents between chunks keeps the UI alive, so Slicer appears frozen for minutes on real volumes. Any per-voxel fit failure is discarded by 'except: pass', leaving zeros in the parameter maps with no indication to the user that the fit failed.",
+     "suggestion": "Run the computation in a CLI or a worker thread (slicer.util.ProgressDialog / qt.QTimer pattern), count failures and report them to the user, and avoid bare excepts.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 406
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Exceptions silently swallowed during voxel-wise fitting",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 923,
+     "line_end": 935,
+     "evidence": "try:\n if method in [\"segmented\", \"bayesian\"]: \n ...\n except: pass",
+     "explanation": "Every per-voxel fit failure is discarded with a bare except, so maps silently contain zeros where fitting failed, and the user gets no report. Bare excepts also catch KeyboardInterrupt.",
+     "suggestion": "Catch Exception, count failed voxels, and report the count in the status message or log.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 924
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Version check compares version strings lexicographically",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 530,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Version check compares version strings lexicographically",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 528,
+     "line_end": 538,
+     "evidence": "        if importlib.metadata.version(\"ivimfit\") < \"0.1.7.2\":\n            raise ImportError(\"Outdated version\")",
+     "explanation": "String comparison makes e.g. '0.1.10' or '0.1.7.10' compare as older than '0.1.7.2', so every run re-triggers pip_install and importlib.reload, repeatedly touching the shared environment and slowing each analysis. Also the except clause 'except (ImportError, Exception)' catches everything, so genuine import errors are indistinguishable from an outdated version.",
+     "suggestion": "Use packaging.version.parse(...) for the comparison and catch only ImportError/PackageNotFoundError.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 530
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "String comparison of version numbers",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 530,
+     "line_end": 530,
+     "evidence": "if importlib.metadata.version(\"ivimfit\") < \"0.1.7.2\":",
+     "explanation": "importlib.metadata.version returns a string and is compared lexicographically with '0.1.7.2'. Versions such as '0.1.10' or '0.10.0' compare incorrectly, so the update check can skip a needed upgrade or trigger unnecessary reinstalls each run.",
+     "suggestion": "Compare parsed versions, for example with packaging.version.Version, and handle the ImportError path separately from the version check.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 530
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "pip requirement string embeds the --upgrade option",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 534,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "pip requirement string embeds the --upgrade option",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 534,
+     "line_end": 534,
+     "evidence": "        slicer.util.pip_install(\"ivimfit>=0.1.7.2 --upgrade\")",
+     "explanation": "slicer.util.pip_install treats a string argument as a single requirement, so 'ivimfit>=0.1.7.2 --upgrade' is passed to pip as one requirement specifier and pip rejects it as an invalid requirement; the install then fails and the subsequent 'import ivimfit' raises, so the module cannot run on a machine without ivimfit pre-installed. (Slicer's util.py was not available to me, so this is inferred from the documented API.)",
+     "suggestion": "Pass the requirement and the option separately, e.g. pip_install(\"ivimfit>=0.1.7.2\", extraOptions=[\"--upgrade\"]) or pip_install([\"ivimfit>=0.1.7.2\"]).",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 534
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "pip_install of ivimfit and pymc into Slicer's shared Python without user confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 534,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "pip_install of ivimfit and pymc into Slicer's shared Python without user confirmation",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 527,
+     "line_end": 557,
+     "evidence": "        slicer.util.pip_install(\"ivimfit>=0.1.7.2 --upgrade\")\n...\n            slicer.util.pip_install(\"pymc\")",
+     "explanation": "Clicking 'Run Analysis' silently installs/upgrades packages into the Slicer Python environment shared by all modules. 'pymc' is a large download whose dependency chain (numpy, scipy, pandas, pytensor) can upgrade or downgrade packages Slicer bundles, which can break Slicer and other extensions for users who never open this module. The policy requires user confirmation for such installs and forbids changing Slicer-bundled packages.",
+     "suggestion": "Ask the user with slicer.util.confirmOkCancelDisplay before installing, install into an isolated location or document a manual install, and constrain dependencies so numpy/scipy are not modified (e.g. install with --no-deps for the risky transitive packages, or use a dedicated extension dependency).",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 534
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Runtime pip installs of ivimfit and pymc into Slicer's shared Python without a size or consent prompt",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 530,
+     "line_end": 538,
+     "evidence": "if importlib.metadata.version(\"ivimfit\") < \"0.1.7.2\":\n raise ImportError(\"Outdated version\")\n...\nslicer.util.pip_install(\"ivimfit>=0.1.7.2 --upgrade\")",
+     "explanation": "When the user clicks Run, the module calls pip_install for ivimfit (with --upgrade) and for pymc if missing. These change the shared Slicer Python environment for every extension and can pull in large dependencies, including numpy/scipy changes, with no explicit confirmation. The request to upgrade is not version-pinned against Slicer's bundled packages.",
+     "suggestion": "Ask the user for confirmation before installing, show the packages and their sizes, avoid --upgrade on shared packages, and check that the bundled numpy/scipy versions are not downgraded. Document these installs in the README.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 530
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Caller's b-value list is mutated in place",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 567,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Caller's b-value list is mutated in place",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 567,
+     "line_end": 569,
+     "evidence": "    if B != len(b_values):\n        if B == len(b_values) + 1: b_values.insert(0, 0.0)",
+     "explanation": "process() inserts into the list passed by the widget (and by the test suite), so repeated runs with the same list object accumulate b=0 entries and can produce a frame-count mismatch on the second run.",
+     "suggestion": "Work on a copy: b_values = list(b_values).",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 567
+     }
+    }
+   ]
+  },
+  {
+   "title": "Creates a 'libs' directory inside the Slicer Python installation at runtime",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 544,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Creates a 'libs' directory inside the Slicer Python installation at runtime",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 543,
+     "line_end": 550,
+     "evidence": "        libs_path = os.path.join(sys.exec_prefix, \"libs\")\n        if not os.path.exists(libs_path):\n            try:\n                os.makedirs(libs_path)",
+     "explanation": "The module writes into the Slicer installation directory (sys.exec_prefix) as a side effect of running an analysis. On a system-wide install this either fails silently (bare except) or modifies the installation, and it is a global side effect unrelated to the advertised function.",
+     "suggestion": "Do not create directories inside the Slicer installation; document the manual setup step instead (as the README already does) and report a clear error if the environment is unsuitable.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 544
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Creates a 'libs' directory inside Slicer's install prefix on Windows",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 543,
+     "line_end": 550,
+     "evidence": "libs_path = os.path.join(sys.exec_prefix, \"libs\")\n if not os.path.exists(libs_path):\n try:\n os.makedirs(libs_path)",
+     "explanation": "The PyTensor workaround creates sys.exec_prefix/libs inside the Slicer installation. This writes into the application directory, which may be read-only or belong to another user, and it is a global side effect for all Slicer Python code.",
+     "suggestion": "Avoid writing to the Slicer install directory. Use a per-user cache directory or configure PyTensor flags through environment variables scoped to the Bayesian call.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 544
+     }
+    }
+   ]
+  },
+  {
+   "title": "Each run adds new table/chart/series nodes with fixed names",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 453,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Each run adds new table/chart/series nodes with fixed names",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 453,
+     "line_end": 468,
+     "evidence": "    tableNode = slicer.mrmlScene.AddNewNodeByClass(\"vtkMRMLTableNode\", \"IVIM_ROI_Data\")",
+     "explanation": "Repeated analyses accumulate 'IVIM_ROI_Data', 'IVIM_Chart', 'Raw Data' and 'Fit Data' nodes in the scene, cluttering the Data module and confusing which chart is current.",
+     "suggestion": "Reuse existing nodes by name or remove the previous ones before creating new ones.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 453
+     }
+    }
+   ]
+  },
+  {
+   "title": "No clinical/research-use disclaimer in the module UI",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 25,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No clinical/research-use disclaimer in the module UI",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 22,
+     "line_end": 25,
+     "evidence": "    parent.acknowledgementText = \"This work is an academic research tool.\"",
+     "explanation": "The module produces quantitative diffusion parameters that could be mistaken for validated clinical measurements; the disclaimer exists only as an acknowledgement string and in the README, not in the module panel or results area.",
+     "suggestion": "Add a visible 'research use only, not for clinical decision making' note in the module widget and README.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 25
+     }
+    }
+   ]
+  },
+  {
+   "title": "README instructs users to run Slicer as Administrator and modify the Slicer installation",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 83,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "README instructs users to run Slicer as Administrator and modify the Slicer installation",
+     "file": "README.md",
+     "line_start": 76,
+     "line_end": 84,
+     "evidence": "4. **Restart 3D Slicer as Administrative Mode:**",
+     "explanation": "Following the documented Bayesian setup, users copy Python headers/libs into the Slicer installation and run Slicer with elevated privileges, which weakens the security posture of the whole application and is not needed for the extension's advertised function.",
+     "suggestion": "Remove the Administrator recommendation and describe a non-privileged, per-user setup (or drop the C++ acceleration instructions in favour of a supported PyMC/PyTensor configuration).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 83
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "README advises running Slicer as administrator",
+     "file": "README.md",
+     "line_start": 83,
+     "line_end": 84,
+     "evidence": "4. **Restart 3D Slicer as Administrative Mode:**\n Run the Bayesian  mode.",
+     "explanation": "The Bayesian setup guide asks users to copy headers and libraries into Slicer's directory and then to restart Slicer in administrative mode. Running a scientific application with elevated privileges widens the impact of any bug or malicious code and is not needed for the described compilation step.",
+     "suggestion": "Remove the administrator requirement. Describe a per-user approach, for example setting PyTensor compiler flags through a user config.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 83
+     }
+    }
+   ]
+  },
+  {
+   "title": "ROI fit exceptions are printed to console instead of shown to the user",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 313,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "ROI fit exceptions are printed to console instead of shown to the user",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 699,
+     "line_end": 703,
+     "evidence": "    except Exception as e:\n        print(f\"\\n🚨 HATA YAKALANDI ({method}): {e}\")",
+     "explanation": "If the ROI fit fails (e.g. bad bounds, missing ivimfit.bayesian), the exception is only printed and the function returns empty params, so the results panel shows 0.000000 values and the plot shows a flat curve without any error message.",
+     "suggestion": "Re-raise or surface the error via slicer.util.errorDisplay and skip displaying results when fitting failed.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 313
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "ROI fit errors are printed but not shown to the user",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 699,
+     "line_end": 703,
+     "evidence": "except Exception as e:\n print(f\"\\n🚨 HATA YAKALANDI ({method}): {e}\")\n import traceback\n traceback.print_exc()",
+     "explanation": "If the ROI fit raises, the error is only printed to the console and the code continues with a zero fit curve and an R^2 of 0 or NaN. The user sees results and plots that look valid.",
+     "suggestion": "Surface the error with slicer.util.errorDisplay or a status message and stop before plotting.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 313
+     }
+    }
+   ]
+  },
+  {
+   "title": "Registered python unittest has no test class; real test suite is not registered",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "IVIMFitSlicer/CMakeLists.txt",
+   "line": 25,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Registered python unittest has no test class; real test suite is not registered",
+     "file": "IVIMFitSlicer/CMakeLists.txt",
+     "line_start": 25,
+     "line_end": 27,
+     "evidence": "  # Register the unittest subclass in the main script as a ctest.\n  # Note that the test will also be available at runtime.\n  slicer_add_python_unittest(SCRIPT ${MODULE_NAME}.py)",
+     "explanation": "IVIMFitSlicer.py contains no unittest.TestCase subclass (only an unused 'import unittest'), so the generated ctest runs zero tests and gives false assurance. The actual round-trip suite in Testing/Python is not installed or registered (Testing/Python/CMakeLists.txt line 2 is commented out), so CI never exercises it.",
+     "suggestion": "Add a proper ScriptedLoadableModuleTest class in the module script, or register Testing/Python/test_IVIMFitSlicer_roundtrip.py with slicer_add_python_unittest and install it.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/CMakeLists.txt",
+      "line": 25
+     }
+    }
+   ]
+  },
+  {
+   "title": "Sample dataset provenance and licence not stated",
+   "category": "license",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 962,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Sample dataset provenance and licence not stated",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 956,
+     "line_end": 966,
+     "evidence": "    uris='https://github.com/Atakanisik/SlicerIVIMFit/releases/download/v1.0.0-data/21.MR.ep2d_diff_b50_400_800_cor_p2.IVIMkurtozis.karaciger._TRACEW_DFC.-.10.frames.MultiVolume.by.AcquisitionTime.nrrd',",
+     "explanation": "The Sample Data entry downloads a converted clinical liver DWI series from the author's GitHub release. Neither the repository nor the README states the licence, de-identification status or consent basis for redistributing this data, so permission to distribute it is unclear even though the code itself is MIT.",
+     "suggestion": "Document the origin, de-identification and licence/consent of the sample dataset (or replace it with the synthetic phantom), and state the licence of the 'ivimfit' dependency.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 962
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unreachable duplicate code after return in extract_pixel_data_safe",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 775,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Unreachable duplicate code after return in extract_pixel_data_safe",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 779,
+     "line_end": 804,
+     "evidence": "    return arr, ref\n    \n    # 2. MultiVolume ise Labelmap modülü için geçici bir 3D referans oluştur",
+     "explanation": "Lines 781-804 can never execute; the dead copy makes the function's actual behaviour (no temporary reference node for MultiVolume in the second block) hard to reason about and suggests an incomplete refactor.",
+     "suggestion": "Delete the unreachable block.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 775
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Unreachable code after return and a possible leaked temporary node",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 779,
+     "line_end": 783,
+     "evidence": "return arr, ref\n \n # 2. MultiVolume ise Labelmap modülü için geçici bir 3D referans oluştur\n if node.IsA(\"vtkMRMLMultiVolumeNode\") or node.IsA(\"vtkMRMLSequenceNode\"):",
+     "explanation": "extract_pixel_data_safe has a second block of code after an unconditional return, which is never executed. The Temp_Scalar_Ref node is created for multivolumes and only removed on the success path in process(), so it can leak when an exception occurs.",
+     "suggestion": "Delete the dead block and clean up temporary nodes in a finally clause.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 775
+     }
+    }
+   ]
+  },
+  {
+   "title": "Catalog entry tracks a moving branch",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "IVIMFitSlicer.json",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Catalog entry tracks a moving branch",
+     "file": "IVIMFitSlicer.json",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "\"scm_revision\": \"main\",",
+     "explanation": "scm_revision is 'main', so the code that users install can change without a catalog update. This does not indicate a defect, but the reviewed commit is not pinned.",
+     "suggestion": "Pin scm_revision to a reviewed commit or tag, or accept branch tracking as a deliberate choice.",
+     "confidence": "high",
+     "verification": {
+      "status": "file not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Self-test not registered with CTest and sample data is external",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "IVIMFitSlicer/Testing/Python/CMakeLists.txt",
+   "line": 2,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Self-test not registered with CTest and sample data is external",
+     "file": "IVIMFitSlicer/Testing/Python/CMakeLists.txt",
+     "line_start": 2,
+     "line_end": 2,
+     "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+     "explanation": "The round-trip test is described in the README but must be run manually from the Slicer Python console. The commented-out CTest registration in Testing/Python/CMakeLists.txt means the test never runs in CI.",
+     "suggestion": "Register the round-trip test with slicer_add_python_unittest, or document why it cannot run in CI.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/Testing/Python/CMakeLists.txt",
+      "line": 2
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Heavy voxel-wise fitting runs on the GUI thread and errors are silently swallowed",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 406,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Heavy voxel-wise fitting runs on the GUI thread and errors are silently swallowed",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 920,
+     "line_end": 942,
+     "evidence": "            except: pass\n        return start_idx, res\n        \n    with ThreadPoolExecutor(max_workers=4) as ex:",
+     "explanation": "run_fitting is called from the button handler on the main thread; only processEvents between chunks keeps the UI alive, so Slicer appears frozen for minutes on real volumes. Any per-voxel fit failure is discarded by 'except: pass', leaving zeros in the parameter maps with no indication to the user that the fit failed.",
+     "suggestion": "Run the computation in a CLI or a worker thread (slicer.util.ProgressDialog / qt.QTimer pattern), count failures and report them to the user, and avoid bare excepts.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 406
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Exceptions silently swallowed during voxel-wise fitting",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 923,
+     "line_end": 935,
+     "evidence": "try:\n if method in [\"segmented\", \"bayesian\"]: \n ...\n except: pass",
+     "explanation": "Every per-voxel fit failure is discarded with a bare except, so maps silently contain zeros where fitting failed, and the user gets no report. Bare excepts also catch KeyboardInterrupt.",
+     "suggestion": "Catch Exception, count failed voxels, and report the count in the status message or log.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 924
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Version check compares version strings lexicographically",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 530,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Version check compares version strings lexicographically",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 528,
+     "line_end": 538,
+     "evidence": "        if importlib.metadata.version(\"ivimfit\") < \"0.1.7.2\":\n            raise ImportError(\"Outdated version\")",
+     "explanation": "String comparison makes e.g. '0.1.10' or '0.1.7.10' compare as older than '0.1.7.2', so every run re-triggers pip_install and importlib.reload, repeatedly touching the shared environment and slowing each analysis. Also the except clause 'except (ImportError, Exception)' catches everything, so genuine import errors are indistinguishable from an outdated version.",
+     "suggestion": "Use packaging.version.parse(...) for the comparison and catch only ImportError/PackageNotFoundError.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 530
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "String comparison of version numbers",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 530,
+     "line_end": 530,
+     "evidence": "if importlib.metadata.version(\"ivimfit\") < \"0.1.7.2\":",
+     "explanation": "importlib.metadata.version returns a string and is compared lexicographically with '0.1.7.2'. Versions such as '0.1.10' or '0.10.0' compare incorrectly, so the update check can skip a needed upgrade or trigger unnecessary reinstalls each run.",
+     "suggestion": "Compare parsed versions, for example with packaging.version.Version, and handle the ImportError path separately from the version check.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 530
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "pip requirement string embeds the --upgrade option",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 534,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "pip requirement string embeds the --upgrade option",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 534,
+     "line_end": 534,
+     "evidence": "        slicer.util.pip_install(\"ivimfit>=0.1.7.2 --upgrade\")",
+     "explanation": "slicer.util.pip_install treats a string argument as a single requirement, so 'ivimfit>=0.1.7.2 --upgrade' is passed to pip as one requirement specifier and pip rejects it as an invalid requirement; the install then fails and the subsequent 'import ivimfit' raises, so the module cannot run on a machine without ivimfit pre-installed. (Slicer's util.py was not available to me, so this is inferred from the documented API.)",
+     "suggestion": "Pass the requirement and the option separately, e.g. pip_install(\"ivimfit>=0.1.7.2\", extraOptions=[\"--upgrade\"]) or pip_install([\"ivimfit>=0.1.7.2\"]).",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 534
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "pip_install of ivimfit and pymc into Slicer's shared Python without user confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+   "line": 534,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "pip_install of ivimfit and pymc into Slicer's shared Python without user confirmation",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 527,
+     "line_end": 557,
+     "evidence": "        slicer.util.pip_install(\"ivimfit>=0.1.7.2 --upgrade\")\n...\n            slicer.util.pip_install(\"pymc\")",
+     "explanation": "Clicking 'Run Analysis' silently installs/upgrades packages into the Slicer Python environment shared by all modules. 'pymc' is a large download whose dependency chain (numpy, scipy, pandas, pytensor) can upgrade or downgrade packages Slicer bundles, which can break Slicer and other extensions for users who never open this module. The policy requires user confirmation for such installs and forbids changing Slicer-bundled packages.",
+     "suggestion": "Ask the user with slicer.util.confirmOkCancelDisplay before installing, install into an isolated location or document a manual install, and constrain dependencies so numpy/scipy are not modified (e.g. install with --no-deps for the risky transitive packages, or use a dedicated extension dependency).",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 534
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Runtime pip installs of ivimfit and pymc into Slicer's shared Python without a size or consent prompt",
+     "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+     "line_start": 530,
+     "line_end": 538,
+     "evidence": "if importlib.metadata.version(\"ivimfit\") < \"0.1.7.2\":\n raise ImportError(\"Outdated version\")\n...\nslicer.util.pip_install(\"ivimfit>=0.1.7.2 --upgrade\")",
+     "explanation": "When the user clicks Run, the module calls pip_install for ivimfit (with --upgrade) and for pymc if missing. These change the shared Slicer Python environment for every extension and can pull in large dependencies, including numpy/scipy changes, with no explicit confirmation. The request to upgrade is not version-pinned against Slicer's bundled packages.",
+     "suggestion": "Ask the user for confirmation before installing, show the packages and their sizes, avoid --upgrade on shared packages, and check that the bundled numpy/scipy versions are not downgraded. Document these installs in the README.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "IVIMFitSlicer/IVIMFitSlicer.py",
+      "line": 530
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D6",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "license": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "minor issues"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 7,
+  "single": 8,
+  "unverified": 1,
+  "total": 15
+ }
+}

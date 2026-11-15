@@ -1,0 +1,725 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Runtime pip installs into Slicer's shared Python environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "KonfAI/KonfAILib/logic/dependencies.py",
+   "line": 103,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Runtime pip installs into Slicer's shared Python environment",
+     "file": "KonfAI/KonfAILib/logic/dependencies.py",
+     "line_start": 103,
+     "line_end": 113,
+     "evidence": "if installed is None:\n        ...\n        slicer.util.pip_install(f\"{package}=={latest}\")",
+     "explanation": "On first use of the module, konfai-apps and its dependencies are pip-installed into Slicer's Python environment, pinned to the newest PyPI release. The install-or-upgrade is prompted, which is good. Lines 153-155 also run a '--force-reinstall --no-deps' of konfai-apps followed by an unpinned pip install of numpy, tensorboard and others. These can change packages Slicer relies on or other extensions use. They are not visible to users who never open the module, but they are installed once they open it.",
+     "suggestion": "Pin the dependency set to versions compatible with the Slicer release, avoid unpinned installs of packages Slicer bundles (numpy), and document the installed packages in the tutorial.",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "KonfAI/KonfAILib/logic/dependencies.py",
+      "line": 103
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "`keyring` is pip-installed into Slicer's Python silently, with no user confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "KonfAI/KonfAILib/logic/servers.py",
+   "line": 58,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "`keyring` is pip-installed into Slicer's Python silently, with no user confirmation",
+     "file": "KonfAI/KonfAILib/logic/servers.py",
+     "line_start": 58,
+     "line_end": 62,
+     "evidence": "    try:\n        import keyring\n    except ImportError:\n        slicer.util.pip_install(\"keyring\")\n    import keyring  # noqa: F811",
+     "explanation": "Any time a RemoteServer object is constructed (module entry when stored remote servers exist in QSettings, or when a run/check is triggered), an ImportError triggers `slicer.util.pip_install(\"keyring\")` with no prompt. This mutates the shared Slicer environment for the user without consent, and the same pattern is repeated in both server dialogs. If the install fails or pulls a different version than expected, it affects every Slicer session, not just this module.",
+     "suggestion": "Bundle keyring as a declared dependency (or ask the user first via the existing ask_user_to_install_dependency helper) and disable the remote-token feature with an explanatory message when keyring is unavailable.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "KonfAI/KonfAILib/logic/servers.py",
+      "line": 58
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Catalog entry tracks a moving branch, not a fixed revision",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "KonfAI.json",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Catalog entry tracks a moving branch, not a fixed revision",
+     "file": "KonfAI.json",
+     "line_start": 1,
+     "line_end": 9,
+     "evidence": "\"scm_revision\": \"main\",",
+     "explanation": "The entry pins 'main', so the built extension changes with every commit. The review covers the source as of the commit named in the review request, not a fixed commit.",
+     "suggestion": "Pin scm_revision to a specific commit or tag after review.",
+     "confidence": "high",
+     "verification": {
+      "status": "file not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Hugging Face repo id / app name interpolated into a generated `-c` script",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "KonfAI/KonfAILib/widgets/panels/selection.py",
+   "line": 444,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Hugging Face repo id / app name interpolated into a generated `-c` script",
+     "file": "KonfAI/KonfAILib/widgets/panels/selection.py",
+     "line_start": 444,
+     "line_end": 449,
+     "evidence": "                    for filename in selected_files:\n                        LocalAppRepositoryFromHF.download(\n                            \"{app._repo_id}\",\n                            \"{app._app_name}\" + \"/\" + filename,\n                            True,\n                        )",
+     "explanation": "The refresh/download action builds a Python source string with textwrap.dedent f-string interpolation of `app._repo_id` and `app._app_name` and executes it with `sys.executable -c`. `selected_files` is inserted with !r (safe), but the repo id and app name are inserted verbatim inside double quotes, so a quote character in either value would break out of the literal and inject code into the executed script. The values come from app objects the user selected, so this is a robustness/defense-in-depth issue rather than an established external attack path.",
+     "suggestion": "Insert these values with `{app._repo_id!r}` / `{app._app_name!r}`, or run the download in-process / from a real script file with arguments instead of -c.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "KonfAI/KonfAILib/widgets/panels/selection.py",
+      "line": 444
+     }
+    }
+   ]
+  },
+  {
+   "title": "Icons referenced by the code are not installed by the module CMakeLists",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "KonfAI/CMakeLists.txt",
+   "line": 40,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Icons referenced by the code are not installed by the module CMakeLists",
+     "file": "KonfAI/CMakeLists.txt",
+     "line_start": 40,
+     "line_end": 45,
+     "evidence": "  Resources/Icons/download.png\n  Resources/Icons/folder.png\n  Resources/Icons/gear.png\n  Resources/Icons/${MODULE_NAME}.png\n  Resources/Icons/refresh.png",
+     "explanation": "`core_widget.py` loads `Icons/studio.png` and `helpers.app_task_icon` loads `Icons/task_segmentation.png` / `task_registration.png` / `task_synthesis.png` / `task_app.png`, but MODULE_PYTHON_RESOURCES only lists download.png, folder.png, gear.png, KonfAI.png and refresh.png. In a package built by the extension factory those files are absent, so the Studio button and the app-selector glyphs render as empty icons for end users, even though they exist in the source tree (10 files under Resources/Icons).",
+     "suggestion": "Add Resources/Icons/studio.png and Resources/Icons/task_*.png to MODULE_PYTHON_RESOURCES (or list all icons in Resources/Icons).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "KonfAI/CMakeLists.txt",
+      "line": 40
+     }
+    }
+   ]
+  },
+  {
+   "title": "Network work on the GUI thread",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "KonfAI/KonfAILib/widgets/core_widget.py",
+   "line": 581,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Network work on the GUI thread",
+     "file": "KonfAI/KonfAILib/widgets/core_widget.py",
+     "line_start": 581,
+     "line_end": 594,
+     "evidence": "    def _update_resources(self) -> None:\n        self._update_ram()\n        self._update_vram()\n\n    def _update_ram(self) -> None:\n        \"\"\"\n        Update the RAM usage display and progress bar.\n\n        If usage exceeds 80%, the progress bar color is set to red.\n        \"\"\"\n        remote_server = self.ui.remoteServerComboBox.currentData\n        from konfai import get_ram\n\n        used_gb, total_gb = get_ram(remote_server)",
+     "explanation": "populate_apps() lists Hugging Face repositories and builds app objects on the GUI thread (using processEvents feedback), `_update_ram`/`_update_vram` issue an HTTP GET to the remote server every 3 s while the module is visible, and `get_latest_pypi_version` blocks up to 5 s on module entry. With a slow or unreachable server the module panel freezes during those calls.",
+     "suggestion": "Move the remote polling and repository listing to a worker thread or a QProcess/QtNetwork request and update the widgets from the main thread.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "KonfAI/KonfAILib/widgets/core_widget.py",
+      "line": 581
+     }
+    }
+   ]
+  },
+  {
+   "title": "Recursive delete of a folder path taken from the app object",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "KonfAI/KonfAILib/widgets/panels/selection.py",
+   "line": 375,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Recursive delete of a folder path taken from the app object",
+     "file": "KonfAI/KonfAILib/widgets/panels/selection.py",
+     "line_start": 375,
+     "line_end": 378,
+     "evidence": "        if chk.isChecked():\n            if isinstance(app, LocalAppRepositoryFromDirectory):\n                try:\n                    shutil.rmtree(app.get_name())",
+     "explanation": "When the user ticks 'Also delete the folder from disk' and confirms the warning dialog, `shutil.rmtree(app.get_name())` deletes whatever path the local app repository reports. The path is not validated against the app repository root and may be relative, so it resolves against Slicer's current working directory. The action is explicitly double-confirmed by the user, which limits the risk.",
+     "suggestion": "Resolve the app directory from the repository object and refuse to delete unless it is inside the known KonfAI app repository/cache root.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "KonfAI/KonfAILib/widgets/panels/selection.py",
+      "line": 375
+     }
+    }
+   ]
+  },
+  {
+   "title": "Remote server bearer token is passed on the child-process command line",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "KonfAI/KonfAILib/logic/servers.py",
+   "line": 84,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Remote server bearer token is passed on the child-process command line",
+     "file": "KonfAI/KonfAILib/logic/servers.py",
+     "line_start": 84,
+     "line_end": 87,
+     "evidence": "        args = [\"--host\", self.host, \"--port\", str(self.port)]\n        if self.token:\n            args += [\"--token\", self.token]",
+     "explanation": "cli_args() appends `--token <token>` to the konfai-apps argv. On shared multi-user machines any local user can read the full command line of the child process (e.g. via ps), exposing the remote GPU server credentials the extension stores encrypted in the keyring. The token is only sent to a server the user configured, so the exposure is local and modest.",
+     "suggestion": "Pass the token through an environment variable or a 0600 temporary config/credential file rather than argv.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "KonfAI/KonfAILib/logic/servers.py",
+      "line": 84
+     }
+    }
+   ]
+  },
+  {
+   "title": "Repair path pip-installs unpinned packages that Slicer bundles (numpy, requests)",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "KonfAI/KonfAILib/logic/dependencies.py",
+   "line": 153,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Repair path pip-installs unpinned packages that Slicer bundles (numpy, requests)",
+     "file": "KonfAI/KonfAILib/logic/dependencies.py",
+     "line_start": 153,
+     "line_end": 156,
+     "evidence": "            slicer.util.pip_install(f\"--upgrade --force-reinstall --no-deps konfai-apps=={latest}\")\n            slicer.util.pip_install(\n                \"tqdm numpy ruamel.yaml psutil tensorboard lxml h5py nvidia-ml-py requests huggingface_hub\"\n            )",
+     "explanation": "On the 'reinstall KonfAI-apps' branch the extension installs `tqdm numpy ruamel.yaml psutil tensorboard lxml h5py nvidia-ml-py requests huggingface_hub` unpinned in one pip call. If any package is missing (e.g. on a Slicer build where a dependency was not satisfied) pip resolves and installs the latest release, including its transitive requirements, which can upgrade numpy/requests under Slicer's feet. This runs only after user consent, which limits the impact.",
+     "suggestion": "Let konfai-apps' own metadata declare these dependencies (install it without --no-deps), or constrain them so Slicer-bundled packages such as numpy and requests are never upgraded.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "KonfAI/KonfAILib/logic/dependencies.py",
+      "line": 153
+     }
+    }
+   ]
+  },
+  {
+   "title": "Run failures are swallowed with a bare print",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "KonfAI/KonfAILib/widgets/app_template.py",
+   "line": 108,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Run failures are swallowed with a bare print",
+     "file": "KonfAI/KonfAILib/widgets/app_template.py",
+     "line_start": 267,
+     "line_end": 272,
+     "evidence": "            try:\n                function(remote_server, device)\n            except Exception as e:\n                # Log the exception for debugging and reset running state\n                print(e)\n                self.set_running(False)",
+     "explanation": "In on_run_button, any exception raised while preparing or starting the run is only `print(e)`ed and the running flag is reset; the user sees the log/progress stop but no error message. For instance a missing `konfai` module or a broken app manifest leaves the user with a silently cancelled operation.",
+     "suggestion": "Also report the exception in the log panel and via slicer.util.errorDisplay (with details/traceback).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "KonfAI/KonfAILib/widgets/app_template.py",
+      "line": 108
+     }
+    }
+   ]
+  },
+  {
+   "title": "`eval()` applied to a string read back from the parameter node",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "KonfAI/KonfAILib/widgets/app_template.py",
+   "line": 198,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "`eval()` applied to a string read back from the parameter node",
+     "file": "KonfAI/KonfAILib/widgets/app_template.py",
+     "line_start": 198,
+     "line_end": 202,
+     "evidence": "        if self._parameter_node is not None and self._parameter_node.GetParameter(\"RemoteServer\") != \"None|True\":\n            name, host, port, ok = self._parameter_node.GetParameter(\"RemoteServer\").split(\"|\")\n            return RemoteServer(name, host, port) if host != \"None\" else None, eval(ok)",
+     "explanation": "get_remote_server splits the `RemoteServer` parameter on '|' and evaluates the fourth field to a bool. Today only the module writes that parameter, so this is not an injection path from outside, but a saved scene file can carry arbitrary parameter strings, and a crafted .mrs scene would execute code when the module runs a job with a remote server set.",
+     "suggestion": "Replace `eval(ok)` with `ok == \"True\"`.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "KonfAI/KonfAILib/widgets/app_template.py",
+      "line": 198
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "eval() applied to a string read from QSettings",
+     "file": "KonfAI/KonfAILib/widgets/app_template.py",
+     "line_start": 198,
+     "line_end": 202,
+     "evidence": "name, host, port, ok = self._parameter_node.GetParameter(\"RemoteServer\").split(\"|\")\n            return RemoteServer(name, host, port) if host != \"None\" else None, eval(ok)",
+     "explanation": "eval() runs on the 'ok' field of a string stored in the parameter node. The value is written by the extension itself (a bool string), so the practical risk is low. Still, a parameter node could be edited or loaded from a scene file, so eval() on it is an unnecessary code-execution surface. Replacing it with a literal comparison such as ok == 'True' removes the risk.",
+     "suggestion": "Replace eval(ok) with ok == \"True\" (or ast.literal_eval), and parse the field explicitly.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "KonfAI/KonfAILib/widgets/app_template.py",
+      "line": 199
+     }
+    }
+   ]
+  },
+  {
+   "title": "keyring and konfai-studio installed on demand",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "KonfAI/KonfAILib/widgets/core_widget.py",
+   "line": 279,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "keyring and konfai-studio installed on demand",
+     "file": "KonfAI/KonfAILib/widgets/core_widget.py",
+     "line_start": 279,
+     "line_end": 280,
+     "evidence": "with slicer_wait_popup(\"KonfAI Studio\", \"Installing konfai-studio...\"):\n                    slicer.util.pip_install(\"konfai-studio\")",
+     "explanation": "The Studio install is only after a user click (confirmed by a dialog), so it is consent-based. keyring is installed on first remote-server use in servers.py line 61. Both are pip installs of unpinned packages into the shared Python environment.",
+     "suggestion": "Pin the versions, and state the packages in the documentation.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "KonfAI/KonfAILib/widgets/core_widget.py",
+      "line": 279
+     }
+    }
+   ]
+  },
+  {
+   "title": "Module import deletes KonfAILib entries from sys.modules",
+   "category": "environment",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "KonfAI/KonfAI.py",
+   "line": 36,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Module import deletes KonfAILib entries from sys.modules",
+     "file": "KonfAI/KonfAI.py",
+     "line_start": 36,
+     "line_end": 37,
+     "evidence": "for _cached_module in [name for name in sys.modules if name == \"KonfAILib\" or name.startswith(\"KonfAILib.\")]:\n    del sys.modules[_cached_module]",
+     "explanation": "KonfAI.py purges every `KonfAILib*` entry from sys.modules at import time to support Slicer's Reload. That is a global interpreter side effect: sister extensions (ImpactSynth, ImpactReg) holding references to old KonfAILib classes keep stale identities, as the author's own comment acknowledges. It does not affect modules that do not import KonfAI.",
+     "suggestion": "Only purge on an explicit Reload path (e.g. when the module is re-executed as a reload, detectable via the wasSetupOnce property used below), or document the constraint in README.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "KonfAI/KonfAI.py",
+      "line": 36
+     }
+    }
+   ]
+  },
+  {
+   "title": "One-click install and detached launch of a local web app that can drive an LLM CLI",
+   "category": "safety",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "KonfAI/KonfAILib/widgets/core_widget.py",
+   "line": 205,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "One-click install and detached launch of a local web app that can drive an LLM CLI",
+     "file": "KonfAI/KonfAILib/widgets/core_widget.py",
+     "line_start": 205,
+     "line_end": 210,
+     "evidence": "        inside_slicer = executable.startswith(slicer.app.slicerHome)\n        env = dict(os.environ) if inside_slicer else dict(slicer.util.startupEnvironment())\n        user_bin = os.path.expanduser(\"~/.local/bin\")\n        path = env.get(\"PATH\", \"\")\n        if user_bin not in path.split(os.pathsep):\n            env[\"PATH\"] = f\"{path}{os.pathsep}{user_bin}\" if path else user_bin",
+     "explanation": "The Studio button can pip-install `konfai-studio` after a confirmation dialog, launch it detached on 127.0.0.1:8730, and the launcher deliberately appends `~/.local/bin` to PATH because that is where the `claude` CLI ('Studio's default brain') lives. The server is loopback-only and the user consents, but users should understand that this third-party tool is started outside Slicer's process and keeps running after Slicer closes.",
+     "suggestion": "Keep the consent dialog, and document in README that Studio is a separate, persistent local web app.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "KonfAI/KonfAILib/widgets/core_widget.py",
+      "line": 205
+     }
+    }
+   ]
+  },
+  {
+   "title": "Single API-contract test; no functional tests",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "KonfAI/CMakeLists.txt",
+   "line": 60,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Single API-contract test; no functional tests",
+     "file": "KonfAI/Testing/Python/KonfAIApiContractTest.py",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "slicer_add_python_unittest(\n  SCRIPT KonfAIApiContractTest.py",
+     "explanation": "The only automated test checks that public symbols exist. Inference, evaluation and remote-server behavior have no tests in the repo. This is a non-blocking maturity note.",
+     "suggestion": "Add a small smoke test on bundled or public sample data.",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "KonfAI/CMakeLists.txt",
+      "line": 60
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Runtime pip installs into Slicer's shared Python environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "KonfAI/KonfAILib/logic/dependencies.py",
+   "line": 103,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Runtime pip installs into Slicer's shared Python environment",
+     "file": "KonfAI/KonfAILib/logic/dependencies.py",
+     "line_start": 103,
+     "line_end": 113,
+     "evidence": "if installed is None:\n        ...\n        slicer.util.pip_install(f\"{package}=={latest}\")",
+     "explanation": "On first use of the module, konfai-apps and its dependencies are pip-installed into Slicer's Python environment, pinned to the newest PyPI release. The install-or-upgrade is prompted, which is good. Lines 153-155 also run a '--force-reinstall --no-deps' of konfai-apps followed by an unpinned pip install of numpy, tensorboard and others. These can change packages Slicer relies on or other extensions use. They are not visible to users who never open the module, but they are installed once they open it.",
+     "suggestion": "Pin the dependency set to versions compatible with the Slicer release, avoid unpinned installs of packages Slicer bundles (numpy), and document the installed packages in the tutorial.",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "KonfAI/KonfAILib/logic/dependencies.py",
+      "line": 103
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "`keyring` is pip-installed into Slicer's Python silently, with no user confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "KonfAI/KonfAILib/logic/servers.py",
+   "line": 58,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "`keyring` is pip-installed into Slicer's Python silently, with no user confirmation",
+     "file": "KonfAI/KonfAILib/logic/servers.py",
+     "line_start": 58,
+     "line_end": 62,
+     "evidence": "    try:\n        import keyring\n    except ImportError:\n        slicer.util.pip_install(\"keyring\")\n    import keyring  # noqa: F811",
+     "explanation": "Any time a RemoteServer object is constructed (module entry when stored remote servers exist in QSettings, or when a run/check is triggered), an ImportError triggers `slicer.util.pip_install(\"keyring\")` with no prompt. This mutates the shared Slicer environment for the user without consent, and the same pattern is repeated in both server dialogs. If the install fails or pulls a different version than expected, it affects every Slicer session, not just this module.",
+     "suggestion": "Bundle keyring as a declared dependency (or ask the user first via the existing ask_user_to_install_dependency helper) and disable the remote-token feature with an explanatory message when keyring is unavailable.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "KonfAI/KonfAILib/logic/servers.py",
+      "line": 58
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D3",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "utility": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 4,
+  "single": 14,
+  "unverified": 1,
+  "total": 15
+ }
+}

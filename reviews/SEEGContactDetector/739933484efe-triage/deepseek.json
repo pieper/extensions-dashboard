@@ -1,0 +1,137 @@
+{
+ "purpose": "Automatically localizes SEEG electrode contacts from post-implantation CT (bolts, trajectories, Gaussian-mixture electrode segmentation, polynomial curve fitting) and outputs an editable fiducial list, for epilepsy clinicians/researchers using 3D Slicer.",
+ "summary": "Coherent, well-documented scripted module (Apache-2.0, sample data with SHA256 checksums, docs and tutorial). Main issues are environment-related: it pip-installs scipy/scikit-learn/scikit-image into Slicer's shared Python on first use (scikit-learn and scikit-image pull their own numpy/scipy, which can replace Slicer-bundled versions), which users of other extensions also inherit. It also writes fixed-name autosave files into the CT folder by default, and the registered unittest runs the full HD-BET/pytorch pipeline although its comment says logic testing is disabled. No telemetry, no uploads of user data. Fixes needed before merge: pip-install handling and the heavy default test.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Searched the whole repo for network/eval/exec/pickle/subprocess and deletion patterns; only sample-data downloads from the project's own GitHub releases (with SHA256 checksums) and no transmission of image data. The one data-risk is default-on auto-save writing fixed filenames into the CT directory (SEEGContactDetector.py:867-870, 903-904, 1098-1100)."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "SEEGContactDetector.py installs scipy/scikit-learn/scikit-image via slicer.util.pip_install into Slicer's shared environment after a generic OK/Cancel prompt (lines 920-931, 1112-1123, 1211-1216, 1266-1271); scikit-learn/scikit-image dependencies can replace Slicer-bundled numpy/scipy. PyTorch and model weights come through HDBrainExtraction's setupPythonRequirements (line 860), which is the sanctioned route; no import-time side effects found."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists installs SEEGContactDetector.py plus all listed Icons/UI resources, EXTENSION_DEPENDS \"HDBrainExtraction\" matches the catalog build_dependencies, and scm_revision main resolves to the reviewed source. The registered unittest (SEEGContactDetector.py:1469-1541) actually runs the full network/HD-BET pipeline despite the comment claiming it is disabled, which can break build-machine tests."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Full Apache License 2.0 text in LICENSE; no third-party code bundled; sample data are hosted on the project's GitHub releases. Provenance/terms for the distributed sample CT/T1/fcsv are not stated explicitly (minor info only)."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "ScriptedLoadableModule structure, parameter node with connectGui, observer cleanup in exit()/setParameterNode() are all present and correct. However heavy computation runs on the GUI thread with processEvents instead of a logic thread or CLI (onRunClicked:369-389), and default-on auto-save into the CT folder can overwrite a previous patient's autosave results (SEE, line 903-904, 1098-1100); several UI callbacks also dereference nodes without None checks (e.g. line 280, 289)."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Clear purpose, sample data registered in Sample Data, mkdocs documentation (installation, usage, module overview, sample data, troubleshooting, video tutorial) and a paper reference; but no clinical-use/research-only disclaimer although the README claims 'highly accurate' results for a clinical localization task."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "pip installs of scipy / scikit-learn / scikit-image into Slicer's shared Python environment",
+   "file": "SEEGContactDetector/SEEGContactDetector.py",
+   "line_start": 919,
+   "line_end": 931,
+   "evidence": "        try:\n            import scipy\n        except ModuleNotFoundError:\n            if slicer.util.confirmOkCancelDisplay(\"This module requires 'scipy' Python package. Click OK to install it now.\"):\n                slicer.util.pip_install(\"scipy\")\n                import scipy",
+   "explanation": "On first use the module installs scipy, scikit-learn and scikit-image with pip into Slicer's own site-packages (also lines 1112-1123, 1211-1216, 1266-1271). scikit-learn and scikit-image declare numpy/scipy dependencies, so pip can replace Slicer-bundled numpy/scipy with PyPI versions in the user's installation; that breakage is inherited by every other module and extension in that Slicer, including users who never open this module. The prompt only says a package is required, not that Slicer's environment is modified.",
+   "suggestion": "Ship the dependencies via the extension's CMake/pip requirements mechanism or the SlicerPython wheel-based approach used by other extensions; if runtime installation stays, state that it modifies the shared environment, install with --no-deps plus explicit user choice of versions, and never touch numpy/scipy that Slicer bundles.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Default-on auto-save writes fixed filenames into the CT's folder, overwriting earlier results",
+   "file": "SEEGContactDetector/SEEGContactDetector.py",
+   "line_start": 902,
+   "line_end": 904,
+   "evidence": "        # save updated fiducials\n        if save and path:\n            slicer.util.saveNode(fiducial_node, os.path.join(path, \"contacts_autosave.mrk.json\"))",
+   "explanation": "autoSave defaults to True (line 136) and the save path defaults to os.path.dirname of the CT file (lines 588-589, 666-667, 753-754). Every run silently writes CT_brain_mask_autosave.seg.nrrd, transform_T1_to_CT_autosave.h5, contacts_autosave.mrk.json and bolt_fiducials_autosave.mrk.json (also lines 867-870, 1098-1100) into the user's data folder. Processing a second patient whose CT sits in the same folder (common for a study/protocol directory) destroys the first patient's saved contact localizations without any prompt, and the names also collide with the sample-data files downloaded as SEEGContactDetector_*.",
+   "suggestion": "Turn auto-save off by default or ask before overwriting, and include the CT/patient node name or a timestamp in the autosave filenames; keep an explicit 'Save result' action that asks for a destination.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Registered unittest runs the full HD-BET/pytorch pipeline although the comment says testing is disabled",
+   "file": "SEEGContactDetector/SEEGContactDetector.py",
+   "line_start": 1499,
+   "line_end": 1507,
+   "evidence": "        # Logic testing is disabled by default to not overload automatic build machines (pytorch is a huge package).\n        # Set testLogic to True to enable testing.\n        testLogic = True",
+   "explanation": "The module registers this test as a ctest (SEEGContactDetector/CMakeLists.txt:30). As written it downloads sample CT/T1/fcsv from GitHub and calls register_and_brain_mask, which invokes HDBrainExtraction and therefore downloads/installs PyTorch wheel plus model weights (line 860-861). On offline or resource-limited build machines this either fails or takes very long, so the extension's own test will be red or time out; the in-code comment contradicts the code.",
+   "suggestion": "Set testLogic = False as the comment intends (or gate it behind an environment variable), and add a lightweight test that exercises only label parsing / load_electrodes / select_contact_points without network or pytorch.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Long computation runs on the GUI thread with processEvents instead of a background thread",
+   "file": "SEEGContactDetector/SEEGContactDetector.py",
+   "line_start": 369,
+   "line_end": 386,
+   "evidence": "    def onRunClicked(self):\n        progressbar = slicer.util.createProgressDialog(windowTitle=\"Detecting contacts\")\n        progressbar.setCancelButton(None)",
+   "explanation": "The whole detection chain (bolt segmentation, PCA, GMM over all metal voxels, curve fitting with a correlation loop per offset) executes in the GUI thread guarded only by slicer.app.processEvents() calls (e.g. lines 958, 1030, 1134). The progress dialog has its cancel button removed and shows hard-coded percentages, so the UI appears frozen for the multi-minute runs the README advertises and the user cannot abort.",
+   "suggestion": "Move the pipeline into the logic class as a cli/CLI-node or use a QThread/slicer.util.createProgressDialog with real progress and cancellation support, as other Slicer extensions do.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Scene NodeAdded observer silently overrides user-selected inputs by name matching",
+   "file": "SEEGContactDetector/SEEGContactDetector.py",
+   "line_start": 670,
+   "line_end": 681,
+   "evidence": "    def onNodeAdded(self, caller, event,  node):\n        # Every time a new node is added to the scene check if it's input node\n        if \"ct\" in node.GetName().lower() and isinstance(node, SEEGContactDetectorParameterNode.__annotations__['inputCT']):",
+   "explanation": "Any volume whose name contains 'ct' or 't1' (and any markup list containing 'fiducials') is assigned to the module's inputs as soon as it is added to the scene, replacing the node the user explicitly selected. Loading e.g. 'T1_postcontrast' or 'func_t1_map' after choosing the preoperative T1 changes the input without notification and can silently change registration/masking results.",
+   "suggestion": "Use name heuristics only to prefill empty selections (as initializeParameterNode does) and never overwrite a non-empty user choice without asking.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No research-use disclaimer or validation metrics for a clinical localization task",
+   "file": "README.md",
+   "line_start": 20,
+   "line_end": 24,
+   "evidence": "- Automatic localization of SEEG contact centers from post-implantation CT\n- Robust detection of thousands of contacts within minutes",
+   "explanation": "The module produces electrode contact coordinates used to interpret invasive recordings, and the README/docs claim high accuracy, but no accuracy numbers, no statement of validation cohort, and no 'not for primary clinical decision making / research use' disclaimer appear anywhere (searched for clinical/disclaimer/not intended terms).",
+   "suggestion": "Add a short 'Intended use / limitations' section citing the reported accuracy from the Janca et al. paper on the tested data and stating that automatic results must be reviewed by a clinician.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "License/terms of the distributed sample data are not stated",
+   "file": "docs/sample_data.md",
+   "line_start": 5,
+   "line_end": 11,
+   "evidence": "We provide sample data used in this documentation and in the video tutorial, which can be downloaded directly from 3D Slicer.",
+   "explanation": "The module downloads a CT, a T1 and bolt fiducials from the project's GitHub releases (SEEGContactDetector.py:85-113, with SHA256 checksums, which is good), but no terms or provenance statement for the patient data accompany them. TODO.md says 'Sample data (defaced)', which suggests de-identification, yet redistribution permission is not documented.",
+   "suggestion": "Add one sentence in docs/sample_data.md about the de-identification and the terms under which the sample data may be redistributed and used.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Large PNG/GIF screenshots committed to the source repository",
+   "file": "Screenshot01.png",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "",
+   "explanation": "About 6-7 MB of screenshots and animated GIFs (Screenshot01.png 627 KB, Screenshot02.png 674 KB, docs/images/microsteps.gif 814 KB, etc.) are committed; not blocking, but the extension package and clone size grow unnecessarily when images could be optimised or hosted in a release.",
+   "suggestion": "Downscale or convert the documentation GIFs, or host the largest media in a release as the module comment itself recommends for data.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Whether HDBrainExtraction's setupPythonRequirements() prompts the user before downloading PyTorch/HD-BET weights (external repository not available in this review)",
+  "The exact scm_revision commit content beyond the provided snapshot; the entry uses scm_revision 'main' so a moving branch was reviewed as of the snapshot",
+  "Licensing of HD-BET model weights downloaded by HDBrainExtraction",
+  "Behaviour of the .ui file's remaining widgets (lines 445-948) and the four icon files beyond existence",
+  "Actual runtime behaviour of the algorithms and whether the CI build/test currently passes (no execution or CI reports available)"
+ ],
+ "questions_for_author": []
+}

@@ -1,0 +1,108 @@
+{
+ "purpose": "KonfAI is a 3D Slicer scripted module that runs KonfAI Apps (segmentation, synthetic CT, registration) from Hugging Face or local folders on Slicer volumes, with evaluation, uncertainty, and optional local or remote GPU execution. It is for medical-imaging researchers who want to run deep-learning workflows inside Slicer.",
+ "summary": "Reviewed the catalog entry and roughly 20 source files of the KonfAI extension (Apache-2.0). I found no malicious or concealed behavior in what I read. The main concerns are environment-level: on-demand pip installs of konfai-apps, konfai-studio and keyring with pins to latest PyPI, and an eval() of a stored string in app_template.py. The entry uses branch \"main\" rather than a fixed revision, and the Testing directory has only one API-contract test. Several files (core_widget, selection, inference panel, app_template) were only partially read, and the three large MP4 files were not inspected.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Read KonfAILib logic and widgets: keyring-backed tokens, detached konfai-studio launch on loopback, and rmtree limited to user-selected app folders. Concerns: eval() on a settings string in app_template.py line 200, and remote tokens passed as CLI args (visible in process listings). No exfiltration or obfuscation seen; core_widget.py, inference.py and app_template.py were only partially read."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "install_konfai/install_package in logic/dependencies.py pip-install konfai-apps pinned to the latest PyPI release, which pulls konfai's own dependencies, and keyring is installed at runtime. Torch is correctly routed through SlicerPyTorch. konfai-studio is also pip-installed on user click. None of these are bundled-Qt or VTK packages, but they change the shared Slicer Python environment."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "KonfAI/CMakeLists.txt lists every Python and resource file that I saw imported by the module, and the listed files exist in the tree. EXTENSION_DEPENDS is NA and build_dependencies is empty, which matches the entry. The catalog entry points to branch main rather than a fixed commit."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is the Apache License 2.0 full text, and the SPDX headers in source files agree. No bundled third-party model weights were seen in the repo; the apps are fetched from Hugging Face."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Good patterns: heavy imports deferred, and QProcess output parsing is handled. Gaps: eval() in app_template.py (line 200) should be replaced with a literal parser; the Process wrapper uses finished-slot reconnect; work directories are removed with rmtree. Test coverage is a single API-contract test."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md and TUTORIAL.md with screenshots, a helpMessage and acknowledgment in KonfAI.py, and an ApiContract test. Clinical-use disclaimer not confirmed. Sample data is referenced from a Hugging Face dataset."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "eval() applied to a string read from QSettings",
+   "file": "KonfAI/KonfAILib/widgets/app_template.py",
+   "line_start": 198,
+   "line_end": 202,
+   "evidence": "name, host, port, ok = self._parameter_node.GetParameter(\"RemoteServer\").split(\"|\")\n            return RemoteServer(name, host, port) if host != \"None\" else None, eval(ok)",
+   "explanation": "eval() runs on the 'ok' field of a string stored in the parameter node. The value is written by the extension itself (a bool string), so the practical risk is low. Still, a parameter node could be edited or loaded from a scene file, so eval() on it is an unnecessary code-execution surface. Replacing it with a literal comparison such as ok == 'True' removes the risk.",
+   "suggestion": "Replace eval(ok) with ok == \"True\" (or ast.literal_eval), and parse the field explicitly.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Runtime pip installs into Slicer's shared Python environment",
+   "file": "KonfAI/KonfAILib/logic/dependencies.py",
+   "line_start": 103,
+   "line_end": 113,
+   "evidence": "if installed is None:\n        ...\n        slicer.util.pip_install(f\"{package}=={latest}\")",
+   "explanation": "On first use of the module, konfai-apps and its dependencies are pip-installed into Slicer's Python environment, pinned to the newest PyPI release. The install-or-upgrade is prompted, which is good. Lines 153-155 also run a '--force-reinstall --no-deps' of konfai-apps followed by an unpinned pip install of numpy, tensorboard and others. These can change packages Slicer relies on or other extensions use. They are not visible to users who never open the module, but they are installed once they open it.",
+   "suggestion": "Pin the dependency set to versions compatible with the Slicer release, avoid unpinned installs of packages Slicer bundles (numpy), and document the installed packages in the tutorial.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "keyring and konfai-studio installed on demand",
+   "file": "KonfAI/KonfAILib/widgets/core_widget.py",
+   "line_start": 279,
+   "line_end": 280,
+   "evidence": "with slicer_wait_popup(\"KonfAI Studio\", \"Installing konfai-studio...\"):\n                    slicer.util.pip_install(\"konfai-studio\")",
+   "explanation": "The Studio install is only after a user click (confirmed by a dialog), so it is consent-based. keyring is installed on first remote-server use in servers.py line 61. Both are pip installs of unpinned packages into the shared Python environment.",
+   "suggestion": "Pin the versions, and state the packages in the documentation.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Catalog entry tracks a moving branch, not a fixed revision",
+   "file": "KonfAI.json",
+   "line_start": 1,
+   "line_end": 9,
+   "evidence": "\"scm_revision\": \"main\",",
+   "explanation": "The entry pins 'main', so the built extension changes with every commit. The review covers the source as of the commit named in the review request, not a fixed commit.",
+   "suggestion": "Pin scm_revision to a specific commit or tag after review.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Single API-contract test; no functional tests",
+   "file": "KonfAI/Testing/Python/KonfAIApiContractTest.py",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "slicer_add_python_unittest(\n  SCRIPT KonfAIApiContractTest.py",
+   "explanation": "The only automated test checks that public symbols exist. Inference, evaluation and remote-server behavior have no tests in the repo. This is a non-blocking maturity note.",
+   "suggestion": "Add a small smoke test on bundled or public sample data.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Full bodies of core_widget.py, app_template.py, panels/inference.py, panels/selection.py and dialogs/remote_server.py beyond the excerpts read.",
+  "The three large MP4 screenshots and the binary PNG/JPG assets (not readable with the available tools).",
+  "The upstream konfai and konfai-apps packages and the Hugging Face app repositories that are downloaded and executed at runtime (model weights and any code they contain).",
+  "Whether the pinned scm_revision exists; I did not resolve the repository or the 'main' commit.",
+  "Clinical-use disclaimer and model provenance for the Hugging Face apps.",
+  "CI results and build of the extension in Slicer; none were available in the review input.",
+  "The KonfAIApiContractTest.py contents (only its size and registration were visible)."
+ ],
+ "questions_for_author": [
+  "Can you pin scm_revision to a tagged or commit-hash release instead of 'main'?",
+  "Can you replace eval(ok) in app_template.py with an explicit string comparison?",
+  "Which konfai-apps and konfai versions are tested with Slicer 5.10+, and can the installer use pinned versions?",
+  "Is there a clinical-use disclaimer, and what is the license and provenance of the Hugging Face model apps?"
+ ]
+}

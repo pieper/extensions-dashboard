@@ -1,0 +1,102 @@
+{
+ "purpose": "ImpactReg is a 3D Slicer scripted module that runs multimodal image registration (IMPACT metric via elastix, ConvexAdam and FireANTs presets) by driving the impact-reg-konfai command-line tool through the KonfAI extension. It is aimed at medical imaging researchers who register MRI, CT and CBCT volumes and evaluate the result with images, segmentations, landmarks or ensemble uncertainty.",
+ "summary": "The module code I could read (ImpactReg/ImpactReg.py, CMake files, README, TUTORIAL) is a thin UI layer over KonfAI: it writes inputs to a temp folder, runs the CLI via a process manager, and loads outputs. I found no obfuscation, no telemetry, and no unsafe deserialization. The main concerns are the runtime pip installation into Slicer's Python on module entry (which pins konfai/konfai-apps), the unverified licensing of downloaded presets and feature models, and the absence of working tests. The KonfAI dependency, the downloaded payloads and the video were not inspected.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Read ImpactReg/ImpactReg.py in full. Input files go to a temp work dir and the CLI is invoked with an argument list, not a shell string. Data leaves the machine only when a remote server is selected (lines 203-206), and the token is passed on the command line, which is visible in process listings. Presets and binaries are downloaded from Hugging Face and fireants is pip-installed, which I could not inspect."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "ImpactReg.py line 482 calls install_package(\"impact-reg-konfai\", ...) from enter() on every module open. The README says that package pins konfai and konfai-apps in Slicer's shared Python. The installer's source lives in KonfAI and I could not confirm it asks for consent, so downgrades or upgrades of shared packages may happen without explicit user confirmation."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt sets EXTENSION_DEPENDS to KonfAI, which matches build_dependencies in the catalog entry. ImpactReg/CMakeLists.txt installs ImpactReg.py and the icon via slicerMacroBuildScriptedModule. The catalog uses scm_revision \"main\", a moving branch, so the reviewed commit is not pinned. A 9 MB mp4 is committed to the repository."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE is Apache-2.0 and the module header matches it. README.md line 103 says FireANTs is \"distributed under its own license, shipped in each preset's NOTICE\", and the presets download TotalSegmentator/MIND/anatomix weights. I could not read those terms, so redistribution and commercial-use terms of the downloaded payloads are unverified."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "The UI code reads reasonably: errors are reported via _update_logs, outputs are checked for existence, and the KonfAI API major version is gated (lines 451-458). Issues: ImpactReg/CMakeLists.txt registers ImpactReg.py as a unittest, but no test class appears in that file, and the test under ImpactReg/Testing/Python is commented out. Lines 219-221 and 224-227 depend on the CLI output layout with no validation beyond existence."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md and TUTORIAL.md are thorough, with a walkthrough, screenshots, command-line equivalents and a documented preset table. There are no working automated tests. Medical-use disclaimers and validation caveats are limited to a single-case note in README.md line 134. The tier is 3, which fits."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Module installs or upgrades a pip package into Slicer's shared Python on every open",
+   "file": "ImpactReg/ImpactReg.py",
+   "line_start": 479,
+   "line_end": 482,
+   "evidence": "install_package(\"impact-reg-konfai\", \"IMPACT-Reg\")",
+   "explanation": "enter() calls install_package(\"impact-reg-konfai\", ...) each time the module is opened. Per README.md line 141 and the module's own comment, this pins the matching konfai and konfai-apps versions in Slicer's shared environment. That can change or downgrade packages other extensions use, and I could not confirm from the repository that the user is asked before this happens. The package is needed only for this module, so it is not a safety issue, but the shared-environment side effect needs an explicit, confirmed install.",
+   "suggestion": "Ask for confirmation before installing, and report which konfai/konfai-apps versions will be pinned. Document the environment change in the README. Verify the behaviour of KonfAI's install_package.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Remote-server access token is passed on the command line",
+   "file": "ImpactReg/ImpactReg.py",
+   "line_start": 203,
+   "line_end": 206,
+   "evidence": "args += [\"--host\", remote_server.host, \"--port\", str(remote_server.port)]\n            if remote_server.token:\n                args += [\"--token\", remote_server.token]",
+   "explanation": "When a remote server is selected, the token is appended to the CLI argument list. Command-line arguments are visible to other local users through process listings and may be logged. The data path itself (images sent to a user-chosen server) is opt-in through the server selection.",
+   "suggestion": "Pass the token through an environment variable or a file with restricted permissions rather than on the command line.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Terms of downloaded presets and model weights are not stated in the repository",
+   "file": "README.md",
+   "line_start": 103,
+   "line_end": 103,
+   "evidence": "FireANTs is distributed under its own license, shipped in each preset's `NOTICE`.",
+   "explanation": "The module downloads presets, feature models (TotalSegmentator, MIND, anatomix), elastix-IMPACT binaries and fireants at run time. README.md line 103 refers to a NOTICE for FireANTs, but no such file or summary of the terms for the models is in the repository. The redistribution and commercial-use terms for these downloads cannot be checked from the repository alone.",
+   "suggestion": "Add a short section listing the license of each downloaded model, binary and preset, with links.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Unit test registration points at a script with no test class, and the real test is commented out",
+   "file": "ImpactReg/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "ImpactReg/CMakeLists.txt registers ImpactReg.py as a Python unittest under BUILD_TESTING. The file has no unittest class, and the only test file is commented out, so CTest runs no meaningful test. This makes the module's logic (argument construction, output loading) unverified by automated tests.",
+   "suggestion": "Add a test that checks the CLI argument construction and the output-loading path with a small fixture, or remove the misleading BUILD_TESTING registration.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Catalog pins a moving branch and a 9 MB video is committed to the source repo",
+   "file": "catalog entry",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "\"scm_revision\": \"main\",",
+   "explanation": "scm_revision is \"main\", so the exact reviewed source can change without a catalog update. The 9 MB tutorial video referenced in the text-scan hints is committed to the repository and is not needed at runtime.",
+   "suggestion": "Pin scm_revision to a tagged commit for the release, and consider hosting the video externally (the README already links to it).",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "KonfAI extension source, including install_package() and whether it asks for consent before pip installs.",
+  "The impact-reg-konfai PyPI package and its pinned dependencies.",
+  "Hugging Face presets (VBoussot/ImpactReg), the feature models, the elastix-IMPACT binary and the fireants package, including their licenses and the integrity of the downloads.",
+  "The source at scm_revision main; I reviewed only the files shown in the prompt, not the exact commit.",
+  "Screenshots/SlicerImpactReg-tutorial.mp4 and the binary images; ImpactReg/Resources/Icons contents.",
+  "Whether the module runs in Slicer; no build or run was possible."
+ ],
+ "questions_for_author": []
+}

@@ -1,0 +1,180 @@
+{
+ "purpose": "A 3D Slicer scripted module that runs the OpenMAP-T1 deep-learning pipeline to parcellate a T1 brain MRI into 280 regions, producing a labelmap, volume tables, and a 3D segmentation. It is aimed at neuroimaging researchers who accept a non-commercial license.",
+ "summary": "The module is a plausible research tool, and I found no malicious or concealed behavior. Model weights are loaded with weights_only=True and no data leaves the machine except the Google Drive model download. However, the module pip-installs torch, torchvision and other packages at import time (Slicer startup), which violates the PyTorch-extension rule. It also has a license conflict: the extension is labelled MIT, but its own UI and CMake description say non-commercial only. Smaller issues include zip extraction without path checks, a global chdir, and models stored inside the extension install folder. Overall: needs fixes.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "unknown",
+   "rationale": ""
+  },
+  "environment": {
+   "rating": "unknown",
+   "rationale": ""
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": ""
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": ""
+  },
+  "soundness": {
+   "rating": "unknown",
+   "rationale": ""
+  },
+  "utility": {
+   "rating": "unknown",
+   "rationale": ""
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "PyTorch and other packages pip-installed at module import (Slicer startup)",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 10,
+   "line_end": 28,
+   "evidence": "required = [\n        \"torch\",\n        \"torchvision\", \n        \"numpy\",",
+   "explanation": "install_requirements() runs at module import time, before any user action. It pip-installs torch and torchvision (and numpy, pandas, nibabel, gdown, openpyxl, tqdm) into Slicer's shared Python environment whenever a package is missing. This affects every Slicer user at startup, not just those who open the module, and PyTorch is not installed through the PyTorch extension (PyTorchUtils), which the index policy requires. Package installation at import without confirmation is also listed as a request-for-changes item.",
+   "suggestion": "Remove install_requirements() from import time. Declare PyTorch via the PyTorchUtils build dependency and use its PyTorchUtils.installTorch helper behind an explicit user prompt. Do not pip-install torch directly, and do not pin or upgrade numpy/scipy/SimpleITK/pandas, which Slicer bundles.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "gdown is upgraded in the shared environment on every model download",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 206,
+   "line_end": 210,
+   "evidence": "slicer.util.pip_install(\"gdown --upgrade\")\n            import importlib\n            import gdown",
+   "explanation": "Clicking Download runs pip install --upgrade gdown in Slicer's shared Python environment, changing a package that other extensions may use, with no separate consent beyond the license dialog.",
+   "suggestion": "Install gdown only if missing and in a pinned range, or fetch the model via Slicer's own download utilities or a plain HTTP request with a checksum.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Generic 'utils' package placed on sys.path and global cwd changed",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 41,
+   "line_end": 49,
+   "evidence": "if lib_path not in sys.path:\n    sys.path.insert(0, lib_path)",
+   "explanation": "The module inserts its lib folder at sys.path[0] and imports the generic top-level name 'utils'. This can shadow or be shadowed by other Python packages named 'utils'. os.chdir to the module folder changes the process-wide working directory for the whole Slicer session.",
+   "suggestion": "Rename the package to a unique name (e.g. openmap_t1_utils) and import it under that name. Do not chdir; pass absolute paths.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "Conflicting license terms: MIT stated, but non-commercial restriction applies to the extension itself",
+   "file": "CMakeLists.txt",
+   "line_start": 9,
+   "line_end": 9,
+   "evidence": "set(EXTENSION_DESCRIPTION \"Automated brain MRI parcellation into 280 anatomical regions using OpenMAP-T1 deep learning model. NON-COMMERCIAL USE ONLY.\")",
+   "explanation": "LICENSE.txt and README say the extension code is MIT, which allows commercial use. The CMake description and the in-app dialog say the extension is 'NON-COMMERCIAL USE ONLY', and the UI says 'Commercial use requires separate license'. Users and the index cannot tell which terms govern the distributed extension. Distribution under the Slicer catalog needs an unambiguous statement of terms.",
+   "suggestion": "State one consistent license position: separate MIT terms for the wrapper code and non-commercial JHU terms for the model weights downloaded at runtime, with the same wording in CMake, the UI, and README. Confirm the author has the right to offer MIT terms for code that depends on the non-commercial model.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Zip archive extracted without path validation",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 222,
+   "line_end": 226,
+   "evidence": "with zipfile.ZipFile(temp_zip, 'r') as z:\n                  z.extractall(self.moduleDir)",
+   "explanation": "The model archive downloaded from a Google Drive ID is extracted with extractall into the module folder without checking member paths. A malicious or tampered archive could write outside the intended folder (zip-slip). The download is not checksum-verified, so a changed Drive file would be trusted.",
+   "suggestion": "Validate each member path resolves inside the target folder before extraction, and verify a published SHA-256 of the archive before extracting.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Pickle deserialization of a bundled file",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellationLib/utils/postprocessing.py",
+   "line_start": 7,
+   "line_end": 9,
+   "evidence": "dictionary = pickle.load(tf)",
+   "explanation": "The postprocessing step unpickles split_map.pkl. The file is bundled and not user-supplied, so the risk is limited, but pickle execution is unsafe if the file is ever replaced or tampered with.",
+   "suggestion": "Convert the mapping to JSON or NPZ, or keep pickle but document it as trusted only.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Existing model folder deleted before the new download succeeds",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 202,
+   "line_end": 205,
+   "evidence": "if os.path.exists(model_folder):\n            shutil.rmtree(model_folder)",
+   "explanation": "downloadModels() calls shutil.rmtree on MODEL_FOLDER before downloading. If the download fails (common, given the 1.5 GB size), the user loses working models and must download them again.",
+   "suggestion": "Download and extract to a temporary folder, then swap it in only on success.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Long CPU-bound pipeline runs on the GUI thread",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 294,
+   "line_end": 316,
+   "evidence": "work_folder = tempfile.mkdtemp(prefix=\"OpenMAPT1_\")\n        try:\n            self._runPipelineSteps(volumeNode, output_folder, work_folder)",
+   "explanation": "runPipeline() runs all inference synchronously in the Qt GUI thread. The README says CPU runs take 15-45 minutes. The UI freezes apart from processEvents calls in logMessage, and there is no cancel button.",
+   "suggestion": "Run inference in a worker thread or as a separate process, and show progress with a cancel option.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Model weights stored inside the extension install folder",
+   "file": "OpenMAPT1AutoParcellation/OpenMAPT1AutoParcellation.py",
+   "line_start": 178,
+   "line_end": 181,
+   "evidence": "model_folder = os.path.join(self.moduleDir, \"MODEL_FOLDER\")\n        if os.path.exists(model_folder) and os.listdir(model_folder):",
+   "explanation": "MODEL_FOLDER is created under self.moduleDir (the installed extension folder). The author's own UI text notes that the extension folder is replaced on update, so ~1.5 GB of models can be lost on each extension update, and the user must re-download them.",
+   "suggestion": "Store downloaded models in a user-writable location, such as the Slicer application data folder, outside the extension install folder.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Catalog has no build dependency on PyTorch; EXTENSION_DEPENDS is NA",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_DEPENDS \"NA\")",
+   "explanation": "The catalog entry has no build_dependencies and CMake sets EXTENSION_DEPENDS to NA, although the module needs torch and torchvision. The index cannot ensure the PyTorch extension is present.",
+   "suggestion": "Set EXTENSION_DEPENDS to PyTorchUtils and add it to build_dependencies in the catalog entry.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Unreferenced large images committed",
+   "file": "images/img1.png",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "",
+   "explanation": "images/img1.png (about 814 KB) is in the repository and not referenced by CMake or README. Screenshots are referenced via URL, so they are not blocking, but they add repository weight.",
+   "suggestion": "Remove unused images or move them to an external hosting location.",
+   "confidence": "low"
+  }
+ ],
+ "not_checked": [
+  "The Google Drive model archive (ID 1YEE65X5Cx8LHK-C070TbZARHp1C08KxA): its contents, hashes, and license terms were not inspected.",
+  "The upstream OpenMAP-T1 repository and its JHU license text were not fetched.",
+  "The entry's scm_revision is 'main', a moving branch; I did not resolve a commit.",
+  "The catalog JSON for the index entry (build_dependencies) was not in the provided files.",
+  "No runtime testing, build, or Slicer load was performed; I could not run the extension.",
+  "Binary screenshots and icons were not visually inspected.",
+  "The extension's test coverage beyond WITH_GENERIC_TESTS was not inspected because no test files exist in the listing."
+ ],
+ "questions_for_author": [
+  "Will you remove the import-time pip installation and depend on PyTorchUtils instead?",
+  "Which license governs the extension code: MIT (LICENSE.txt) or non-commercial only (CMakeLists.txt, UI)? Please make them consistent.",
+  "Can the model archive be published with a SHA-256 hash that the module verifies?",
+  "Can the models be stored outside the extension install folder so updates do not delete them?"
+ ]
+}

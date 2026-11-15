@@ -1,0 +1,167 @@
+{
+ "purpose": "A 3D Slicer scripted module that segments the glenoid and locates five scapular landmarks from segmented scapula and humerus inputs, using deep-learning models run in a separate Slicer Python subprocess. It is aimed at researchers doing shoulder CT morphology analysis, and it requires the PyTorch extension.",
+ "summary": "The extension's main functionality cannot work as packaged: the inference script it launches (Scripts/scapularmorphology_inference.py) is not installed by CMake. The module also downloads pickled model weights from GitHub with no checksum and loads them with weights_only=False, and it installs MONAI and segmentation_models_pytorch into Slicer's shared Python environment without confirmation or pins. Test coverage is effectively absent, and there are several ordinary bugs. The MIT license is fine. I did not run anything, and I did not inspect the model weights or the upstream repository beyond the files listed.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "No exfiltration or obfuscation seen in the inspected files. However, the module downloads model weights at runtime with checksum=None (ScapularMorphology.py:381-382) and deserializes them with torch.load(weights_only=False) (Scripts/scapularmorphology_inference.py:110, 175), so a tampered release asset would execute arbitrary code. Weights are also fetched without an explicit user prompt."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "setupPythonRequirements installs unpinned monai[...] and segmentation_models_pytorch into Slicer's shared Python via pip_install (ScapularMorphology.py:353-355) without askConfirmation. Those packages pull in their own dependency trees, which can change shared packages. PyTorch itself is correctly routed through PyTorchUtils."
+  },
+  "packaging": {
+   "rating": "blocking",
+   "rationale": "CMakeLists installs only ScapularMorphology.py and the icon/UI resources (ScapularMorphology/CMakeLists.txt:5-12), but the module launches Scripts/scapularmorphology_inference.py (ScapularMorphology.py:461). That script is never installed, so process() fails in any built package. The download target is also inside the installed tree."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "The LICENSE file is MIT and covers the extension code. The license of the downloaded model weights and sample data is not stated, and I could not check it."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Several bugs were found by reading the code. The GUI crashes when only the humerus input is set (ScapularMorphology.py:243-244 calls scapulaVolume.GetName() on None). Landmark indices are cast to int8 (inference script lines 154, 194), which wraps for indices above 127. The segmentation storage node is used to write scalar volumes (ScapularMorphology.py:488-491). Long-running work runs synchronously on the GUI thread with no progress reporting."
+  },
+  "utility": {
+   "rating": "concern",
+   "rationale": "The only test is a stub that downloads data and prints 'Test passed' without any assertion (ScapularMorphology.py:635), and the ctest registration is commented out (Testing/Python/CMakeLists.txt:2). The helpText is still template text ('This is an example of scripted loadable module', line 41). There is no model validation or clinical-use disclaimer, and the README gives a usable tutorial."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "blocking",
+   "title": "Inference script is never installed by CMake, so processing fails in the built extension",
+   "file": "ScapularMorphology/CMakeLists.txt",
+   "line_start": 5,
+   "line_end": 12,
+   "evidence": "set(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n  )",
+   "explanation": "ScapularMorphology/CMakeLists.txt lists only ${MODULE_NAME}.py and the icon and UI resources. The module runs Scripts/scapularmorphology_inference.py via a subprocess, so every Apply in an installed build fails with a missing-file error. The downloaded weights are also written into the Scripts directory inside the install tree, which may be read-only in a system-wide Slicer install.",
+   "suggestion": "Add Scripts/scapularmorphology_inference.py to the installed files (for example through an extra install(FILES ...) call or by placing it in a location the module can find after installation). Store downloaded weights in a user-writable location such as the Slicer cache or a user-chosen folder.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Model weights downloaded without integrity check and loaded with unsafe pickle deserialization",
+   "file": "ScapularMorphology/Scripts/scapularmorphology_inference.py",
+   "line_start": 110,
+   "line_end": 110,
+   "evidence": "model_dict = torch.load(weight_pth, weights_only=False, map_location=torch.device(args.device))[\"state_dict\"]",
+   "explanation": "The module downloads model_2d.pt and model_3d.pt from GitHub release URLs with checksum=None and then calls torch.load(weights_only=False). Any tampered or replaced release asset, or a compromised account, gives arbitrary code execution in the user's Slicer process. The download also happens during processing without an explicit confirmation step.",
+   "suggestion": "Pin SHA-256 checksums for the weight files and pass them to downloadFile. Load with weights_only=True, or convert the weights to safetensors. Ask the user before downloading.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Unpinned pip installs into Slicer's shared environment without user confirmation",
+   "file": "ScapularMorphology/ScapularMorphology.py",
+   "line_start": 353,
+   "line_end": 355,
+   "evidence": "slicer.util.pip_install(monaiInstallString)\n        modelInstallString = \"segmentation_models_pytorch\"\n        slicer.util.pip_install(modelInstallString)",
+   "explanation": "MONAI with several extras and segmentation_models_pytorch are installed with no version constraints and no confirmation prompt. Their transitive dependencies can upgrade or downgrade packages Slicer and other extensions rely on, and the installs run at the first Apply.",
+   "suggestion": "Ask for confirmation before installing. Pin or constrain versions so Slicer-bundled packages (numpy, scipy, SimpleITK, etc.) are not changed, and confirm that segmentation_models_pytorch does not pull torch from PyPI. Check the installed MONAI and smp versions against the ones the models were trained with.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "GUI crashes when only the humerus volume is selected",
+   "file": "ScapularMorphology/ScapularMorphology.py",
+   "line_start": 242,
+   "line_end": 244,
+   "evidence": "if humerusVolume or scapulaVolume:\n            self.ui.outputSegmentationSelector.baseName = _(\"{volume_name} segmentation\").format(\n                volume_name=scapulaVolume.GetName())",
+   "explanation": "The output name is built from scapulaVolume.GetName() whenever either input is set. If only the humerus input is selected, scapulaVolume is None and the widget raises AttributeError.",
+   "suggestion": "Use whichever input is set, or fall back to a fixed name when scapulaVolume is None.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Landmark index cast to int8 overflows for indices above 127",
+   "file": "ScapularMorphology/Scripts/scapularmorphology_inference.py",
+   "line_start": 154,
+   "line_end": 154,
+   "evidence": "gc_idx = tuple(np.int8(np.round(gc_idx)))",
+   "explanation": "np.int8 wraps values outside -128 to 127. CT slice and voxel indices routinely exceed 127, so the glenoid index wraps to a wrong value and is passed on to cal_landmarks. The landmark index list is not written to the output in the current code, so the visible effect is limited, but the cast is wrong.",
+   "suggestion": "Use np.int32 or plain integers, and apply the same fix to the landmark index cast on line 194.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Scalar volumes are written with the segmentation storage node",
+   "file": "ScapularMorphology/ScapularMorphology.py",
+   "line_start": 488,
+   "line_end": 491,
+   "evidence": "scavolumeStorageNode = slicer.mrmlScene.CreateNodeByClass(\"vtkMRMLSegmentationStorageNode\")\n        scavolumeStorageNode.SetFileName(scaInputFile)\n        scavolumeStorageNode.UseCompressionOff()\n        scavolumeStorageNode.WriteData(scapulaVolume)",
+   "explanation": "processVolume creates vtkMRMLSegmentationStorageNode and uses it to write the scapula and humerus inputs, which are typed as scalar volumes. The inputs are actually segmentation nodes from the widget. The writer and the reader (MONAI LoadImage on NRRD) are not aligned, so the input array may not match what the model expects. I could not run this to confirm.",
+   "suggestion": "Confirm the exact NRRD layout the model expects. Write a labelmap or a scalar volume explicitly, and fix the type hints so they match what the GUI passes.",
+   "confidence": "low"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Test does not assert anything and downloads data from the network",
+   "file": "ScapularMorphology/ScapularMorphology.py",
+   "line_start": 627,
+   "line_end": 635,
+   "evidence": "logic.process(scapulaVolume, humerusVolume, outputSegmentation,\n                            False, False, False, False)",
+   "explanation": "test_ScapularMorphology downloads sample data and runs logic.process, but it never checks the output. The ctest registration is commented out, so CI does not exercise the module. This gives no protection against regressions.",
+   "suggestion": "Assert the segmentation and landmark outputs (for example segment count and fiducial count). Register the test in CTest. Keep the test data in a fixed, checksummed location.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Module help text is unedited template text",
+   "file": "ScapularMorphology/ScapularMorphology.py",
+   "line_start": 40,
+   "line_end": 43,
+   "evidence": "This is an example of scripted loadable module bundled in an extension.\nSee more information in <a href=\"https://github.com/liukuan5625/SlicerScapularMorphology\">module documentation</a>.",
+   "explanation": "The help text still describes the module as an example, which misleads users about what the module does and where to find documentation.",
+   "suggestion": "Replace it with a description of the glenoid and landmark pipeline and a link to the README tutorial.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "No license stated for the downloaded model weights and sample data",
+   "file": "LICENSE",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "MIT License\n\nCopyright (c) 2025 liukuan5625",
+   "explanation": "The MIT license covers the code. The weights and sample files are downloaded from the author's GitHub releases, and their terms are not stated in the repository. Redistribution by others is therefore uncertain.",
+   "suggestion": "State the terms for the model weights and sample data in the README.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Catalog scm_revision is a moving branch",
+   "file": "",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "\"scm_revision\": \"main\",",
+   "explanation": "The catalog entry uses scm_revision \"main\", so the built code can change without a catalog update. The reviewed commit is 28fe666318286c72303515ba32902b51cf1864a5.",
+   "suggestion": "Pin scm_revision to a reviewed commit or release tag.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "I did not run the extension, its installation, or any tests, and I did not execute any code.",
+  "I did not inspect the model weights, the sample data, or the upstream training repository (liukuan5625/ScapularMorphology).",
+  "I did not verify that scm_revision 28fe6663... exists or matches the files listed; I relied on the provided file contents.",
+  "I did not check the .ui file, the icon, or the screenshot files beyond their listing.",
+  "I did not check CI results, because none were provided.",
+  "I did not verify whether the Slicer extension packaging step installs non-listed Python files, which I assumed based on the CMake macro usage."
+ ],
+ "questions_for_author": [
+  "Is Scripts/scapularmorphology_inference.py meant to be installed? If so, which CMake change installs it?",
+  "Can you publish SHA-256 checksums for model_2d.pt, model_3d.pt, and the sample files, and state their license?",
+  "Why does the module install unpinned MONAI and segmentation_models_pytorch without confirmation, and which versions were used to train the models?",
+  "Does the input written in processVolume match what the model was trained on (scalar volume or segmentation NRRD)?"
+ ]
+}

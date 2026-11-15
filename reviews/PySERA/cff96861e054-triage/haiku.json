@@ -1,0 +1,125 @@
+{
+ "purpose": "PySERA is a Slicer scripted module (plus an unbuilt CLI wrapper) that drives the PySERA radiomics library from a Qt UI, running single-case or batch handcrafted/deep feature extraction and writing CSV output. It is aimed at radiomics researchers who want a GUI workflow inside 3D Slicer.",
+ "summary": "The module code I read is a plain UI wrapper with no network calls, no telemetry and no obfuscation. The main concerns are: it pip-installs an unpinned 'pysera' at run time into Slicer's shared Python without a confirmation step and without declaring the dependency footprint (deep mode may pull heavy packages); the repository commits a non-commercial (CC BY-NC) phantom dataset alongside an MIT-licensed extension; and the PySeraCLI wrapper is not built by CMake. I could not inspect the pysera package itself or the phantom NIfTI binary.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "I read PySera.py, PySeraCLIModule.py and the README; no network, telemetry or obfuscation was found. Runtime pip installation of an unpinned package and the data-privacy note (line 578) are the main risks, and pysera's own code was not reviewed."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "PySera.py lines 207-210 and PySeraCLIModule.py lines 29-34 call slicer.util.pip_install('pysera') at runtime with no version pin and no user prompt. The transitive dependencies of pysera (including any deep-learning stack for deep mode) were not verified, so the effect on Slicer's shared environment is unknown."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Root CMakeLists.txt adds only PySERA; PySERA/CMakeLists.txt builds only PySera.py and the icon, and does not add PySeraCLI, so the CLI wrapper is dead code. EXTENSION_DEPENDS 'NA' matches build_dependencies []. Repo also contains __pycache__ .pyc, .idea files and a 'gitattributes' file without a leading dot."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "LICENSE is MIT and the README says so (line 608). The bundled Data/ct_radiomics_phantom carries CC BY-NC 3.0 (LICENSE.md line 3; README line 12), which forbids commercial use and is not mentioned in the extension README's license section. The pysera library's license was not checked."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "The run executes synchronously on the GUI thread in onCompute (PySera.py ~1437-1439), with blocking time.sleep polling in _wait_for_readable_file (line 473). Parameter-file load errors are swallowed (lines 141-142). The PySeraTest is only an instantiation check (lines 1482-1491)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README is extensive (24 KB) and screenshots are provided. Tests are trivial, the tier is 1, and there is no clinical-use disclaimer beyond the privacy note. Sample data is in the repo but its license is non-commercial."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Unpinned runtime pip install of pysera into Slicer's shared Python without confirmation",
+   "file": "PySERA/PySera.py",
+   "line_start": 207,
+   "line_end": 210,
+   "evidence": "logger.info(f\"Installing '{package_name}' via slicer.util.pip_install ...\")\n            slicer.util.pip_install(package_name)",
+   "explanation": "On first use, the module installs 'pysera' from PyPI with no version pin and no user prompt. Pysera's transitive dependencies (and any deep-learning stack for deep mode) are then installed into the shared Slicer environment, which affects other extensions. The README claims network access only happens for pip, but the install is not gated behind an explicit opt-in.",
+   "suggestion": "Pin a tested pysera version, confirm with the user before installing (for example with slicer.util.confirmOkCancelDisplay), and document which transitive packages are installed. Deep mode should go through the PyTorch extension rather than pip.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "Non-commercial phantom data committed in an MIT-licensed extension repo without notice",
+   "file": "Data/ct_radiomics_phantom/README.md",
+   "line_start": 11,
+   "line_end": 12,
+   "evidence": "## License\nThe phantom is licensed under the Creative Commons Attribution-NonCommercial 3.0 Unported Licence.",
+   "explanation": "The repository ships the IBSI CT phantom (DICOM and NIfTI) under CC BY-NC 3.0, which prohibits commercial use. The extension's README and LICENSE declare only MIT, and the README does not mention the NC restriction. Users who fetch the source may redistribute or use the data in ways the NC license forbids.",
+   "suggestion": "State the data license in the top-level README, or remove the phantom from the repo and link to its source (CancerData) instead. Confirm that the data is not required by the module.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "PySeraCLI wrapper is not built or installed",
+   "file": "PySERA/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 19,
+   "evidence": "#-----------------------------------------------------------------------------\nset(MODULE_NAME PySera)",
+   "explanation": "The root CMakeLists adds only the PySERA subdirectory, and PySERA/CMakeLists.txt does not call add_subdirectory(PySeraCLI). The CLI module, its XML, and its parameter files are therefore not part of the packaged extension, despite being described in the README's repository layout.",
+   "suggestion": "Either add the CLI subdirectory to the build or remove the PySeraCLI directory from the repo to avoid confusion.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Long extraction runs synchronously on the GUI thread",
+   "file": "PySERA/PySera.py",
+   "line_start": 1434,
+   "line_end": 1439,
+   "evidence": "try:\n                t0 = time.time()\n                if is_single:\n                    output_csv, result = self.logic.run_single_case(image_path, mask_path, params)",
+   "explanation": "onCompute calls the PySERA process_batch directly on the Qt main thread. The output-CSV poller also uses time.sleep. Slicer becomes unresponsive for large batch jobs, and the user gets no cancel option. The README acknowledges the freeze but does not fix it.",
+   "suggestion": "Run the extraction in a worker thread or subprocess with progress reporting and a cancel button.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Parameter-file load errors are silently swallowed",
+   "file": "PySERA/PySera.py",
+   "line_start": 138,
+   "line_end": 142,
+   "evidence": "        with open(path, \"r\", encoding=\"utf-8\") as f:\n            return yaml.safe_load(f) or {}\n    except Exception:\n        return {}",
+   "explanation": "If parameters.yaml is malformed or PyYAML is missing, the loader returns an empty dict with no logged reason. The module then silently runs with defaults or fails later with a confusing message.",
+   "suggestion": "Log the exception (logger.error) with the path before falling back.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Test is only an instantiation check; no sample-data regression test",
+   "file": "PySERA/PySera.py",
+   "line_start": 1482,
+   "line_end": 1491,
+   "evidence": "    def runTest(self):\n        self.delayDisplay(\"Running PySera tests...\")\n        try:\n            logic = PySERALogic()",
+   "explanation": "PySeraTest.runTest only asserts that PySERALogic() can be constructed. It does not exercise extraction on the bundled phantom, so regressions in the pysera integration would not be caught.",
+   "suggestion": "Add a test that runs a small extraction on the phantom and checks the output CSV.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "README privacy claim depends on pip-installed code that was not reviewed",
+   "file": "README.md",
+   "line_start": 575,
+   "line_end": 578,
+   "evidence": "- **No data is uploaded** by the extension itself.\n- Any network access typically occurs only if Slicer installs Python packages via pip.",
+   "explanation": "The data-privacy section says no data is uploaded and network access happens only for pip. The pysera library, which processes the images, was not inspected, so this claim is unverified.",
+   "suggestion": "Verify the pysera package has no telemetry, and state the pinned version tested.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "The pysera PyPI package (its code, dependencies, network behaviour and license) was not accessible.",
+  "The bundled binary Data/ct_radiomics_phantom/nifti/phantom.nii.gz was not read (listed only as a large file).",
+  "The scm_revision 'main' was not resolved to a commit; no build or Slicer load was run.",
+  "parameters.json and parameters.yaml contents were not read beyond the loader code.",
+  "Screenshots and icons (binary) were not inspected."
+ ],
+ "questions_for_author": []
+}

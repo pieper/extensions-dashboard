@@ -1,0 +1,1166 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Helper modules in PcatMeasure/utils are not installed by CMake, so the module cannot load from the catalog build",
+   "category": "packaging",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "blocking"
+   ],
+   "file": "PcatMeasure/CMakeLists.txt",
+   "line": 3,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "Helper modules in PcatMeasure/utils are not installed by CMake, so the module cannot load from the catalog build",
+     "file": "PcatMeasure/CMakeLists.txt",
+     "line_start": 3,
+     "line_end": 6,
+     "evidence": "slicerMacroBuildScriptedModule(\n  NAME ${MODULE_NAME}\n  SCRIPTS ${MODULE_NAME}.py\n)",
+     "explanation": "slicerMacroBuildScriptedModule installs only the files listed in SCRIPTS. PcatMeasure.py:29-33 computes _utilsDir = <module dir>/utils and inserts it into sys.path, then PcatMeasure.py:44-51 does `from branch import showMultiCheckPopup`, `from save_overlay import ...`, `from extract_centerline_logic import ExtractCenterlineLogic`, etc. In an installed extension the utils/ directory is absent, so importing the module raises ImportError and the PcatMeasure module never appears in Slicer. The same applies to PcatMeasure/utils/__init__.py, which is also not installed.",
+     "suggestion": "Install the helper files, e.g. add them to SCRIPTS (or use slicerMacroAddPythonModule / an explicit install(FILES ...) of the utils directory), and preferably convert utils into a real package imported as `from PcatMeasure.utils.branch import ...` instead of manipulating sys.path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/CMakeLists.txt",
+      "line": 3
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "blocking",
+     "title": "utils/ helper modules are not installed by CMake, so the module will fail to import when built",
+     "file": "PcatMeasure/CMakeLists.txt",
+     "line_start": 3,
+     "line_end": 6,
+     "evidence": "slicerMacroBuildScriptedModule(\n  NAME ${MODULE_NAME}\n  SCRIPTS ${MODULE_NAME}.py\n)",
+     "explanation": "PcatMeasure.py (lines 44-51) does 'from branch import ...', 'from cal_startpoint import ...', 'from extract_centerline_logic import ExtractCenterlineLogic', etc. These files live in PcatMeasure/utils/, and only PcatMeasure.py is passed to slicerMacroBuildScriptedModule. In an installed extension the utils directory is not copied, so the sys.path insert at PcatMeasure.py lines 29-33 points to a non-existent folder and the module fails to load. It works only in the README's development setup, where the source tree is added to module paths.",
+     "suggestion": "Install the utils package via CMake (for example install(DIRECTORY utils ...) into the module's lib folder, or add the helper files to the module's install rules) and verify the built package loads the module in a clean Slicer.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/CMakeLists.txt",
+      "line": 3
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "\"Clear All\" wipes the entire MRML scene without confirmation",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "PcatMeasure/PcatMeasure.py",
+   "line": 480,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "\"Clear All\" wipes the entire MRML scene without confirmation",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 480,
+     "line_end": 482,
+     "evidence": "    def onClearAllNodes(self):\n        slicer.mrmlScene.Clear(0)\n        print(\"All displayable nodes cleared.\")",
+     "explanation": "Clicking the button removes every node in the scene, including volumes, segmentations, markups and annotations the user loaded or created outside this extension, with no confirmation dialog and no undo. A mis-click during a long analysis session destroys unsaved work; the neighbouring 'Clear (except CT)' button only keeps the CT node.",
+     "suggestion": "Ask for confirmation (slicer.util.confirmOkCancelDisplay) and/or restrict deletion to the nodes the extension created (self.caseNodeIDs / caseNodeIDs_2).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 480
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Analysis output is written into the extension's own installation directory",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "PcatMeasure/PcatMeasure.py",
+   "line": 573,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Analysis output is written into the extension's own installation directory",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 573,
+     "line_end": 583,
+     "evidence": "        base_dir = os.path.dirname(os.path.abspath(__file__))\n        self.save_dir_output=os.path.join(base_dir,\"output\")\n        \n        # If the folder does not exist, create it\n        os.makedirs(self.save_dir_output, exist_ok=True)",
+     "explanation": "All results (VTK files, pickles, NIfTI labelmaps, CSV, overlay PNGs) are written under <extension install dir>/output/<case>. For a catalog-installed extension this is inside Slicer's application directory (e.g. Program Files on Windows, the .app bundle on macOS), which is typically not writable for normal users, so the analysis fails with a permission error after the expensive centerline computation. On writable installs it silently pollutes the installation and mixes patient-derived data with program files.",
+     "suggestion": "Write to a user-chosen directory (ctkDirectoryButton / QFileDialog) or a temporary directory, defaulting to something like slicer.app.defaultScenePath or the user's home folder.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 573
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Outputs written inside the extension's own install directory",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 573,
+     "line_end": 577,
+     "evidence": "base_dir = os.path.dirname(os.path.abspath(__file__))\n        self.save_dir_output=os.path.join(base_dir,\"output\")\n        \n        # If the folder does not exist, create it\n        os.makedirs(self.save_dir_output, exist_ok=True)",
+     "explanation": "Patient-derived outputs (CT filename, PCAT CSV, NIfTI labelmaps, VTK meshes) are written under the module/extension folder. In an installed Slicer on a managed or read-only install location this raises an error, and the data is mixed with program files and may be lost when the extension is upgraded or removed. Users are not asked for an output folder.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 573
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Module relies on sys.path injection of a subdirectory for its own imports",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "PcatMeasure/PcatMeasure.py",
+   "line": 29,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Module relies on sys.path injection of a subdirectory for its own imports",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 29,
+     "line_end": 33,
+     "evidence": "_thisDir = os.path.dirname(os.path.abspath(__file__))\n_utilsDir = os.path.join(_thisDir, \"utils\")\n\nif _utilsDir not in sys.path:\n    sys.path.insert(0, _utilsDir)",
+     "explanation": "Even when the source tree is used directly (developer mode), the module only works because a directory is prepended to sys.path at import time. This is the mechanism that hides the packaging defect above and makes the module's imports depend on filesystem layout rather than on the installed file list.",
+     "suggestion": "Ship utils as a package (with __init__.py installed) and use relative/absolute package imports; drop the sys.path manipulation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 29
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Module-level sys.path change with generic module names",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 29,
+     "line_end": 33,
+     "evidence": "_utilsDir = os.path.join(_thisDir, \"utils\")\n\nif _utilsDir not in sys.path:\n    sys.path.insert(0, _utilsDir)",
+     "explanation": "Inserting the utils folder at the front of the global sys.path, with generic module names such as 'branch' and 'save_poly', can shadow other modules imported by Slicer or other extensions. This is an environment side effect for all users who load the module.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 30
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Start point from a previous run is reused, silently producing wrong analysis ranges",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "PcatMeasure/PcatMeasure.py",
+   "line": 981,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Start point from a previous run is reused, silently producing wrong analysis ranges",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 981,
+     "line_end": 981,
+     "evidence": "        ras_point = self.coordinates[0]  # [-14.61, 204.66, 105.45]",
+     "explanation": "onSelect_branches appends the detected start point to self.coordinates (line 681) but never clears the list, and resetWidgetState is only called in setup(). The documented workflow 'Clear (except CT) ... useful when analyzing RCA first and then proceeding to LAD or LCX' (README.md:140-142) therefore reuses the first vessel's start point for the second analysis: cal_start_point then slices the second centerline at the wrong index, so the 0-40 mm / 10-50 mm PCAT window is measured from the wrong location and the reported HU is silently incorrect. self.default_branch_id and self.caseNodeIDs accumulate in the same way.",
+     "suggestion": "Reset self.coordinates, self.default_branch_id, self.coord_mm/coord_voxel and the case node lists at the start of onSelect_branches (or in onClearNodes_except_CT).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 981
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Cross-module dependency not declared and called without existence checks",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CoronaryCenterlineCrossSection/CoronaryCenterlineCrossSection.py",
+   "line": 17,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Cross-module dependency not declared and called without existence checks",
+     "file": "CoronaryCenterlineCrossSection/CoronaryCenterlineCrossSection.py",
+     "line_start": 17,
+     "line_end": 17,
+     "evidence": "        parent.dependencies = []",
+     "explanation": "The module calls slicer.modules.pcatmeasure.widgetRepresentation() (lines 333, 367) and PcatMeasure calls slicer.modules.coronarycenterlinecrosssection (PcatMeasure.py:458), but no dependency is declared, so the buttons raise AttributeError if the other module is not loaded/available.",
+     "suggestion": "Declare the dependency (parent.dependencies = [\"PcatMeasure\"]) and guard the calls with hasattr checks plus a user-facing message.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CoronaryCenterlineCrossSection/CoronaryCenterlineCrossSection.py",
+      "line": 17
+     }
+    }
+   ]
+  },
+  {
+   "title": "Debug polydata files are written to the process working directory",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "PcatMeasure/utils/extract_centerline_logic.py",
+   "line": 483,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Debug polydata files are written to the process working directory",
+     "file": "PcatMeasure/utils/extract_centerline_logic.py",
+     "line_start": 483,
+     "line_end": 486,
+     "evidence": "        writer = vtk.vtkPolyDataWriter()\n        writer.SetInputData(centerlines)\n        writer.SetFileName(\"./test_centerlines.vtk\")\n        writer.Write()",
+     "explanation": "Every centerline extraction writes test_centerlines.vtk and test_mergedCenterlines.vtk (lines 500-503) into Slicer's current working directory, leaving patient-derived geometry in an unexpected location and failing silently when the CWD is read-only.",
+     "suggestion": "Remove the debug writers or gate them behind a debug flag and write into the chosen output directory.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/utils/extract_centerline_logic.py",
+      "line": 483
+     }
+    }
+   ]
+  },
+  {
+   "title": "Empty-segmentation path crashes instead of warning",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "PcatMeasure/utils/getCTvaluesFromSegmentation.py",
+   "line": 61,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Empty-segmentation path crashes instead of warning",
+     "file": "PcatMeasure/utils/getCTvaluesFromSegmentation.py",
+     "line_start": 56,
+     "line_end": 62,
+     "evidence": "    if mean_hu.size == 0:",
+     "explanation": "When no voxel falls in -190..-30 HU, mean_hu is set to None (line 57) and the following `mean_hu.size` raises AttributeError: 'NoneType' object has no attribute 'size'. The intended 'Segmentation is empty.' warning is unreachable, and the user gets a Python traceback in the interactor instead of an explanation; the caller would also fail at PcatMeasure.py:1266 formatting None.",
+     "suggestion": "Test `if mean_hu is None:` and report the condition to the user (slicer.util.warningDisplay) and return early.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/utils/getCTvaluesFromSegmentation.py",
+      "line": 61
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Empty-mask case crashes in getCTvaluesFromSegmentation (None.size)",
+     "file": "PcatMeasure/utils/getCTvaluesFromSegmentation.py",
+     "line_start": 56,
+     "line_end": 62,
+     "evidence": "if masked_values.size == 0:\n        mean_hu = None   \n    else:\n        mean_hu = masked_values.mean()\n    \n    if mean_hu.size == 0:",
+     "explanation": "When no voxel falls in -190..-30 HU, mean_hu is None and 'mean_hu.size' raises AttributeError. The intended warning branch is never reached, so the analysis fails with an unhelpful traceback instead of a user message.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/utils/getCTvaluesFromSegmentation.py",
+      "line": 56
+     }
+    }
+   ]
+  },
+  {
+   "title": "Generic module names inserted at the front of sys.path can shadow other modules",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "PcatMeasure/PcatMeasure.py",
+   "line": 32,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Generic module names inserted at the front of sys.path can shadow other modules",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 32,
+     "line_end": 33,
+     "evidence": "if _utilsDir not in sys.path:\n    sys.path.insert(0, _utilsDir)",
+     "explanation": "The inserted directory contains modules named branch, save_poly, cal_startpoint, save_overlay, create_curved_cylinder_mask and getCTvaluesFromSegmentation. Because the path is inserted at position 0, any later `import branch` (or similar) anywhere in the Slicer Python session resolves to this extension's file instead of the intended module, affecting other extensions and the user's scripts.",
+     "suggestion": "Use a package namespace (e.g. PcatMeasure.utils.*) instead of top-level module names on sys.path.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 32
+     }
+    }
+   ]
+  },
+  {
+   "title": "Heavy per-voxel Python loops run on the GUI thread without progress",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CoronaryCenterlineCrossSection/CoronaryCenterlineCrossSection.py",
+   "line": 750,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Heavy per-voxel Python loops run on the GUI thread without progress",
+     "file": "CoronaryCenterlineCrossSection/CoronaryCenterlineCrossSection.py",
+     "line_start": 750,
+     "line_end": 782,
+     "evidence": "        for i in range(n_points):\n            p = centerlineNode.GetNthControlPointPositionWorld(i)",
+     "explanation": "segmentVesselAlongCenterline loops over every centerline point and then over a 5 mm cube of voxels in pure Python, and save_overlay.py:39-81 does the same per voxel for every slice when 'Save Overlay Images' is checked. On a typical CCTA volume this blocks the Slicer GUI for a long time with no progress bar or cancel, and the user may assume the application has hung.",
+     "suggestion": "Vectorize with numpy (or use vtkImageThreshold / Segment Editor effects) and run long steps with slicer.util.progress or a CLI node so the GUI stays responsive.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CoronaryCenterlineCrossSection/CoronaryCenterlineCrossSection.py",
+      "line": 750
+     }
+    }
+   ]
+  },
+  {
+   "title": "Incomplete statement leaves segmentID unset in the scene branch",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "PcatMeasure/PcatMeasure.py",
+   "line": 612,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Incomplete statement leaves segmentID unset in the scene branch",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 611,
+     "line_end": 613,
+     "evidence": "            if not segmentID:\n                slicer.util",
+     "explanation": "When no segment is selected in the segment selector, the handler evaluates the bare expression `slicer.util` (no effect) and continues with segmentID None into polyDataFromNode, which then fails deep inside the VMTK pipeline instead of telling the user to pick a segment.",
+     "suggestion": "Show an error and return, e.g. `slicer.util.errorDisplay(\"No segment selected\"); return`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 612
+     }
+    }
+   ]
+  },
+  {
+   "title": "Missing prerequisites produce raw tracebacks (unbound startPointPosition, empty selected_ids, None save_dir)",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "PcatMeasure/PcatMeasure.py",
+   "line": 666,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Missing prerequisites produce raw tracebacks (unbound startPointPosition, empty selected_ids, None save_dir)",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 666,
+     "line_end": 669,
+     "evidence": "            s = paramNode.GetParameter(\"CenterlineStartPointRAS\")\n            if not s:\n                return None",
+     "explanation": "If a PCATParameters node exists without the parameter, onSelect_branches returns None from a button slot after having already created five scene nodes; if neither the parameter node nor any PickedPoints exist, startPointPosition is never assigned and line 681 raises UnboundLocalError. Similarly onAnalysys_pcat concatenates self.selected_ids (empty if [2] was never run) and joins self.save_dir (None) at line 1059, giving ValueError/TypeError tracebacks rather than user-facing messages.",
+     "suggestion": "Validate state at the start of each handler (ctNode, segmentation, start point, selected_ids, save_dir) and report a clear message with slicer.util.errorDisplay.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 666
+     }
+    }
+   ]
+  },
+  {
+   "title": "No automated tests or sample data",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "README.md",
+   "line": 156,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No automated tests or sample data",
+     "file": "README.md",
+     "line_start": 154,
+     "line_end": 159,
+     "evidence": "- This module is intended for research use only.",
+     "explanation": "The repository contains no test module, no sample CCTA/segmentation data and no self-test, so the centerline/PCAT pipeline cannot be validated by users or CI; the README only lists known limitations and a research-only disclaimer.",
+     "suggestion": "Add a ScriptedLoadableModuleTest with a small synthetic or public sample dataset exercising the centerline and PCAT steps.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 156
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "No automated tests or sample data for the analysis pipeline",
+     "file": "README.md",
+     "line_start": 77,
+     "line_end": 124,
+     "evidence": "### PcatMeasure\n\nThis module requires a contrast-enhanced coronary CT image and a segmentation\nof the coronary artery to be analyzed.",
+     "explanation": "The README documents the workflow but no test data or tests are present in the repo, so the quantitative PCAT pipeline cannot be checked by a user or CI. This is non-blocking for admission.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 77
+     }
+    }
+   ]
+  },
+  {
+   "title": "Overlay export passes a segment name where a segment ID is expected",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "PcatMeasure/utils/save_overlay.py",
+   "line": 21,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Overlay export passes a segment name where a segment ID is expected",
+     "file": "PcatMeasure/utils/save_overlay.py",
+     "line_start": 21,
+     "line_end": 26,
+     "evidence": "    slicer.modules.segmentations.logic().ExportSegmentsToLabelmapNode(",
+     "explanation": "exportSegToLabel is called with the PCAT segmentation node but requests the segment ID list [\"seg_artery_PCAT\"], which is a segment name (and belongs to a different node). ExportSegmentsToLabelmapNode expects segment IDs, so the overlay path either exports nothing or fails, and the resulting labelmap is then indexed by saveOverlayImage.",
+     "suggestion": "Pass the actual segment ID, e.g. segNode.GetSegmentation().GetNthSegmentID(0), or use ExportAllSegmentsToLabelmapNode.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/utils/save_overlay.py",
+      "line": 21
+     }
+    }
+   ]
+  },
+  {
+   "title": "Raising a string instead of an exception",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "PcatMeasure/utils/extract_centerline_logic.py",
+   "line": 89,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Raising a string instead of an exception",
+     "file": "PcatMeasure/utils/extract_centerline_logic.py",
+     "line_start": 88,
+     "line_end": 89,
+     "evidence": "            raise(\"Input surface model is empty\")",
+     "explanation": "`raise` with a str argument raises TypeError: exceptions must derive from BaseException, so an empty input surface produces a confusing TypeError instead of the intended message.",
+     "suggestion": "Use `raise ValueError(\"Input surface model is empty\")`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/utils/extract_centerline_logic.py",
+      "line": 89
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "String passed to raise() instead of an exception",
+     "file": "PcatMeasure/utils/extract_centerline_logic.py",
+     "line_start": 88,
+     "line_end": 89,
+     "evidence": "if numberOfInputPoints == 0:\n            raise(\"Input surface model is empty\")",
+     "explanation": "Raising a plain string is a TypeError in Python 3, hiding the intended message. Empty inputs are still stopped, but with a misleading error.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/utils/extract_centerline_logic.py",
+      "line": 88
+     }
+    }
+   ]
+  },
+  {
+   "title": "Repo catalog file disagrees with the index entry (build_subdirectory and tier)",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "PcatMeasureExtension.json",
+   "line": 6,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Repo catalog file disagrees with the index entry (build_subdirectory and tier)",
+     "file": "PcatMeasureExtension.json",
+     "line_start": 6,
+     "line_end": 7,
+     "evidence": "\"build_subdirectory\": [\"SlicerVMTK\"],\n  \"tier\": 4",
+     "explanation": "The catalog file in the source repo sets build_subdirectory to an array ['SlicerVMTK'] and tier 4, while the index entry given for review has build_subdirectory '.' and tier 3. The array form is not a valid string value in the index schema and points at a non-existent subdirectory, so the source-repo file should not be treated as the submitted entry. The maintainers should reconcile these.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasureExtension.json",
+      "line": 6
+     }
+    }
+   ]
+  },
+  {
+   "title": "Undefined variable `center` in interpolateSliceCircles",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CoronaryCenterlineCrossSection/CoronaryCenterlineCrossSection.py",
+   "line": 904,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Undefined variable `center` in interpolateSliceCircles",
+     "file": "CoronaryCenterlineCrossSection/CoronaryCenterlineCrossSection.py",
+     "line_start": 904,
+     "line_end": 910,
+     "evidence": "                newCircles[idx] = {\n                    \"center\": center,",
+     "explanation": "In the interpolation loop only p0, p1, xAxis, yAxis and pts_interp are computed; `center` is never assigned in this method, so pressing [4] 'Create artery seg' after editing contours raises NameError. (I could not see the truncated line 897, so this is inferred from the surrounding code.)",
+     "suggestion": "Interpolate the centre explicitly, e.g. `center = (1 - t) * p0 + t * p1`.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CoronaryCenterlineCrossSection/CoronaryCenterlineCrossSection.py",
+      "line": 904
+     }
+    }
+   ]
+  },
+  {
+   "title": "Global attribute set on the slicer module",
+   "category": "environment",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "PcatMeasure/utils/extract_centerline_logic.py",
+   "line": 334,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Global attribute set on the slicer module",
+     "file": "PcatMeasure/utils/extract_centerline_logic.py",
+     "line_start": 334,
+     "line_end": 334,
+     "evidence": "        slicer.tubePolyData = tubePolyData",
+     "explanation": "A leftover debugging aid stores a large polydata on the shared `slicer` module object, keeping it alive for the whole session and polluting a namespace shared by all extensions.",
+     "suggestion": "Remove the assignment or store the object on the logic instance.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/utils/extract_centerline_logic.py",
+      "line": 334
+     }
+    }
+   ]
+  },
+  {
+   "title": "Installation instructions reference a different repository name",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "README.md",
+   "line": 24,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Installation instructions reference a different repository name",
+     "file": "README.md",
+     "line_start": 24,
+     "line_end": 24,
+     "evidence": "   git clone https://github.com/hattori222yu/PcatMeasureExtension.git",
+     "explanation": "The catalog entry points to https://github.com/hattori222yu/SlicerPcatMeasure, but the README tells users to clone PcatMeasureExtension, so the documented developer install path does not match the published source.",
+     "suggestion": "Update the README to the actual repository URL.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 24
+     }
+    }
+   ]
+  },
+  {
+   "title": "License file references the Slicer license instead of reproducing it",
+   "category": "license",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "LICENSE.txt",
+   "line": 2,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "License file references the Slicer license instead of reproducing it",
+     "file": "LICENSE.txt",
+     "line_start": 2,
+     "line_end": 6,
+     "evidence": "This extension is distributed under the same license as 3D Slicer.",
+     "explanation": "Distribution permission is clear (BSD-style Slicer license, VMTK-derived code acknowledged), but the file only links to the license text rather than including it, which is weaker for offline/redistributed copies.",
+     "suggestion": "Include the full 3D Slicer BSD license text in LICENSE.txt.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "LICENSE.txt",
+      "line": 2
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Helper modules in PcatMeasure/utils are not installed by CMake, so the module cannot load from the catalog build",
+   "category": "packaging",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "blocking"
+   ],
+   "file": "PcatMeasure/CMakeLists.txt",
+   "line": 3,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "Helper modules in PcatMeasure/utils are not installed by CMake, so the module cannot load from the catalog build",
+     "file": "PcatMeasure/CMakeLists.txt",
+     "line_start": 3,
+     "line_end": 6,
+     "evidence": "slicerMacroBuildScriptedModule(\n  NAME ${MODULE_NAME}\n  SCRIPTS ${MODULE_NAME}.py\n)",
+     "explanation": "slicerMacroBuildScriptedModule installs only the files listed in SCRIPTS. PcatMeasure.py:29-33 computes _utilsDir = <module dir>/utils and inserts it into sys.path, then PcatMeasure.py:44-51 does `from branch import showMultiCheckPopup`, `from save_overlay import ...`, `from extract_centerline_logic import ExtractCenterlineLogic`, etc. In an installed extension the utils/ directory is absent, so importing the module raises ImportError and the PcatMeasure module never appears in Slicer. The same applies to PcatMeasure/utils/__init__.py, which is also not installed.",
+     "suggestion": "Install the helper files, e.g. add them to SCRIPTS (or use slicerMacroAddPythonModule / an explicit install(FILES ...) of the utils directory), and preferably convert utils into a real package imported as `from PcatMeasure.utils.branch import ...` instead of manipulating sys.path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/CMakeLists.txt",
+      "line": 3
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "blocking",
+     "title": "utils/ helper modules are not installed by CMake, so the module will fail to import when built",
+     "file": "PcatMeasure/CMakeLists.txt",
+     "line_start": 3,
+     "line_end": 6,
+     "evidence": "slicerMacroBuildScriptedModule(\n  NAME ${MODULE_NAME}\n  SCRIPTS ${MODULE_NAME}.py\n)",
+     "explanation": "PcatMeasure.py (lines 44-51) does 'from branch import ...', 'from cal_startpoint import ...', 'from extract_centerline_logic import ExtractCenterlineLogic', etc. These files live in PcatMeasure/utils/, and only PcatMeasure.py is passed to slicerMacroBuildScriptedModule. In an installed extension the utils directory is not copied, so the sys.path insert at PcatMeasure.py lines 29-33 points to a non-existent folder and the module fails to load. It works only in the README's development setup, where the source tree is added to module paths.",
+     "suggestion": "Install the utils package via CMake (for example install(DIRECTORY utils ...) into the module's lib folder, or add the helper files to the module's install rules) and verify the built package loads the module in a clean Slicer.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/CMakeLists.txt",
+      "line": 3
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "\"Clear All\" wipes the entire MRML scene without confirmation",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "PcatMeasure/PcatMeasure.py",
+   "line": 480,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "\"Clear All\" wipes the entire MRML scene without confirmation",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 480,
+     "line_end": 482,
+     "evidence": "    def onClearAllNodes(self):\n        slicer.mrmlScene.Clear(0)\n        print(\"All displayable nodes cleared.\")",
+     "explanation": "Clicking the button removes every node in the scene, including volumes, segmentations, markups and annotations the user loaded or created outside this extension, with no confirmation dialog and no undo. A mis-click during a long analysis session destroys unsaved work; the neighbouring 'Clear (except CT)' button only keeps the CT node.",
+     "suggestion": "Ask for confirmation (slicer.util.confirmOkCancelDisplay) and/or restrict deletion to the nodes the extension created (self.caseNodeIDs / caseNodeIDs_2).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 480
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Analysis output is written into the extension's own installation directory",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "PcatMeasure/PcatMeasure.py",
+   "line": 573,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Analysis output is written into the extension's own installation directory",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 573,
+     "line_end": 583,
+     "evidence": "        base_dir = os.path.dirname(os.path.abspath(__file__))\n        self.save_dir_output=os.path.join(base_dir,\"output\")\n        \n        # If the folder does not exist, create it\n        os.makedirs(self.save_dir_output, exist_ok=True)",
+     "explanation": "All results (VTK files, pickles, NIfTI labelmaps, CSV, overlay PNGs) are written under <extension install dir>/output/<case>. For a catalog-installed extension this is inside Slicer's application directory (e.g. Program Files on Windows, the .app bundle on macOS), which is typically not writable for normal users, so the analysis fails with a permission error after the expensive centerline computation. On writable installs it silently pollutes the installation and mixes patient-derived data with program files.",
+     "suggestion": "Write to a user-chosen directory (ctkDirectoryButton / QFileDialog) or a temporary directory, defaulting to something like slicer.app.defaultScenePath or the user's home folder.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 573
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Outputs written inside the extension's own install directory",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 573,
+     "line_end": 577,
+     "evidence": "base_dir = os.path.dirname(os.path.abspath(__file__))\n        self.save_dir_output=os.path.join(base_dir,\"output\")\n        \n        # If the folder does not exist, create it\n        os.makedirs(self.save_dir_output, exist_ok=True)",
+     "explanation": "Patient-derived outputs (CT filename, PCAT CSV, NIfTI labelmaps, VTK meshes) are written under the module/extension folder. In an installed Slicer on a managed or read-only install location this raises an error, and the data is mixed with program files and may be lost when the extension is upgraded or removed. Users are not asked for an output folder.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 573
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Module relies on sys.path injection of a subdirectory for its own imports",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "PcatMeasure/PcatMeasure.py",
+   "line": 29,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Module relies on sys.path injection of a subdirectory for its own imports",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 29,
+     "line_end": 33,
+     "evidence": "_thisDir = os.path.dirname(os.path.abspath(__file__))\n_utilsDir = os.path.join(_thisDir, \"utils\")\n\nif _utilsDir not in sys.path:\n    sys.path.insert(0, _utilsDir)",
+     "explanation": "Even when the source tree is used directly (developer mode), the module only works because a directory is prepended to sys.path at import time. This is the mechanism that hides the packaging defect above and makes the module's imports depend on filesystem layout rather than on the installed file list.",
+     "suggestion": "Ship utils as a package (with __init__.py installed) and use relative/absolute package imports; drop the sys.path manipulation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 29
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Module-level sys.path change with generic module names",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 29,
+     "line_end": 33,
+     "evidence": "_utilsDir = os.path.join(_thisDir, \"utils\")\n\nif _utilsDir not in sys.path:\n    sys.path.insert(0, _utilsDir)",
+     "explanation": "Inserting the utils folder at the front of the global sys.path, with generic module names such as 'branch' and 'save_poly', can shadow other modules imported by Slicer or other extensions. This is an environment side effect for all users who load the module.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 30
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Start point from a previous run is reused, silently producing wrong analysis ranges",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "PcatMeasure/PcatMeasure.py",
+   "line": 981,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Start point from a previous run is reused, silently producing wrong analysis ranges",
+     "file": "PcatMeasure/PcatMeasure.py",
+     "line_start": 981,
+     "line_end": 981,
+     "evidence": "        ras_point = self.coordinates[0]  # [-14.61, 204.66, 105.45]",
+     "explanation": "onSelect_branches appends the detected start point to self.coordinates (line 681) but never clears the list, and resetWidgetState is only called in setup(). The documented workflow 'Clear (except CT) ... useful when analyzing RCA first and then proceeding to LAD or LCX' (README.md:140-142) therefore reuses the first vessel's start point for the second analysis: cal_start_point then slices the second centerline at the wrong index, so the 0-40 mm / 10-50 mm PCAT window is measured from the wrong location and the reported HU is silently incorrect. self.default_branch_id and self.caseNodeIDs accumulate in the same way.",
+     "suggestion": "Reset self.coordinates, self.default_branch_id, self.coord_mm/coord_voxel and the case node lists at the start of onSelect_branches (or in onClearNodes_except_CT).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PcatMeasure/PcatMeasure.py",
+      "line": 981
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Rating of packaging",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D6",
+   "rating_dispute": {
+    "deepseek": "blocking",
+    "flash-lite": "ok",
+    "haiku": "blocking"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "environment": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "packaging": {
+   "deepseek": "blocking",
+   "flash-lite": "ok",
+   "haiku": "blocking"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 7,
+  "single": 14,
+  "unverified": 0,
+  "total": 20
+ }
+}

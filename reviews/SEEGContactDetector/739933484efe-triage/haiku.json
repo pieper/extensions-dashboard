@@ -1,0 +1,107 @@
+{
+ "purpose": "SEEG Contact Detector is a 3D Slicer scripted extension that automatically localizes SEEG electrode contacts in post-implantation CT, using HDBrainExtraction for brain masking and optional T1-to-CT registration. It is intended for clinical and research teams working on presurgical epilepsy evaluation, and it depends on the HDBrainExtraction extension.",
+ "summary": "I reviewed the catalog entry, the CMake files, the full main module (SEEGContactDetector.py, about 1,545 lines), the LICENSE, and the README and installation docs. I found no malicious or concealed behavior, no telemetry, and no unsafe deserialization. Sample downloads are pinned by SHA256. Package installs happen only after an OK dialog, but they are unpinned and could change shared numpy/scipy. Minor gaps: no clinical-use disclaimer, and autosave can overwrite files next to the CT. The source revision is the moving branch \"main\", and I did not run anything.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read SEEGContactDetector.py in full. Network access is limited to sample-data downloads from GitHub release URLs (lines 85, 99, 110), each with a SHA256 checksum. Package installs (pip_install, lines 924, 930, 1116, 1122, 1215, 1270) run only after confirmOkCancelDisplay. No eval, exec, pickle, or telemetry was found in the search."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Lines 923-931, 1115-1123, 1214-1216 and 1269-1271 call slicer.util.pip_install for scipy, scikit-learn and scikit-image with no version pins. Installing scikit-learn can upgrade or downgrade the numpy/scipy that Slicer bundles, which affects other extensions. PyTorch is not used."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMakeLists.txt line 12 sets EXTENSION_DEPENDS to HDBrainExtraction, which matches the catalog build_dependencies. SEEGContactDetector/CMakeLists.txt lists the main script and the resource files. I did not verify that the listed icons and the UI file exist, since their content was not included."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is the Apache License 2.0 full text, which permits distribution. The bundled assets are icons and sample data hosted on the author's GitHub release. HD-BET weights come through the separate HDBrainExtraction extension, which I did not inspect."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "onRunClicked (lines 370-389) creates a progress dialog but never closes it. curve_fitting and register_and_brain_mask use fixed autosave filenames (lines 868-870, 1099-1100) and overwrite existing files without asking. Heavy processing runs with WaitCursor on the GUI thread, with processEvents calls in the loops. Errors are raised as bare ValueError after errorDisplay (lines 1313-1314, 1442-1448)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "There is user documentation (docs/*.md), sample data with checksums, and a generic test that is enabled. The docs contain no clinical-use or research-only disclaimer. The validation and accuracy claims in the README are not backed by linked evidence in the reviewed files."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Unpinned pip installs of scipy/scikit-learn/scikit-image can change Slicer's bundled numpy/scipy",
+   "file": "SEEGContactDetector/SEEGContactDetector.py",
+   "line_start": 1121,
+   "line_end": 1123,
+   "evidence": "            if slicer.util.confirmOkCancelDisplay(\"This module requires 'scikit-learn' Python package. Click OK to install it now.\"):\n                slicer.util.pip_install(\"scikit-learn\")\n                from sklearn.mixture import GaussianMixture",
+   "explanation": "On user confirmation, the module installs scikit-learn, scipy and scikit-image into Slicer's shared Python environment without version constraints. Their dependency resolution can upgrade or replace numpy or scipy that Slicer and other extensions rely on. This affects all users of the Slicer install, not just those who use this module.",
+   "suggestion": "Install with constraints that keep the bundled numpy/scipy versions, or check the installed versions first and warn the user. Document the side effects of the install.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Autosave silently overwrites fixed-name files in the CT's folder",
+   "file": "SEEGContactDetector/SEEGContactDetector.py",
+   "line_start": 1098,
+   "line_end": 1100,
+   "evidence": "        if save and path:\n            slicer.util.saveNode(boltFiducials, os.path.join(path, \"bolt_fiducials_autosave.mrk.json\"))\n            slicer.util.saveNode(markupsNode, os.path.join(path, \"contacts_autosave.mrk.json\"))",
+   "explanation": "With the default autoSave=True, the module writes to fixed filenames in the directory of the input CT. Each run overwrites the earlier autosave files and the user's bolt fiducial file, with no confirmation. A user who edited contacts manually and then reruns can lose those edits.",
+   "suggestion": "Use timestamped or run-specific filenames, or confirm before overwriting. Do not write over the user's original fiducial file without asking.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No clinical-use or research-only disclaimer for a medical localization tool",
+   "file": "README.md",
+   "line_start": 3,
+   "line_end": 5,
+   "evidence": "**SEEG Contact Detector** is a 3D Slicer extension for automatic and highly accurate localization of intracerebral electrode contacts from post-implantation CT imaging.",
+   "explanation": "The module is meant to localize electrodes for presurgical planning, and the docs describe it as supporting clinical review. The help text, the README and the docs do not say that the output is research-only or must be verified by a clinician. Users may rely on automated positions without review.",
+   "suggestion": "Add a clear statement that the software is not a medical device, that the output needs expert verification, and that the accuracy claims come from a cited validation.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Progress dialog is never closed in onRunClicked",
+   "file": "SEEGContactDetector/SEEGContactDetector.py",
+   "line_start": 370,
+   "line_end": 389,
+   "evidence": "        progressbar = slicer.util.createProgressDialog(windowTitle=\"Detecting contacts\")\n        progressbar.setCancelButton(None)",
+   "explanation": "onRunClicked creates a progress dialog and updates its text and value, but it never calls close(). The dialog can stay open after the run finishes, and it has no cancel button. If a sub-step raises (for example the ValueError in bolt_segmentation), the dialog stays open.",
+   "suggestion": "Close the dialog in a finally block, and report errors to the user.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Catalog points to the moving branch 'main' rather than a fixed revision",
+   "file": "",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "\"scm_revision\": \"main\"",
+   "explanation": "The catalog entry sets scm_revision to 'main'. The reviewed code can therefore change without any change to the index, and I could not confirm that commit 739933484efeb08cf1b72d2507bf3b4795e3ac6b is the one in the catalog. This is informational, not a defect.",
+   "suggestion": "Pin scm_revision to a reviewed commit or release tag, as the index usually recommends.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The source repository was not fetched. Only the files supplied in the review package were read, so the exact commit 739933484efeb08cf1b72d2507bf3b4795e3ac6b and the main branch tip were not verified.",
+  "The UI file (Resources/UI/SEEGContactDetector.ui), icons and Testing content were listed but not read, so resource presence and the Qt widget names were not checked.",
+  "The HDBrainExtraction dependency and its model weights were not inspected.",
+  "The sample-data URLs and SHA256 checksums were not downloaded or recomputed. The claim that the sample data is defaced was not verified.",
+  "The docs/*.md files (usage, advanced, module_overview, sample_data, index, acknowledgements) were searched but not read in full.",
+  "No code was executed, and no CI results were available."
+ ],
+ "questions_for_author": [
+  "Can the Python dependencies (scikit-learn, scipy, scikit-image) be pinned or constrained so that Slicer's bundled numpy and scipy are not changed?",
+  "Should autosave write to run-specific filenames, or ask before overwriting the user's bolt fiducial file?",
+  "Will you add a clinical-use disclaimer and state the validation evidence for the accuracy claims?",
+  "Can scm_revision be pinned to a reviewed commit or release tag rather than 'main'?"
+ ]
+}
