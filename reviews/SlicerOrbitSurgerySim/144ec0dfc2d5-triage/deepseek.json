@@ -1,0 +1,203 @@
+{
+ "purpose": "SlicerOrbitSurgerySim is a 3D Slicer extension for orbital fracture repair planning: PlateRegistration registers preformed orbital plates to fractured/reconstructed orbits and computes plate-fit metrics, while MirrorOrbitRecon reconstructs a fractured orbit by mirroring the contralateral side. It targets oral/maxillofacial surgeons and researchers doing virtual plate selection and comparison.",
+ "summary": "The extension is well documented (README, quick tutorial, videos, sample data) and its CMake/EXTENSION_DEPENDS setup is consistent with the catalog entry, with an MIT license. However, both modules' sample-data downloader downloads a ZIP from a moving GitHub branch with no checksum and then executes a `setup.py` from it inside the Slicer process — download-and-execute of remote code, which is blocking. Both modules also run `slicer.util.pip_install` for pandas/matplotlib without asking the user, and the code has numerous swallowed exceptions, a broken registered unit test, and template help text. Recommend fixes before offering to users.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Both modules' custom sample-data downloader fetches a ZIP from a GitHub branch with checksums=None and then executes a setup.py from the downloaded folder via importlib (MirrorOrbitRecon.py:100-105, PlateRegistration.py:112-117). That is remote code execution in the user's Slicer process controlled by whoever owns the sample-data repository."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "PlateRegistrationWidget.setup() runs slicer.util.pip_install([\"pandas\"]) and [\"matplotlib\"] on first module open with no user confirmation (PlateRegistration.py:210-224), and pip_install(\"matplotlib\") is repeated inside plotting functions (lines 2745, 2911). Unpinned installs can pull/upgrade numpy and other shared packages in Slicer's environment."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt installs both modules' .py and referenced resources, and EXTENSION_DEPENDS \"SlicerMorph\" matches build_dependencies. But slicer_add_python_unittest registers MirrorOrbitReconTest, which calls SampleData.downloadSample(\"MirrorOrbitRecon1\") and logic.process(...) that do not exist, so the registered ctest fails; PlateRegistration's test is entirely commented out."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE.txt is MIT and permits distribution. However the sample data (downloaded from chz31/orbitSurgeySim_sampleData, derived from the CBCTDental Surgery dataset) has no stated license, and reused SlicerMorph ALPACA/FastModelAlign code (BSD-2-Clause) is only acknowledged in prose without a license notice."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Many bare `except: pass` blocks hide failures (e.g. PlateRegistration.py:402-411, MirrorOrbitRecon.py:392-399), heavy registration/CPD work runs on the GUI thread without progress, and there are concrete bugs: `importlib` is never imported, `mirrorOrbitReconParameterNode` is undefined (MirrorOrbitRecon.py:600), `itk` is used outside its try block (line 216), and the half-model affine step uses the full-skull point sets (line 501)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README, a step-by-step quick tutorial, video tutorials, sample data and a citation are provided, which is good. But module helpText is still the template text (PlateRegistration.py:51-54), categories are \"Examples\", and there is no research-use/clinical disclaimer for a surgical planning tool."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Sample-data downloader executes a setup.py downloaded from a GitHub branch without checksum",
+   "file": "MirrorOrbitRecon/MirrorOrbitRecon.py",
+   "line_start": 100,
+   "line_end": 105,
+   "evidence": "      filepath=destFolderPath+\"/setup.py\"\n      if (os.path.exists(filepath)):\n        spec = importlib.util.spec_from_file_location(\"setup\",filepath)\n        setup = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(setup)\n        setup.setup()",
+   "explanation": "When the user clicks the sample-data entry, downloadSampleDataInFolder downloads a ZIP from https://github.com/chz31/orbitSurgeySim_sampleData/raw/refs/heads/main/... with `checksums=None` (line 79) and then imports and runs any `setup.py` found in the chosen folder. Whoever controls that repository (or a compromised account / MITM without checksum verification) can execute arbitrary Python inside the user's Slicer process with the user's privileges. The same code exists in PlateRegistration/PlateRegistration.py:112-117. It currently fails only because `importlib` is not imported in either file, which is a one-line fix away from being live.",
+   "suggestion": "Remove the setup.py execution entirely. If post-download setup is needed, implement it in the extension's own code, and pin the sample data to a fixed commit with a published SHA256 checksum passed to downloadFile.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Sample data downloaded from a moving branch with no checksum",
+   "file": "PlateRegistration/PlateRegistration.py",
+   "line_start": 87,
+   "line_end": 91,
+   "evidence": "        uris=\"https://github.com/chz31/orbitSurgeySim_sampleData/raw/refs/heads/main/plateRegistrationSampleData.zip\",\n        loadFiles=False,\n        fileNames=\"PlateRegistrationSampleData.zip\",\n        loadFileType='ZipFile',\n        checksums=None,",
+   "explanation": "The data users load into the scene (and, per the previous finding, code that is executed) comes from `refs/heads/main` with `checksums=None`, so the content can change silently after review and there is no integrity check on download. Combined with the setup.py execution this removes any guarantee about what runs on the user's machine.",
+   "suggestion": "Reference a fixed commit/tag and supply the SHA256 checksum in `checksums`.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "pandas and matplotlib installed into Slicer's Python without asking the user",
+   "file": "PlateRegistration/PlateRegistration.py",
+   "line_start": 210,
+   "line_end": 224,
+   "evidence": "        if needInstall:\n            progressDialog = slicer.util.createProgressDialog(\n                windowTitle=\"Installing...\",\n                labelText=\"Installing Python dependencies. This may take a minute...\",\n                maximum=0,\n            )\n            slicer.app.processEvents()\n            try:\n                slicer.util.pip_install([\"pandas\"])\n                slicer.util.pip_install([\"matplotlib\"])",
+   "explanation": "Simply opening the PlateRegistration module modifies Slicer's shared Python environment with unpinned pip installs, without a consent prompt. Unpinned installs can upgrade shared packages (e.g. numpy) that Slicer and other extensions rely on, affecting users who never use this module. The tutorial even tells users 'Required Python packages will be installed automatically' (Tutorials/00_Quick_Tutorial.md:84-86).",
+   "suggestion": "Ask the user for confirmation before installing, pin compatible versions, and prefer declaring the dependency so the extension build/Extension Manager handles it.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "matplotlib re-installed from inside plotting functions",
+   "file": "PlateRegistration/PlateRegistration.py",
+   "line_start": 2745,
+   "line_end": 2745,
+   "evidence": "        slicer.util.pip_install(\"matplotlib\")",
+   "explanation": "pip_install(\"matplotlib\") is called again at lines 2745 and 2911 whenever a plot is produced, so a network install can be triggered mid-workflow (and can fail or hang) long after the module was set up. This is redundant with the setup-time install and adds another uncontrolled environment change.",
+   "suggestion": "Install once, with user consent, or require the package to be present and report a clear error if it is missing.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Registered unit test cannot pass (wrong sample name, nonexistent logic.process)",
+   "file": "MirrorOrbitRecon/MirrorOrbitRecon.py",
+   "line_start": 729,
+   "line_end": 745,
+   "evidence": "        registerSampleData()\n        inputVolume = SampleData.downloadSample(\"MirrorOrbitRecon1\")\n        self.delayDisplay(\"Loaded test data set\")",
+   "explanation": "registerSampleData registers the sample as \"orbitMirrorReconSampleData\", not \"MirrorOrbitRecon1\", and MirrorOrbitReconLogic has no `process` method (line 745 calls logic.process(inputVolume, outputVolume, threshold, True)). MirrorOrbitRecon/CMakeLists.txt:27 registers this class as a ctest, so the extension's own test always fails, giving no regression signal.",
+   "suggestion": "Replace the template test with a real test of the mirror/registration logic, or remove the test registration until one exists.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Half-model affine registration uses the full-skull point sets",
+   "file": "MirrorOrbitRecon/MirrorOrbitRecon.py",
+   "line_start": 500,
+   "line_end": 501,
+   "evidence": "        logic = MirrorOrbitReconLogic()\n        transformation, translation = logic.CPDAffineTransform(self.halfModelaffineNode, self.sourcePoints, self.targetPoints)",
+   "explanation": "onRigidMirroredHalfButton stores the half-model point sets in self.sourcePointsHalf/self.targetPointsHalf (line 466), but onAffineMirroredHalfButton passes the full-skull self.sourcePoints/self.targetPoints. The affine transform applied to the half model is therefore computed from the wrong point clouds, producing a silently wrong registration result that the user may then use for fit metrics.",
+   "suggestion": "Use self.sourcePointsHalf and self.targetPointsHalf here.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Undefined names and missing imports cause runtime failures",
+   "file": "MirrorOrbitRecon/MirrorOrbitRecon.py",
+   "line_start": 599,
+   "line_end": 600,
+   "evidence": "    def getParameterNode(self):\n        return mirrorOrbitReconParameterNode(super().getParameterNode())",
+   "explanation": "`mirrorOrbitReconParameterNode` is never defined (the class is MirrorOrbitReconParameterNode), so any call to getParameterNode raises NameError. Likewise `importlib` is used at lines 102-104 and PlateRegistration.py:114-116 but never imported, and `itk` is used at line 216 outside the try/except that guards its import, so a missing dependency produces a NameError instead of a user-facing message.",
+   "suggestion": "Fix the class name reference, import importlib, and move the itk usage inside the guarded block with a clear error dialog.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Bare except blocks silently swallow failures",
+   "file": "PlateRegistration/PlateRegistration.py",
+   "line_start": 402,
+   "line_end": 411,
+   "evidence": "        try:\n            self._parameterNode.fractureOrbitModel.GetDisplayNode().SetVisibility(False)\n        except:\n            pass",
+   "explanation": "This pattern (also MirrorOrbitRecon.py:392-399, 480-487, 520-527, 545-548) hides real errors such as a missing display node or an unset parameter, so the module can silently do nothing when the user clicks a button instead of reporting the problem. Example: onResetPushButton calls `self.halfModelRigidNode.GetDisplayNode.SetVisibility(False)` (missing parentheses, line 546) and the resulting AttributeError is swallowed.",
+   "suggestion": "Catch specific exceptions and report unexpected ones to the user (slicer.util.errorDisplay) or log them.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Long registrations run on the GUI thread without progress or cancellation",
+   "file": "MirrorOrbitRecon/MirrorOrbitRecon.py",
+   "line_start": 344,
+   "line_end": 350,
+   "evidence": "        #Perfrom itk rigid registration\n        logic = MirrorOrbitReconLogic()\n        self.sourcePoints, self.targetPoints, scalingTransformNode, ICPTransformNode = logic.ITKRegistration(self.mirroredSkullRigidNode,",
+   "explanation": "FPFH/RANSAC/ICP registration and the CPD affine step (line 372) run synchronously in the button slot with no progress dialog or cancellation, so Slicer appears frozen for the duration on large skull meshes. The same applies to the heatmap/projection batch operations in PlateRegistration.",
+   "suggestion": "Run the heavy work in a CLI or a worker thread with progress reporting, or at minimum show a progress dialog with processEvents.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Module help text and category are still template placeholders",
+   "file": "PlateRegistration/PlateRegistration.py",
+   "line_start": 44,
+   "line_end": 54,
+   "evidence": "        self.parent.categories = [translate(\"qSlicerAbstractCoreModule\", \"Examples\")]",
+   "explanation": "Both modules are listed under the \"Examples\" category and their help text still says 'This is an example of scripted loadable module bundled in an extension. See more information in <a href=\"https://github.com/organization/projectname#PlateRegistration\">module documentation</a>.' (lines 51-54; MirrorOrbitRecon.py:38-48 identical). Users looking for a planning tool will not find it, and the in-app help points to a nonexistent URL.",
+   "suggestion": "Set a real category (e.g. Planning) and write help text linking to the tutorials in this repository.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No research-use / clinical disclaimer for a surgical planning tool",
+   "file": "README.md",
+   "line_start": 4,
+   "line_end": 4,
+   "evidence": "**SlicerOrbitSurgerySim** is a 3D Slicer extension for **interactive registration, evaluation, and comparison of preformed orbital plates** used in the repair of orbital fractures.",
+   "explanation": "The README markets the tool for 'clinical decision support' and plate ranking for surgery, but contains no statement that it is not cleared for clinical use and that results must be verified by a clinician. Users may treat computed fit metrics as validated surgical guidance.",
+   "suggestion": "Add an explicit research-use-only / not-for-clinical-use disclaimer and describe the validation status of the fit metrics.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Sample data license and provenance not stated",
+   "file": "Tutorials/00_Quick_Tutorial.md",
+   "line_start": 39,
+   "line_end": 39,
+   "evidence": "This tutorial uses open-source segmentations derived from the **CBCTDental Surgery** dataset from Slicer's Sample Data module.",
+   "explanation": "The extension downloads a ZIP from a separate repository (chz31/orbitSurgeySim_sampleData) containing segmentations derived from a third-party dataset, but neither the extension repository nor the README states the license of that data or of the derived segmentations. Distribution permission for the bundled/downloaded material is therefore unclear.",
+   "suggestion": "State the license of the sample data (and of the source dataset) in the README and in the sample-data repository.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Reused SlicerMorph code acknowledged but no license notice",
+   "file": "MirrorOrbitRecon/MirrorOrbitRecon.py",
+   "line_start": 51,
+   "line_end": 51,
+   "evidence": "In addition to Slicer base functions, the module reused itk functions for rigid registration from the ALPACA and FastModelAlign Modules of SlicerMorph extension (https://slicermorph.github.io/).",
+   "explanation": "The registration logic is described as reused from SlicerMorph (BSD-2-Clause). Acknowledgement is present, but the BSD-2-Clause copyright notice and conditions are not reproduced anywhere in the repository, which the license requires for redistributed source.",
+   "suggestion": "Add the SlicerMorph BSD-2-Clause notice to LICENSE.txt or a THIRD_PARTY file.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "The sample-data repository chz31/orbitSurgeySim_sampleData (contents, setup.py, license) could not be fetched, so what the downloaded ZIP contains and whether it includes an executable setup.py is unverified.",
+  "PlateRegistration.py was only partially read (lines 1-470, 890-1030, 1690-1900 plus a symbol/pattern search); the heatmap, projection, comparison and plotting code (lines ~1940-3336) was not reviewed line by line, including the os.remove calls at lines 2778 and 2958.",
+  "The .ui files, icons and the two extension screenshots were not inspected (binary/large XML).",
+  "No build or test run was performed; the claim that the registered MirrorOrbitRecon ctest fails is based on reading the test code, not on executing it.",
+  "The cited JOMS 2026 DOI and the YouTube tutorials were not verified.",
+  "Whether SlicerMorph's ALPACA module installs itk/itk-fpfh/cpdalp at import (which this extension relies on) was not inspected."
+ ],
+ "questions_for_author": [
+  "Why does the sample-data downloader execute a setup.py from the downloaded folder, and can that step be removed or replaced with code shipped in the extension?",
+  "Can the sample data be pinned to a fixed commit with SHA256 checksums instead of refs/heads/main with checksums=None?",
+  "Can pandas/matplotlib installation be gated behind an explicit user confirmation prompt (or declared as a build dependency) instead of running automatically when the module is opened?",
+  "What is the license of the sample data and of the CBCTDental Surgery-derived segmentations, and where is it documented?"
+ ]
+}

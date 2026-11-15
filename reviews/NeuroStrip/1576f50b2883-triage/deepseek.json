@@ -1,0 +1,140 @@
+{
+ "purpose": "NeuroStrip is a 3D Slicer scripted module that runs CNN-based skull stripping (brain masking) on MRI volumes using the external `neurostrip` Python library, producing a brain mask labelmap and optionally a masked brain volume.",
+ "summary": "The module code itself is small and does not transmit data: it exports the input volume to a temporary directory, calls `neurostrip.predict` locally, and loads results back. However the extension cannot be built as submitted: `CMakeLists.txt:22` does `add_subdirectory(NeuroStrip)` but no `NeuroStrip/CMakeLists.txt` exists in the repository, so CMake configuration fails and no Python/UI/icon files are installed. There are also environment concerns (unpinned `pip_install(\"neurostrip[cpu]\")` into Slicer's shared Python, contents of that package unverifiable) and a likely runtime bug in the direction-matrix copy. License (MIT) is fine for the extension itself; the bundled/downloaded library and model weights could not be verified.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "NeuroStrip/NeuroStrip.py:306-361 only writes to a tempfile.TemporaryDirectory and calls the local `neurostrip.predict`; no network transmission, eval/exec, subprocess or deserialization of untrusted files was found (searches for eval/exec/subprocess/pickle/socket returned nothing). The only download is the user-confirmed pip install at line 37 and the checksum-verified sample data at lines 92-96."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "NeuroStrip/NeuroStrip.py:37 runs `slicer.util.pip_install(\"neurostrip[cpu]\")` into Slicer's shared Python with no version pin, triggered from `enter()` (line 183-186); the transitive dependencies of that package (onnxruntime, possibly torch) could not be inspected, so compliance with the no-PyTorch-outside-PyTorchUtils and no-pinning-of-bundled-packages rules is unverified."
+  },
+  "packaging": {
+   "rating": "blocking",
+   "rationale": "CMakeLists.txt:22 calls `add_subdirectory(NeuroStrip)` but the repository contains no `NeuroStrip/CMakeLists.txt` (listing of NeuroStrip/ shows only NeuroStrip.py, Resources/Icons/*.png, Resources/UI/NeuroStrip.ui), so configuration fails and the .py/.ui/.png files are never installed."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE is MIT (lines 1-21) and README.md:75 states the plugin follows the MIT license of the NeuroStrip library; the license of the `neurostrip` package and of the model weights it downloads could not be verified from this repository."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "NeuroStrip/NeuroStrip.py:342-344 builds a Python list and passes it to `GetIJKToRASDirections`, which expects a vtkMatrix4x4, and hardcodes identity instead of the input geometry; inference also runs synchronously on the GUI thread with no progress reporting (lines 261-271)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md documents installation and usage and a sample data set plus a module test exist (NeuroStrip.py:73-99, 371-415), but the test asserts a hardcoded scalar maximum (line 413) and there is no clinical-use disclaimer or model provenance/validation information."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "blocking",
+   "title": "Missing NeuroStrip/CMakeLists.txt: extension cannot be configured or installed",
+   "file": "CMakeLists.txt",
+   "line_start": 22,
+   "line_end": 22,
+   "evidence": "add_subdirectory(NeuroStrip)",
+   "explanation": "The top-level CMakeLists.txt adds the NeuroStrip subdirectory, but the repository has no NeuroStrip/CMakeLists.txt (directory listing shows only NeuroStrip.py, Resources/Icons/NeuroStrip.png, Resources/Icons/NeuroStrip1.png, Resources/UI/NeuroStrip.ui). CMake configuration of the catalog entry therefore fails, and even if it did not, nothing would install NeuroStrip.py, the .ui file or the icons, so the module would not load from the Extension Manager build.",
+   "suggestion": "Add NeuroStrip/CMakeLists.txt using slicerMacroBuildScriptedModule(NAME NeuroStrip) with the standard Resources install rules (UI, Icons) and verify the extension builds from the catalog entry.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Unpinned pip install of neurostrip[cpu] into Slicer's shared Python environment",
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line_start": 31,
+   "line_end": 37,
+   "evidence": "def installPythonDependencies() -> None:\n    msg = \"Extra python packages (neurostrip and onnxruntime) are required.\"\n    msg += \"\\nClick OK to install them for NeuroStrip.\"\n    if not slicer.util.confirmOkCancelDisplay(msg):\n        logging.info('Installation of neurostrip aborted by user')\n        return\n    slicer.util.pip_install(\"neurostrip[cpu]\")",
+   "explanation": "The module installs a third-party package with no version constraint into the Slicer Python environment shared by all extensions. The transitive dependency set of `neurostrip[cpu]` (onnxruntime, and possibly torch or pinned numpy) could not be inspected from this repository, so it cannot be confirmed that it does not pull PyTorch from PyPI, does not pin/downgrade numpy or other Slicer-bundled packages, or does not bundle its own Qt/VTK. Any such dependency would affect users who never open this module, and an unpinned install means the code that runs changes silently over time.",
+   "suggestion": "Pin a reviewed version range, verify the dependency tree of neurostrip[cpu] (no torch, no pins of Slicer-bundled packages, headless-only Qt/VTK), and document the reviewed dependency set; consider shipping the model via a Slicer data/extension mechanism instead of a pip package.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Direction matrix copy is wrong: list passed to GetIJKToRASDirections and identity hardcoded",
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line_start": 339,
+   "line_end": 344,
+   "evidence": "outputMask.SetAndObserveImageData(tempMaskNode.GetImageData())\n                    outputMask.SetOrigin(tempMaskNode.GetOrigin())\n                    outputMask.SetSpacing(tempMaskNode.GetSpacing())\n                    directionMatrix = np.eye(3, 3).tolist()\n                    tempMaskNode.GetIJKToRASDirections(directionMatrix)",
+   "explanation": "vtkMRMLVolumeNode.GetIJKToRASDirections expects a vtkMatrix4x4 (or a wrapped C array), not a Python list, so this call is likely to raise a TypeError after the (expensive) prediction has already run, making Apply fail with 'Failed to compute results.' Even if it did not raise, the direction is overwritten with identity rather than the input volume's orientation, so results for oblique or non-axially-aligned MRI would be misoriented in the scene. The same pattern is repeated at lines 357-359 for the masked volume.",
+   "suggestion": "Use `outputMask.SetIJKToRASMatrix(tempMaskNode.GetIJKToRASMatrix())` (or copy the input volume's IJKToRAS matrix) instead of building an identity list, and add a test with a non-identity direction.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "CNN inference runs synchronously on the GUI thread without progress reporting",
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line_start": 261,
+   "line_end": 271,
+   "evidence": "with slicer.util.tryWithErrorDisplay(\n            _(\"Failed to compute results.\"), waitCursor=True\n        ):\n            # Compute output\n            self.logic.process(",
+   "explanation": "The whole prediction (potentially minutes on CPU) runs inside the button handler with only a wait cursor; Slicer's UI is frozen and the user gets no progress or cancel option, which looks like a hang for large volumes. Errors are at least surfaced via tryWithErrorDisplay, so this is a usability/robustness issue rather than a safety one.",
+   "suggestion": "Run the prediction in a background thread/CLI node with progress reporting, or at minimum show a modal progress dialog and process events.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Install prompt repeats on every module entry if the user declines",
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line_start": 182,
+   "line_end": 186,
+   "evidence": "# Make sure dependencies are installed\n        if not self._dependenciesInstalled:\n            self._dependenciesInstalled = checkPythonDependencies()\n            if not self._dependenciesInstalled:\n                installPythonDependencies()",
+   "explanation": "If the user cancels the installation dialog, `_dependenciesInstalled` stays False and the confirmation dialog reappears every time the module is entered; conversely, after a successful install the flag is not re-checked, so a failed install is only detected on the next Apply. Minor UX issue.",
+   "suggestion": "Remember the user's decline for the session and re-check availability before running the algorithm.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Brittle test assertion on exact intensity maximum",
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line_start": 411,
+   "line_end": 413,
+   "evidence": "outputScalarRange = outputMaskedVolume.GetImageData().GetScalarRange()\n        self.assertEqual(outputScalarRange[0], 0)\n        self.assertEqual(outputScalarRange[1], 605)  # Maximum value in mask",
+   "explanation": "The test asserts an exact maximum intensity of 605, which depends on the model version and preprocessing; any model update or minor numerical difference will fail the test even when the module works. It also requires the pip dependency to be installed, so the test cannot run in a clean build environment.",
+   "suggestion": "Assert structural properties (non-empty mask, mask values in {0,1}, masked volume zero outside the mask) instead of exact intensity values.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No clinical-use disclaimer or model provenance/validation information",
+   "file": "README.md",
+   "line_start": 1,
+   "line_end": 13,
+   "evidence": "# NeuroStrip 3D Slicer Extension\n\nThis extension provides CNN-based skull stripping (brain masking) from MRI using the [NeuroStrip library](https://github.com/dyollb/neurostrip) directly within 3D Slicer.",
+   "explanation": "The README describes features and usage but gives no information about the training data, model version, reported accuracy, or a research-use-only disclaimer, which users of an AI-based segmentation tool need in order to judge whether results are trustworthy.",
+   "suggestion": "Document model provenance, validation results and add a research-use-only disclaimer.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Screenshot URL points to the sample-data thumbnail rather than a screenshot",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_SCREENSHOTURLS \"https://raw.githubusercontent.com/dyollb/SlicerNeuroStrip/main/NeuroStrip/Resources/Icons/NeuroStrip1.png\")",
+   "explanation": "NeuroStrip1.png is registered as the Sample Data thumbnail (NeuroStrip.py:90) and is not the Screenshot01.png committed at the repository root, so the catalog screenshot will show the thumbnail image. Cosmetic only.",
+   "suggestion": "Point EXTENSION_SCREENSHOTURLS at Screenshot01.png.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "The `neurostrip` PyPI package (https://github.com/dyollb/neurostrip) and its pyproject.toml could not be fetched: its dependency tree (whether it pulls torch, pins numpy/onnxruntime, or bundles Qt/VTK), its license, and the provenance/license of the model weights it downloads are unverified.",
+  "No network access, so the catalog entry's scm_revision 'main' could not be resolved to the stated commit 1576f50b2883dede76ac284782caf166b6b3760c, and the sample-data URL/checksum at NeuroStrip.py:92-96 could not be verified.",
+  "The extension was not built or run; the missing NeuroStrip/CMakeLists.txt finding is based on the repository file listing, not on an actual CMake configure attempt.",
+  "Binary files (Screenshot01.png, NeuroStrip.png, NeuroStrip1.png) were not inspected for embedded content."
+ ],
+ "questions_for_author": [
+  "Where is NeuroStrip/CMakeLists.txt? The top-level CMakeLists.txt adds that subdirectory but the file is not in the repository.",
+  "What are the exact dependencies of `neurostrip[cpu]` (does it install torch, and does it pin numpy/onnxruntime)? Which version is intended to be reviewed?",
+  "What license and training-data provenance apply to the model weights downloaded by the neurostrip package?"
+ ]
+}

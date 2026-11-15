@@ -1,0 +1,173 @@
+{
+ "purpose": "A 3D Slicer extension for DBS (deep brain stimulation) planning: it segments the subthalamic nucleus (STN) from T1/T2 MRI using pretrained networks, maps atlas meshes, and estimates brain shift and electrode trajectories from intraoperative MER/Lead-OR data. It is intended for neurosurgery research groups using Slicer, Netstim/Lead-OR and Elastix.",
+ "summary": "Reviewed the catalog entry, CMake files, README, and the main Python modules' install/download/deserialization paths. The entry is mechanically simple, but the code installs torch and other packages via pip at import time, runs unpinned GitHub and third-party-host wheel installs, downloads model weights without checksums and loads them with torch.load, and declares runtime dependencies in EXTENSION_DEPENDS that the catalog does not list. Several soundness bugs are visible (a broken test call and a non-iterable loop). No malicious behavior was seen. Needs fixes before admission.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "No exfiltration or malicious logic seen, but model weights are fetched from a GitHub release with no hash check and loaded via torch.load (pickle), and a wheel is downloaded from app.box.com and installed. Inspected STNSegmenter/STNSegmenter.py lines 27-60, 137-182, and 727-733."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "Torch is pip-installed directly instead of through SlicerPyTorch, and pip installs happen at module import and at logic construction time. Inspected DBS_STN/DBSShiftPrediction.py lines 17-25, 1743-1751 and STNSegmenter/STNSegmenter.py lines 67-76, 185-189. Not verified against a live Slicer."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "CMakeLists EXTENSION_DEPENDS lists SlicerElastix and SlicerNetstim, but the catalog entry has build_dependencies empty. Large .pt and .nii.gz files are committed in the source tree. Did not check whether listed files all exist, since binaries were not readable."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "The top-level LICENSE.txt is MIT and matches the README. The bundled MNI152 template and the pretrained .pt weights have no stated terms in the repo. I did not find a license for the model weights."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Several visible bugs: DBS_STN/Lib/mer_support.py line 347 iterates over an int, and AtlasMapping/AtlasMapping.py line 1178 calls process() with 4 arguments when the signature takes 2. The test suites are commented out (Testing/Python/CMakeLists.txt)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README gives install and usage steps for the segmentation and localisation modules, and a sample-data hook exists. Tests are effectively absent and there is no clinical-use or research-only disclaimer in the README. Tier 1."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "PyTorch installed via pip_install instead of the PyTorch extension",
+   "file": "DBS_STN/DBSShiftPrediction.py",
+   "line_start": 17,
+   "line_end": 25,
+   "evidence": "try:\n    import torch\n    from torch import nn\n    from torch.nn import functional as F\nexcept ImportError:\n    slicer.util.pip_install('torch')",
+   "explanation": "Torch is installed with slicer.util.pip_install('torch') at import time and in logic construction. This bypasses SlicerPyTorch and can change or conflict with the Python environment that Slicer and other extensions use, including for users who never open the module. The policy requires torch to come through PyTorchUtils.",
+   "suggestion": "Add SlicerPyTorch to EXTENSION_DEPENDS and build_dependencies, and use the PyTorchUtils install logic instead of pip_install('torch'). Remove the same call from STNSegmenter/STNSegmenter.py line 70 and line 189.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Package installs at import time, including unpinned GitHub installs",
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line_start": 55,
+   "line_end": 62,
+   "evidence": "try:\n    import ants\n    import antstorch\nexcept ImportError:\n    _install_antspyx()\n    slicer.util.pip_install('git+https://github.com/ANTsX/ANTsTorch.git')",
+   "explanation": "STNSegmenter.py installs packages when the module is loaded (dbs-pure-lib, antspyx, a git+https ANTsTorch install, intensity-normalization). Each install runs without a version pin or user confirmation, and the ANTsTorch install follows a moving default branch. Module import can therefore change the shared Python environment.",
+   "suggestion": "Move installs behind an explicit user action in the widget, pin versions, and avoid installing from a VCS URL. Install only on first use of the feature, not at import.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Binary wheel downloaded from a third-party file host and installed",
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line_start": 33,
+   "line_end": 44,
+   "evidence": "download_url = \"https://app.box.com/shared/static/mu1gy26t80oopbtv3mndl5yveb6s4431.whl\"\n        whl_filename = \"antspyx-0.6.2-cp312-cp312-linux_x86_64.whl\"\n        whl_path = Path(tempfile.gettempdir()) / whl_filename\n\n        logging.info(\"Downloading antspyx wheel from %s\", download_url)\n        urllib.request.urlretrieve(download_url, str(whl_path))",
+   "explanation": "On a specific Linux/Python combination, _install_antspyx() fetches a wheel from app.box.com with no checksum, then installs it. Anyone who can replace the Box file controls code that runs in the user's Slicer Python. The URL is also a personal share link that can change.",
+   "suggestion": "Install antspyx from PyPI with a pinned version, or verify a SHA256 of the wheel before installing. Do not depend on a personal file-share link.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Model weights downloaded without integrity check and loaded with torch.load",
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line_start": 160,
+   "line_end": 182,
+   "evidence": "if not file_path.exists() or _looks_like_git_lfs_pointer(file_path):\n        _download_weights()\n\n    try:\n        return torch.load(str(file_path), map_location=torch.device('cpu'))",
+   "explanation": "shp_pred.pt is downloaded from a GitHub release with no checksum, then passed to torch.load, which unpickles arbitrary code. Anyone able to replace the release asset, or a man-in-the-middle, can execute code on the user's machine. A corrupt download also triggers a re-download and a second load. The first load also runs with no weights_only restriction.",
+   "suggestion": "Verify a pinned SHA256 for each downloaded or bundled .pt file before loading. Load with torch.load(..., weights_only=True) or use safetensors. Document the source of the weights.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Pickle deserialization of bundled model and atlas files",
+   "file": "DBS_STN/DBSShiftPrediction.py",
+   "line_start": 1036,
+   "line_end": 1040,
+   "evidence": "def _read_pickle(filename):\n    f = open(filename, 'rb')\n    res = pickle.load(f)",
+   "explanation": "Several .pkl files are read with pickle.load (DBS_STN/DBSShiftPrediction.py line 1036-1040 and STNSegmenter line 104-108). The files ship inside the extension, so the risk is limited to tampering with the package or the user's copy. The same code path is still unsafe in principle.",
+   "suggestion": "Convert the bundled pickles to a non-executable format (JSON/NPZ) or document their provenance and hashes.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Catalog build_dependencies does not match EXTENSION_DEPENDS",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_DEPENDS \"SlicerElastix;SlicerNetstim\") # AtlasMapping uses Elastix, DBS workflow integrates with Netstim/Lead-OR",
+   "explanation": "CMakeLists.txt declares EXTENSION_DEPENDS of SlicerElastix and SlicerNetstim, but the catalog entry lists no build_dependencies. The index build may not see the dependencies, and the policy requires them to match.",
+   "suggestion": "Align the catalog entry's build_dependencies with EXTENSION_DEPENDS (and add SlicerPyTorch once the torch install is moved to PyTorchUtils).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Loop over an integer raises TypeError",
+   "file": "DBS_STN/Lib/mer_support.py",
+   "line_start": 347,
+   "line_end": 347,
+   "evidence": "for i in points_to_compute.shape[0]:",
+   "explanation": "compute_distances_to_mesh iterates over points_to_compute.shape[0], which is an int. The first call raises TypeError, so the function cannot run. It is a visible correctness bug.",
+   "suggestion": "Use range(points_to_compute.shape[0]) or remove the function if it is unused.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Test calls process() with the wrong signature",
+   "file": "AtlasMapping/AtlasMapping.py",
+   "line_start": 1178,
+   "line_end": 1178,
+   "evidence": "logic.process(inputMesh, outputVolume, threshold, True)",
+   "explanation": "The AtlasMapping test calls logic.process with four arguments and checks volume scalar ranges, but process() takes (inputMesh, inputBaseTransform) and returns a transform. The test would fail if enabled, and it is not part of the build test list.",
+   "suggestion": "Rewrite the test for the current process() API, or remove the stale test code.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Shell-like command built by string formatting and shlex.split",
+   "file": "STNSegmenter/segm_lib/slicer_preprocessing.py",
+   "line_start": 27,
+   "line_end": 38,
+   "evidence": "cmd += f\"t1_image = ants.image_read(\\\"{t1}\\\");\"\n    ...\n    subprocess.check_output(cmd,env={})",
+   "explanation": "register_t2_to_t1 and _run_cli_wm_segmentation build commands by f-string and shlex.split. Paths with spaces or quotes break, and an embedded quote can alter the Python command passed to 'python -c'. Inputs are user-selected paths, so this is a robustness issue more than a remote attack, but it is still fragile.",
+   "suggestion": "Pass arguments as a list without a shell, and call the Python APIs directly rather than building python -c strings.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No clinical or research-use disclaimer and no tests",
+   "file": "README.md",
+   "line_start": 1,
+   "line_end": 5,
+   "evidence": "Project: SlicerDBSCoalignment\n\nThis project focuses on improving the precision of electrode placement in Deep Brain Stimulation (DBS) surgery",
+   "explanation": "The software supports surgical electrode placement, but the README and CMake metadata contain no statement that results are research-only and not for clinical decisions. Test suites are commented out (e.g., DBS_STN/Testing/Python/CMakeLists.txt), so there is no regression coverage.",
+   "suggestion": "Add a research-use disclaimer, document model provenance and validation for the networks, and enable at least a smoke test.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Bundled model weights and MNI template lack stated terms",
+   "file": "LICENSE.txt",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "MIT License\n\nCopyright (c) 2025 Czech Technical University in Prague",
+   "explanation": "The repository license covers the code only. The pretrained .pt/.pkl networks and the MNI152 template are bundled and downloaded without stated terms or attribution. Distribution is probably permitted, but the terms are not documented.",
+   "suggestion": "Document the source and license of the model weights and the MNI template, and include attribution where required.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Binary files (.pt, .pkl, .nii.gz, .mrb) were not readable, so their contents, checksums and sizes were not verified.",
+  "The exact revision 'master' was not resolved; the source at commit d1d9b946 was not fetched, and no CI build or Slicer run was performed.",
+  "Whether every file listed in CMake (e.g., nets/mer_pca_mesh.pkl, transformer_classifier_test.pt) exists in the repository was not checked.",
+  "STNSegmenter/STNSegmenter.py beyond lines 1-230 and 690-740, and most of DBSShiftPrediction.py, were not read in full; no full dataflow or network-transmission audit was done.",
+  "Upstream dependencies (dbs-pure-lib, antstorch, brainextractor, intensity_normalization) were not inspected."
+ ],
+ "questions_for_author": []
+}

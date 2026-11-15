@@ -1,0 +1,203 @@
+{
+ "purpose": "AnatomyCarve is a 3D Slicer rendering module that lets a user place invisible \"clipping spheres\" in a 3D view so that selected segments of a segmentation are carved away interactively, producing textbook-style anatomical renderings. It targets users creating anatomical illustrations from CT/segmentation data, with a bundled C++ helper module exposing the volume-rendering OpenGL texture ID.",
+ "summary": "Sound core idea with a working tutorial and Apache-2.0 license, but not ready as submitted. A pip install of PyOpenGL runs at scripted-module import, i.e. at Slicer startup for every user who installs the extension, without any confirmation. The GPU data path has an unbounded clipping-sphere list fed to a fixed-size uniform array and a 32-row mask texture, a concrete out-of-bounds/crash path. A render-window observer is never removed, and the sample dataset's third-party provenance/licence is undocumented. Fixes are small but should land before the extension is offered to users.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "AnatomyCarve.py:22-25 downloads and installs PyOpenGL from PyPI with no user consent, and AnatomyCarveLogic.py:337 passes a variable-length array to glUniform4fv with a hard-coded count of 32, an out-of-bounds host memory read. No data transmission, telemetry, secrets or obfuscation were found; sample data download uses a SHA256 checksum."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "The pip_install('PyOpenGL') call sits at module import (AnatomyCarve.py:22-25), so it runs at Slicer startup for all users who install the extension, before anyone opens the module, and a failure/offline case breaks loading of all extension modules. No torch, no pinned/downgraded Slicer-bundled packages, no sys.path or warning changes were found."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Every Python file imported by the module is listed in AnatomyCarve/CMakeLists.txt:5-13 and all four shaders plus the UI file are in MODULE_PYTHON_RESOURCES; catalog entry field names are valid and EXTENSION_DEPENDS 'NA' matches build_dependencies []. Leftovers: an unused VolumeTextureIDHelper/VolumeTextureIDHelper.zip binary and ~3.3 MB of committed PNG/NRRD binaries."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "LICENSE.txt is full Apache-2.0 and permits distribution of the code; the VolumeTextureIDHelper C++ files keep the Slicer/Kitware BWH notices. However the bundled sample dataset data/Panoramix-cropped.seg.nrrd (and the 'CTA abdomen (Panoramix)' sample references) has no provenance or licence statement in the repository, and 'Panoramix' is a third-party CTA dataset."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read all Python logic, the shaders, the UI file and the C++ helper. Several crash/leak paths: unbounded sphere count against a 32-entry shader/texture limit, a leaked RenderWindow StartEvent observer that survives module exit, out-of-range list/dict indexing in radius handling, and divide-by-zero normalisation for constant-intensity volumes."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README has a step-by-step tutorial, a sample-data registration with checksum, and an arXiv reference; the module is registered under Rendering with help/acknowledgement text. But the ctest test (AnatomyCarve.py:456-502) only downloads sample data and asserts nothing, the C++ helper keeps template placeholder metadata, and README says Windows/Linux only without an in-module warning when GL 4.3 is missing."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "PyOpenGL is pip-installed at module import, i.e. at Slicer startup, without asking the user",
+   "file": "AnatomyCarve/AnatomyCarve.py",
+   "line_start": 22,
+   "line_end": 25,
+   "evidence": "try:\n    from OpenGL.GL import *\nexcept ImportError:\n    slicer.util.pip_install('PyOpenGL')",
+   "explanation": "Slicer imports every scripted-module file at startup to register modules, so this runs for all users who have the extension installed, even if they never open AnatomyCarve. It silently installs a third-party package from PyPI into Slicer's shared Python environment (changing an environment shared with other extensions, and downloading and executing code without informed opt-in). Conversely, on a machine without network access pip_install raises and the whole extension fails to load at startup, so the module does not even appear in the module selector. PyOpenGL is also not declared anywhere in CMake, so the dependency is resolved at runtime only.",
+   "suggestion": "Move the OpenGL import into the logic/widget, and if PyOpenGL is really required, ask the user before installing (e.g. a ctkMessageBox confirmation or the Slicer 'install dependencies' pattern with progress), or state it as a documented prerequisite / add it to the extension's dependency documentation.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "glUniform4fv called with hard-coded count 32 on a variable-length array: out-of-bounds host memory read",
+   "file": "AnatomyCarve/AnatomyCarveLogic/AnatomyCarveLogic.py",
+   "line_start": 321,
+   "line_end": 337,
+   "evidence": "        sphereDetails = np.array(sphereDetailsArray, dtype=np.float32)\n\n        glUseProgram(shader.program)\n        glUniform4fv(glGetUniformLocation(shader.program, \"sphereDetails\"), 32, sphereDetails)",
+   "explanation": "sphereDetailsArray has one row per control point, so with a single clipping sphere the numpy buffer holds 4 floats, while glUniform4fv is asked to read 32*4 floats (512 bytes) from it. PyOpenGL passes the buffer pointer, so the driver reads memory beyond the array: garbage sphere positions at best, a segfault in the render callback (called on the GUI thread from the render window StartEvent) at worst. The engine adds exactly one control point at start (addInitialClippingSphere), so the very first render already takes this path.",
+   "suggestion": "Pass the real element count (sphereDetails.shape[0]) or pad the array to exactly 32 rows filled with zeros before the call.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Clipping sphere count is not bounded, but the mask texture and shaders are fixed at 32",
+   "file": "AnatomyCarve/AnatomyCarveLogic/Mask.py",
+   "line_start": 21,
+   "line_end": 71,
+   "evidence": "    MAX_SPHERES = 32    \n...\n            self.texture.updateRow2d(self.sphereCount - 1, rowMask)",
+   "explanation": "The user can place arbitrarily many control points with the markups widget. Each one calls addSphere(), which writes row sphereCount-1 into a 2D texture allocated with exactly MAX_SPHERES rows (line 59) and, from index 33 on, writes outside the texture (GL error, undefined results, possible driver hang). The compute shader also declares sphereDetails[MAX_SPHERES] and reads mask column i for i < sphereCount, so with more than 32 spheres the shader reads the mask out of bounds while the uniform upload above under/over-runs its array. Nothing validates the count or warns the user.",
+   "suggestion": "Clamp the number of clipping spheres (disable the place-control-point action at 32, or size the texture/uniform from the actual count) and validate sphereCount before dispatch.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "RenderWindow StartEvent observer is never removed and stays active after the module is closed",
+   "file": "AnatomyCarve/AnatomyCarveLogic/AnatomyCarveLogic.py",
+   "line_start": 228,
+   "line_end": 233,
+   "evidence": "    def applyCarveVoxelsComputeShader(self):\n\n\n        renderWindow = slicer.app.layoutManager().threeDWidget(self.context.getViewIndex()).threeDView().renderWindow()\n        \n        observerTag = renderWindow.AddObserver(vtk.vtkCommand.StartEvent, self.applyCarveVoxelsComputeShaderTick)",
+   "explanation": "The returned observer tag is stored in a local variable and discarded, and AnatomyCarveWidget.cleanup() (AnatomyCarve.py:305-314) only removes the parameter-node and markups observers. The observer therefore keeps firing on every frame after the user leaves the module or closes the scene, holding the logic/context and their GPU objects alive; applyCarveVoxelsComputeShaderTick then indexes self.sphereRadiuses with IDs from a possibly cleared scene (KeyError) or uses deleted nodes, raising exceptions from inside a render callback where they are not shown to the user. Clicking Render again after a scene change also adds a second observer.",
+   "suggestion": "Store the tag on the logic, remove it in a cleanup/stop method called from the widget's cleanup() and from exit(), and guard the tick callback with observers/heap checks.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Unconditional rewrite of slice background and creation of new output/VR nodes on every Render",
+   "file": "AnatomyCarve/AnatomyCarveLogic/Context.py",
+   "line_start": 112,
+   "line_end": 128,
+   "evidence": "        outputVolume = slicer.mrmlScene.AddNewNodeByClass(\"vtkMRMLVectorVolumeNode\", \"AnatomyCarve Output\")\n...\n        slicer.util.setSliceViewerLayers(background=outputVolume)\n...\n        displayNode = volRenLogic.CreateDefaultVolumeRenderingNodes(outputVolume)",
+   "explanation": "Starting a render silently replaces the slice views' background layer chosen by the user and adds an 'AnatomyCarve Output' vector volume plus a volume-rendering display node to the scene. If the user starts the module again (new scene, or after a failed start that left nodes behind), duplicates accumulate and the user's slice layout is overwritten without a way to undo from the module. Nothing is deleted permanently, but the scene is modified without consent.",
+   "suggestion": "Reuse an existing output node if present, ask or warn before replacing the slice background, and remove the temporary nodes when rendering stops.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Divide-by-zero normalisation and max() over possibly empty segment lists",
+   "file": "AnatomyCarve/AnatomyCarveLogic/Texture.py",
+   "line_start": 57,
+   "line_end": 62,
+   "evidence": "        data = slicer.util.arrayFromVolume(scalarVolumeNode).astype(DEFAULT_TYPE)\n        data = data.reshape(data.shape[::-1])\n        min = data.min()\n        max = data.max()\n        data = (data - min) / (max - min)",
+   "explanation": "A constant-intensity volume (min == max, e.g. a mask-like or empty volume a user picks by accident) yields an all-NaN texture, so the render appears blank/black with no error shown. Similarly Mask.createTexture (Mask.py:55-58) and Context.createLabelToColorMap (Context.py:56-59) call max(...) over the segmentation's segment IDs, which raises ValueError for a segmentation with no segments; the widget auto-selects the first segmentation node in the scene, which can be empty.",
+   "suggestion": "Guard max == min (skip normalisation) and validate that the segmentation has at least one segment, reporting a clear message to the user.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Compute shaders are compiled in AnatomyCarveLogic.__init__, so opening the module requires a current GL context",
+   "file": "AnatomyCarve/AnatomyCarveLogic/AnatomyCarveLogic.py",
+   "line_start": 46,
+   "line_end": 50,
+   "evidence": "        ScriptedLoadableModuleLogic.__init__(self)\n        self.shaderFillColorVolume = ComputeShader(\"FillColorVolume.comp\")\n        self.shaderCarveVoxels = ComputeShader(\"CarveVoxelsAA.comp\")",
+   "explanation": "The logic object is created in AnatomyCarveWidget.setup(), i.e. the first time the user opens the module, and it immediately calls glCreateShader/glCompileShader. With no current OpenGL context (and certainly on macOS, where the OpenGL 4.3 compute shaders are unavailable) this raises from ComputeShader.createComputeShader and the module widget fails to appear with a raw driver error, instead of a readable 'OpenGL 4.3 required' message as the README's Windows/Linux prerequisite implies.",
+   "suggestion": "Defer shader creation to the Render action inside tryWithErrorDisplay, and check the GL version up front to give a clear message.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Whole-volume float32 RGBA copy made synchronously on the GUI thread",
+   "file": "AnatomyCarve/AnatomyCarveLogic/Context.py",
+   "line_start": 99,
+   "line_end": 104,
+   "evidence": "        arrayR = np.zeros(dims, dtype=np.float32)\n        arrayG = np.ones(dims, dtype=np.float32)\n        arrayB = np.ones(dims, dtype=np.float32)        \n        arrayA = slicer.util.arrayFromVolume(self.intensityVolume).astype(np.float32) #np.ones(dims, dtype=np.uint8)\n\n        arrayRGBA = np.stack((arrayR, arrayG, arrayB, arrayA), axis=-1)",
+   "explanation": "For the bundled 441x321x215 sample this allocates roughly 0.5 GB of host RAM in several temporaries while the wait cursor blocks the GUI; a typical 512x512x500 CT needs several GB twice over, which on a 8-16 GB laptop triggers swapping or MemoryError after the user clicked Render. The same full-volume work is repeated per StartEvent in the shaders, but the Python-side copies happen once without progress reporting.",
+   "suggestion": "Build the RGBA array in one allocation (or reuse the existing VectorVolumeNode's array) and run the setup off the GUI thread or with a progress dialog.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "Bundled sample dataset has no provenance or licence statement",
+   "file": "AnatomyCarve/AnatomyCarve.py",
+   "line_start": 87,
+   "line_end": 101,
+   "evidence": "        sampleName=\"CTA abdomen (Panoramix) segmentation\",\n...\n        uris=\"https://raw.githubusercontent.com/andrey-titov/SlicerAnatomyCarve/main/data/Panoramix-cropped.seg.nrrd\",",
+   "explanation": "The extension ships data/Panoramix-cropped.seg.nrrd (934 KB, derived from the Panoramix CTA case, an IRCAD 3D-IRCADb-style dataset) and downloads it from the project's own repository, but neither LICENSE.txt nor README.md states the origin or the terms under which this data may be redistributed. Apache-2.0 covers the code only. Users and the index therefore cannot verify that the extension may redistribute this third-party dataset; such datasets are frequently limited to research use and require acknowledgement.",
+   "suggestion": "Add a data/README or LICENSE-DATA note stating the dataset origin, its licence/terms of use, required citation, and any non-commercial/research-only restriction, and confirm redistribution is permitted.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Unused committed binary archive VolumeTextureIDHelper.zip",
+   "file": "VolumeTextureIDHelper/VolumeTextureIDHelper.zip",
+   "line_start": null,
+   "line_end": null,
+   "evidence": "",
+   "explanation": "A 2 KB zip archive is committed in the repository but referenced by no CMakeLists or source file (searched for the name across the tree). Its contents could not be inspected with the available tools, so an unreviewed binary blob ships in the extension source; it also looks like an accidental export artifact.",
+   "suggestion": "Delete the archive unless it is required for a build step, and state its purpose if it is.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Registered test asserts nothing",
+   "file": "AnatomyCarve/AnatomyCarve.py",
+   "line_start": 468,
+   "line_end": 488,
+   "evidence": "        self.delayDisplay(\"Starting the test\")\n\n        # Get/create input data\n\n        import SampleData\n\n        registerSampleData()\n        # intensityVolume = SampleData.downloadSample(\"CTA abdomen (Panoramix)\")        \n        segmentation = SampleData.downloadSample(\"CTA abdomen (Panoramix) segmentation\")",
+   "explanation": "This unittest is registered as a ctest (AnatomyCarve/CMakeLists.txt:38) but only downloads the sample data and prints 'Test passed'; no assertion covers the logic, the OpenGL path or the sample-data checksum, so CI cannot detect regressions and the test may pass even when the module is unusable.",
+   "suggestion": "Add at least assertions on the sample download, texture/mask bookkeeping (add/remove sphere, radius update) using headless-safe helpers, and clean up node creation.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Helper module keeps Slicer template placeholder metadata",
+   "file": "VolumeTextureIDHelper/qSlicerVolumeTextureIDHelperModule.cxx",
+   "line_start": 62,
+   "line_end": 84,
+   "evidence": "  return \"This work was partially funded by NIH grant NXNNXXNNNNNN-NNXN\";\n...\n  moduleContributors << QString(\"John Doe (AnyWare Corp.)\");",
+   "explanation": "The hidden helper module still advertises the 'Examples' category, a 'John Doe (AnyWare Corp.)' contributor and a dummy NIH grant, and ships an unused FooBar widget. This does not affect safety but makes the extension's provenance metadata misleading if the helper module is ever surfaced.",
+   "suggestion": "Replace placeholders with the real contributors/acknowledgement or remove the unused widget and template text.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "No concealed behaviour found in the reviewed source",
+   "file": "AnatomyCarve/AnatomyCarveLogic/AnatomyCarveLogic.py",
+   "line_start": 210,
+   "line_end": 233,
+   "evidence": "",
+   "explanation": "Reported for completeness: I searched the whole tree for network/socket/requests, subprocess, eval/exec, pickle/torch.load, and found no telemetry, outbound data transmission, credential handling, archive extraction or obfuscated code. The only network accesses are the SampleData download of the project's own NRRD (with SHA256 checksum) and the PyPI install noted above. Several heavily commented-out debug blocks remain but contain no instructions to reviewers or AI tools.",
+   "suggestion": "No action required beyond the environment/packaging items above.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not read or unzip VolumeTextureIDHelper/VolumeTextureIDHelper.zip (binary, tool cannot extract archives).",
+  "Could not view the committed screenshots (docs/Screenshot 2025-06-26 153232.png, SlicerAnatomyCarve.png, Icons/*.png) or the remaining ~17 590 lines of data/Panoramix-cropped.seg.nrrd; the NRRD header was inspected only.",
+  "Did not build the extension or run Slicer, so whether vtkSlicerVolumeTextureIDHelperLogic.cxx compiles against the current Slicer/VTK (it uses vtkVolumeInputHelper.h, vtkVolumeTexture.h and mapper->AssembledInputs) and whether the 3D-view GL context is current when ComputeShader objects are created",
+  "Could not verify the licence terms of the Panoramix / CTA-abdomen dataset externally (no network access); the finding is based on the absence of any provenance or licence statement in the repository.",
+  "Did not verify the upstream repository at the exact revision 3ce2dd19c461184cf17456bdbbd84a30c6ad8f7b beyond the files provided for this review (scm_revision is 'main', a moving branch), nor that all referenced files exist at that revision.",
+  "Did not review CI/build results or previous review history for this extension."
+ ],
+ "questions_for_author": [
+  "What are the origin, licence and citation terms of data/Panoramix-cropped.seg.nrrd, and do they permit redistribution inside the extension (or should the sample be removed and only referenced)?",
+  "Can the PyOpenGL dependency be avoided or installed only after an explicit user prompt, instead of at scripted-module import?",
+  "Is the number of clipping spheres intentionally limited to 32, and where is that limit enforced in the UI?",
+  "Was VolumeTextureIDHelper.zip meant to be committed?"
+ ]
+}

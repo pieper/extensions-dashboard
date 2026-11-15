@@ -1,0 +1,93 @@
+{
+ "purpose": "A 3D Slicer scripted module (\"Class Annotation\") for manually annotating medical image datasets: users pick a dataset folder, assign class labels per patient/case, and the extension writes a CSV plus a per-class output folder tree with copied originals. It is intended for clinicians and researchers doing dataset labelling in Slicer.",
+ "summary": "I read the CMake files, the catalog entry, the MIT license, the helper libraries in full, and the module's header and key deletion/CSV/copy routines in ClassAnnotation.py. I found no network access, no package installation, no dynamic execution, and no obvious malicious behaviour. The main concerns are soundness: a substring check that can silently skip all files, and rmtree calls whose paths partly come from a user-editable CSV. The rest of the 3,850-line module was not read, so this is not a full audit.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "No network, subprocess, pip, eval/exec or pickle usage was found in the lines searched. Several shutil.rmtree calls delete folders under the dataset or output path, and one of them (ClassAnnotation.py:3262) builds its path from a CSV the user can edit. The impact is limited to the user's own data, but the deletions are not validated against traversal, so I rate this a concern rather than ok."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "The only import-time side effect is inserting ClassAnnotationLib into sys.path (ClassAnnotation.py:20-21), which is a specific directory. No pip installs, no torch, no global warnings or logging changes were found in the searched lines."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "ClassAnnotation/CMakeLists.txt lists ClassAnnotation.py, ClassAnnotationUtils.py, ClassAnnotationUIUtils.py, Resources/Icons/ClassAnnotation.png and Resources/UI/ClassAnnotation.ui, and all of these exist in the listing. EXTENSION_DEPENDS is \"NA\" and build_dependencies is empty, which is consistent. ClassAnnotationLib/__init__.py is present but not installed by CMake; it is empty, so the failure mode is minor."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE.txt is the standard MIT license with a 2025 copyright line to Lorena Romeo. This permits distribution of the extension."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "ClassAnnotationUtils.findOriginalFile skips any directory whose full path contains the substring \"output\", so a dataset stored under any folder with \"output\" in its path silently yields no files. _organizeFolders also builds a path from unvalidated CSV values before rmtree. There are no tests (the Python test registration is commented out)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README describes the purpose, both data formats and the review modes, and gives a video tutorial link. There is no sample data, no automated tests, and no clinical-use disclaimer. The tier is 3."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Substring match on 'output' silently skips dataset files",
+   "file": "ClassAnnotation/ClassAnnotationLib/ClassAnnotationUtils.py",
+   "line_start": 31,
+   "line_end": 33,
+   "evidence": "for root, _, files in os.walk(datasetPath):\n        if \"output\" in root:\n            continue",
+   "explanation": "Concrete failure: a dataset stored under any path that contains 'output' produces no copied originals and no warning.",
+   "suggestion": "",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Deletion path built from user-editable CSV without containment check",
+   "file": "ClassAnnotation/ClassAnnotation.py",
+   "line_start": 3257,
+   "line_end": 3262,
+   "evidence": "oldPatientPath = os.path.join(finalOutputFolder, oldFolderName, patientID)\n                  if os.path.exists(oldPatientPath):\n                      shutil.rmtree(oldPatientPath)",
+   "explanation": "patientID comes from the CSV 'Patient ID' column. A crafted or corrupted value that resolves outside the output tree would cause recursive deletion of that location.",
+   "suggestion": "",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Errors during copy and CSV read are swallowed",
+   "file": "ClassAnnotation/ClassAnnotation.py",
+   "line_start": 2949,
+   "line_end": 2950,
+   "evidence": "except Exception:\n                pass",
+   "explanation": "Users are not told when the previous classification could not be read, or when copies failed, so reclassification may silently lose track of earlier assignments.",
+   "suggestion": "",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No automated tests and no clinical-use disclaimer",
+   "file": "ClassAnnotation/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "Without tests, regressions in the CSV and folder-reorganisation logic will not be caught by the build.",
+   "suggestion": "",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Most of ClassAnnotation/ClassAnnotation.py (about 3,850 lines) was not read in full. I only read the header, the rename and deletion paths, the CSV writers, the folder organisation and cleanup routines, and used targeted searches.",
+  "The UI file ClassAnnotation/Resources/UI/ClassAnnotation.ui and the icon files were not opened, only confirmed present.",
+  "The source repository at the pinned branch 'main' was not resolved to a specific commit, so the reviewed revision is unknown beyond the provided snapshot.",
+  "No CI build, Slicer load test, or runtime test was run; I could not execute anything.",
+  "Commented-out code blocks were not analysed for behaviour since they are not executed."
+ ],
+ "questions_for_author": [
+  "Can findOriginalFile use the path relative to datasetPath when checking for 'output', so that dataset locations containing 'output' still work?",
+  "Should patient IDs read from the CSV be validated (no path separators, no '..') before they are used in shutil.rmtree?",
+  "Would you enable the module's unit test, or add a sample dataset and a basic test for the CSV round-trip and folder reorganisation?"
+ ]
+}

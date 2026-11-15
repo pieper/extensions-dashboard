@@ -1,0 +1,215 @@
+{
+ "purpose": "A 3D Slicer module that runs a bundled nnU-Net model (UpperAirwaySegmentator) to automatically segment the pharyngeal/sinonasal upper airway from CBCT/CT volumes, then lets the user edit, display and export the result as STL/OBJ/NIfTI. It targets orthodontic/dental and airway researchers and clinicians using Slicer.",
+ "summary": "The extension is a thin, honest wrapper around the NNUNet extension: it downloads the author's own model weights from their GitHub releases, calls NNUNet's InstallLogic/SegmentationLogic, and adds a segment editor plus export. No telemetry, no data upload, no obfuscation, Apache-2.0 LICENSE present, catalog entry consistent (EXTENSION_DEPENDS \"NNUNet\" matches build_dependencies). Main problems: an undeclared import-time dependency on PyGithub that can prevent the module from loading at all; a broken consent check (`if qt.QMessageBox.question(...)`) that downloads and `rmtree`s the weights folder even when the user clicks No; unvalidated zip extraction; no stated license/terms for the model weights; and no clinical-use disclaimer. Needs fixes before offering to users.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "No telemetry, no upload of images or identifiers, no credentials, no eval/exec/pickle; network use is limited to the GitHub API and the author's own release asset (PythonDependencyChecker.py:47-51, 90-100). Weaknesses are unvalidated archive extraction (PythonDependencyChecker.py:115-117) and a recursive delete of the weights folder before download (lines 86-88)."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "No pip installs at import; torch/nnunetv2 are installed through the NNUNet extension's InstallLogic.setupPythonRequirements() (SegmentationWidget.py:563-567), which is the sanctioned path, and EXTENSION_DEPENDS is NNUNet. However that multi-GB install is triggered by the Apply button with no confirmation dialog in this extension's own code (SegmentationWidget.py:210)."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "CMakeLists.txt lists every Python file and resource the module imports, and the catalog entry matches the CMake (EXTENSION_DEPENDS \"NNUNet\" vs build_dependencies [\"NNUNet\"]). But PythonDependencyChecker.py:8 imports PyGithub at module import time, pulled in by UpperAirwaySegmentatorLib/__init__.py:2 and UpperAirwaySegmentator.py:4, and PyGithub is not declared anywhere (no requirements file, no pip_install); if it is absent from Slicer's Python the module fails to load entirely."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "LICENSE.txt is Apache-2.0 and the README credits the Apache-2.0 DentalSegmentator framework (README.md:139), so the code may be distributed. The essential model weights are downloaded from the author's releases (README.md:95-112) with no license or terms stated for the weights or for the clinical training data they derive from."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read SegmentationWidget.py, PythonDependencyChecker.py, Utils.py, Signal.py and the tests. The consent check for weight updates is always true (PythonDependencyChecker.py:36-41), onSceneChanged calls self.logic.stopSegmentation() even when logic is None (SegmentationWidget.py:163-165, 190-192), the widget changes global layout/3D view settings on construction without restoring them (SegmentationWidget.py:172-179), and the scene observer is removed in __del__ with a super().__del__() call that does not exist (lines 159-161)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents installation, usage, troubleshooting and manual weight install, cites the peer-reviewed paper and nnU-Net, and there are unit tests plus a slow integration test. Missing: any clinical/research-use disclaimer (the README instead offers 'For clinical support', README.md:146-150) and reported validation metrics for the model."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "PyGithub imported at module import time but never declared as a dependency",
+   "file": "UpperAirwaySegmentator/UpperAirwaySegmentatorLib/PythonDependencyChecker.py",
+   "line_start": 8,
+   "line_end": 8,
+   "evidence": "from github import Github, GithubException",
+   "explanation": "UpperAirwaySegmentatorLib/__init__.py:2 imports PythonDependencyChecker, and UpperAirwaySegmentator.py:4 does `from UpperAirwaySegmentatorLib import SegmentationWidget`, so PyGithub is imported as soon as the module is loaded. Nothing in CMakeLists.txt, the catalog entry or a requirements file declares PyGithub, and it is not part of Slicer's standard Python distribution as far as I could verify. If it is missing, the import raises ImportError and the whole module fails to load (not just the weight download). I could not verify whether the NNUNet extension happens to install PyGithub, so this is reported as major rather than blocking.",
+   "suggestion": "Move `from github import ...` inside getLatestReleaseUrl()/areWeightsOutdated() and report a clear error if it is unavailable, or replace the GitHub API call with a plain HTTPS request to the releases/latest endpoint (requests is already used).",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Weight-update confirmation is always accepted, so declining still deletes and re-downloads weights",
+   "file": "UpperAirwaySegmentator/UpperAirwaySegmentatorLib/PythonDependencyChecker.py",
+   "line_start": 35,
+   "line_end": 41,
+   "evidence": "            if qt.QMessageBox.question(\n                    None,\n                    \"New weights are available\",\n                    \"New weights are available. Would you like to download them?\"\n            ):",
+   "explanation": "QMessageBox.question returns a StandardButton value (Yes = 16384, No = 65536); both are truthy, so the branch is taken regardless of the answer. downloadWeights() then runs shutil.rmtree(self.destWeightFolder) (lines 86-88) and re-downloads, so a user who explicitly clicks No loses the weights they already had and gets a large download anyway. The same file's sibling code in SegmentationWidget.py:246 shows the correct pattern (`if ret == qt.QMessageBox.No`).",
+   "suggestion": "Compare against qt.QMessageBox.Yes explicitly, and do not delete the existing weights folder until the new archive has been downloaded and validated.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Downloaded weight archive is extracted without path validation or integrity check",
+   "file": "UpperAirwaySegmentator/UpperAirwaySegmentatorLib/PythonDependencyChecker.py",
+   "line_start": 115,
+   "line_end": 117,
+   "evidence": "        with zipfile.ZipFile(zipPath, \"r\") as f:\n            f.extractall(self.destWeightFolder)",
+   "explanation": "extractall() honours '../' and absolute member names, so a tampered or replaced release asset would write outside Resources/ML (e.g. over other files in the extension install directory). There is also no checksum/signature check on the downloaded zip (lines 90-100), and the URL is taken from `assets[0]` of the latest release (line 51), i.e. whatever asset happens to be first. Risk is limited because the source is the author's own HTTPS release, but the extraction is unguarded.",
+   "suggestion": "Validate each member path against the destination folder before extracting, and pin/verify a checksum for the expected weights archive.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Recursive delete of the weights folder inside the installed extension directory",
+   "file": "UpperAirwaySegmentator/UpperAirwaySegmentatorLib/PythonDependencyChecker.py",
+   "line_start": 86,
+   "line_end": 88,
+   "evidence": "        if self.destWeightFolder.exists():\n            shutil.rmtree(self.destWeightFolder)\n        self.destWeightFolder.mkdir(parents=True, exist_ok=True)",
+   "explanation": "destWeightFolder resolves to <extension>/UpperAirwaySegmentatorLib/../Resources/ML (SegmentationWidget.py:584-587). Anything a user placed there following the manual-install instructions in README.md:100-112 is deleted before the new download, and if the download then fails the user is left with nothing. The path is contained in the extension folder, so this is not user-data destruction, but it is an unconditional recursive delete of a directory the user may have curated.",
+   "suggestion": "Download to a temporary directory, verify, then swap; never rmtree the existing weights before a successful download.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Scene-close observer calls into a possibly None logic object",
+   "file": "UpperAirwaySegmentator/UpperAirwaySegmentatorLib/SegmentationWidget.py",
+   "line_start": 163,
+   "line_end": 165,
+   "evidence": "    def onSceneChanged(self, *_, doStopInference=True):\n        if doStopInference:\n            self.onStopClicked()",
+   "explanation": "onStopClicked() unconditionally calls self.logic.stopSegmentation() and self.logic.waitForSegmentationFinished() (lines 190-192). self.logic is None whenever the NNUNet extension is not installed (lines 569-571, and _connectSegmentationLogic returns early at 577-578). Closing the scene in that state raises AttributeError inside an MRML observer callback, and the same path is exercised by the module's own test_handles_cleared_scene.",
+   "suggestion": "Guard onStopClicked with `if self.logic is None: return` (or check before calling stopSegmentation).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Module construction changes global Slicer layout and 3D view settings without restoring them",
+   "file": "UpperAirwaySegmentator/UpperAirwaySegmentatorLib/SegmentationWidget.py",
+   "line_start": 172,
+   "line_end": 179,
+   "evidence": "    @staticmethod\n    def _initSlicerDisplay():\n        \"\"\"\n        Initialize 3D Slicer's display with white background and no 3D Cube / labels.\n        \"\"\"\n        set3DViewBackgroundColors([1, 1, 1], [1, 1, 1])\n        setConventionalWideScreenView()\n        setBoxAndTextVisibilityOnThreeDViews(False)",
+   "explanation": "This runs from __init__ (line 156) and again on every scene close, so merely opening the module switches the application layout to ConventionalWidescreen, forces a white 3D background and hides the orientation cube/axis labels for all view nodes (Utils.py:43-61). The user's previous layout and view settings are never saved or restored, which surprises users who open the module and then switch to another module.",
+   "suggestion": "Apply these display changes only when the user starts a segmentation, and restore the previous layout/view node settings in cleanup().",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Observer removed in __del__ with a non-existent super().__del__()",
+   "file": "UpperAirwaySegmentator/UpperAirwaySegmentatorLib/SegmentationWidget.py",
+   "line_start": 159,
+   "line_end": 161,
+   "evidence": "    def __del__(self):\n        slicer.mrmlScene.RemoveObserver(self.sceneCloseObserver)\n        super().__del__()",
+   "explanation": "qt.QWidget/object does not define __del__, so super().__del__() raises AttributeError inside the finalizer. More importantly, relying on __del__ for observer removal is unreliable: if the widget is destroyed without the finalizer running promptly, the EndCloseEvent observer stays registered and can invoke onSceneChanged on a deleted C++ object when the scene is closed, which risks a crash. Slicer convention is to remove observers in the module widget's cleanup().",
+   "suggestion": "Remove the observer in an explicit cleanup()/closeEvent path (and keep a defensive check in __del__), and drop the super().__del__() call.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Latest-release asset selection is fragile and unauthenticated",
+   "file": "UpperAirwaySegmentator/UpperAirwaySegmentatorLib/PythonDependencyChecker.py",
+   "line_start": 47,
+   "line_end": 51,
+   "evidence": "    def getLatestReleaseUrl(self):\n        g = Github()\n        repo = g.get_repo(self.repo_path)\n        assets = [asset for release in repo.get_releases() for asset in release.get_assets()]\n        return assets[0].browser_download_url",
+   "explanation": "The download URL is whatever asset happens to be first across all releases, not a named weights archive; adding any other asset to a release (or a release with no assets) makes the module download the wrong file or raise IndexError. Unauthenticated GitHub API calls are also rate-limited per IP, so areWeightsOutdated() can fail for users behind a shared NAT (only GithubException is caught, not rate-limit/connection errors).",
+   "suggestion": "Select the asset by an expected file name/pattern and handle network/rate-limit errors explicitly.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "No license or terms stated for the model weights that the extension downloads",
+   "file": "README.md",
+   "line_start": 95,
+   "line_end": 98,
+   "evidence": "### Failed to Download / Find Weights\n\nIf the weights are not correctly installed, you can install them manually from here:  \n➡️ [Download weights from the latest release](https://github.com/capenaka/SlicerUpperAirwaySegmentator/releases/latest)",
+   "explanation": "The extension code is Apache-2.0 (LICENSE.txt), but the nnU-Net weights are the essential functional payload and are fetched from the repository's releases with no stated license, no statement about redistribution permission, and no note on the terms of the clinical training data (University of Alberta, a private Chilean centre, French surgical departments, per README.md:8). Users and the index therefore have no documented permission for the weights they are told to download.",
+   "suggestion": "State the license/terms of the released weights (and any data-use restrictions) in the README and in the release notes, or add a LICENSE/NOTICE alongside the weights archive.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No clinical/research-use disclaimer for an AI segmentation tool",
+   "file": "README.md",
+   "line_start": 146,
+   "line_end": 150,
+   "evidence": "## Contact\n\nFor clinical support:\nDr. Silvia Gianoni-Capenakas - capenaka@ualberta.ca,",
+   "explanation": "The README advertises 'clinical support' contacts but nowhere states that the automatic segmentation is not a validated diagnostic device and must be reviewed by a qualified clinician. Users may treat the output as diagnostic, which is a foreseeable misuse for a tier-1 research model.",
+   "suggestion": "Add an explicit disclaimer that results are for research/decision-support and require expert review, and report the model's validation metrics.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Large dependency installation triggered by Apply without an explicit confirmation in this extension",
+   "file": "UpperAirwaySegmentator/UpperAirwaySegmentatorLib/SegmentationWidget.py",
+   "line_start": 563,
+   "line_end": 567,
+   "evidence": "    def _installNNUNetIfNeeded(self) -> bool:\n        from SlicerNNUNetLib import InstallLogic\n        logic = InstallLogic()\n        logic.progressInfo.connect(self.onProgressInfo)\n        return logic.setupPythonRequirements()",
+   "explanation": "Clicking Apply runs NNUNet's setupPythonRequirements(), which installs nnunetv2 and PyTorch (multi-GB) into Slicer's shared Python. Using the NNUNet extension's install logic is the sanctioned route, but this extension adds no confirmation dialog of its own before the install, so a user who just wanted to try the module can trigger a large environment change. Whether NNUNet's InstallLogic prompts internally could not be verified.",
+   "suggestion": "Show an explicit confirmation (size, packages, that Slicer's Python environment will be modified) before calling setupPythonRequirements().",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Model weights are stored inside the installed extension directory",
+   "file": "UpperAirwaySegmentator/UpperAirwaySegmentatorLib/SegmentationWidget.py",
+   "line_start": 584,
+   "line_end": 587,
+   "evidence": "    @classmethod\n    def nnUnetFolder(cls):\n        fileDir = Path(__file__).parent\n        return fileDir.joinpath(\"..\", \"Resources\", \"ML\").resolve()",
+   "explanation": "Weights are written into the extension installation folder rather than a user data or temporary directory. That folder is replaced on extension update/reinstall (forcing a re-download), may be read-only in system-wide installs, and the README itself documents Windows 260-character path failures caused by this location (README.md:114-121). The unit tests also write download_info.json into this installed folder (Testing/Utils.py:15-26).",
+   "suggestion": "Store weights under slicer.util.getUserResourceDirectory() or a user-selectable folder, and let the tests use a temporary directory.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Self-test requires an undeclared extension and silently skips otherwise",
+   "file": "UpperAirwaySegmentator/UpperAirwaySegmentator.py",
+   "line_start": 47,
+   "line_end": 52,
+   "evidence": "        try:\n            from SlicerPythonTestRunnerLib import RunnerLogic, RunnerWidget, RunSettings, isRunningInTestMode\n            from pathlib import Path\n        except ImportError:\n            slicer.util.warningDisplay(\"Please install SlicerPythonTestRunner extension to run the self tests.\")\n            return",
+   "explanation": "The module's own test entry point depends on the SlicerPythonTestRunner extension, which is not in EXTENSION_DEPENDS/build_dependencies, so the built-in self test cannot run in a standard Slicer install and reports success by returning early. This is a test-infrastructure gap, not a functional defect.",
+   "suggestion": "Declare the test dependency or make the test fall back to plain unittest discovery.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Large binary assets committed to the repository",
+   "file": "",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "",
+   "explanation": "Screenshots/upperairwaysegmentator_3dmodel.gif (~20 MB), Screenshots/dentalsegmentator_3dmodel.gif (~6 MB) and Screenshots/upperairwaysegmentator_run.gif (~4 MB) are committed, and the installed resources include UpperAirwaySegmentator_full_icon.png (~1.2 MB) and UpperAirwaySegmentator.png (~0.8 MB). This bloats the repository and the extension package; the screenshots are not needed at runtime.",
+   "suggestion": "Host the animated screenshots externally (or in a docs branch) and downscale the installed icons.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not verify whether PyGithub is present in Slicer's bundled Python or installed by the NNUNet extension, so the actual impact of the import-time `from github import ...` is unconfirmed.",
+  "Could not inspect the NNUNet extension's InstallLogic/SegmentationLogic (external repository) to see whether setupPythonRequirements() prompts the user, installs torch via PyTorchUtils, or pins/downgrades Slicer-bundled packages.",
+  "Could not inspect the model weights archive (Dataset014_Airways_155CBCT_fold_all.zip) or its release page: contents, license, checksum and whether it contains a fold_0 model matching `Parameter(folds=\"0\", ...)` are unknown.",
+  "Could not run the module or its tests, so runtime behaviour (widget construction, observer cleanup, export) is assessed by reading only.",
+  "Binary files (screenshots, icons, Testing/Data/UpperAirway_Segmentation.nii.gz) were not inspected for embedded content.",
+  "No CI/build logs were available to confirm the extension builds and loads on the three platforms."
+ ],
+ "questions_for_author": [
+  "The weights archive is named `Dataset014_Airways_155CBCT_fold_all.zip` but the code requests `Parameter(folds=\"0\", modelPath=...)` (SegmentationWidget.py:251). Does the archive actually contain a `fold_0` model, or should folds be `\"all\"`?",
+  "What license and data-use terms apply to the released model weights, and may they be redistributed/downloaded by Slicer users?",
+  "Is PyGithub guaranteed to be available in the target Slicer environment, or should the GitHub API call be replaced with a plain HTTPS request?",
+  "Should the module really change the application layout, 3D background and orientation-cube visibility as soon as it is opened?"
+ ]
+}

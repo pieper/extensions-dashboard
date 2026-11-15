@@ -1,0 +1,125 @@
+{
+ "purpose": "A 3D Slicer extension for registering preformed orbital fracture plates to orbit models and computing plate-fit metrics (PlateRegistration), plus a mirror-based orbit reconstruction tool (MirrorOrbitRecon) that depends on SlicerMorph. It is aimed at maxillofacial researchers and clinicians doing virtual planning.",
+ "summary": "Reviewed the catalog entry, CMake files, README/tutorials, LICENSE, and the sample-data, dependency-install, and file-write code in both Python modules. The main concern is that the sample-data custom downloader executes a setup.py from an unverified downloaded zip (checksums=None), in both modules. Runtime pip installs of pandas/matplotlib happen on widget setup without a confirmation prompt. Several placeholder texts remain. The MIT license and the SlicerMorph dependency declaration are consistent. I did not read most of the 3300-line PlateRegistration.py, so the review is partial.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Both modules' custom sample-data downloaders import and execute a setup.py from the downloaded archive with no checksum, which is download-and-run code from a remote, author-controlled location. No data exfiltration, obfuscation, or credential handling was found in the code I searched."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "PlateRegistration.setup() calls slicer.util.pip_install(['pandas']) and (['matplotlib']) at widget setup when imports fail, without asking the user (PlateRegistration.py lines 202-224). No torch or Qt/VTK-bundling packages were found. Packages are unpinned."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt EXTENSION_DEPENDS 'SlicerMorph' matches build_dependencies in the catalog entry, and each module's Python and resource files are listed in CMake. Stray tutorial stub files (Tutorials/02_Edit_existing_plate_registration, Tutorials/Generate_Plate_Fit_Metrics) appear to be leftovers. Build was not run."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE.txt is MIT with a copyright line. The sample-data zip hosted on a separate GitHub repo has no visible license, which I could not verify."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "MirrorOrbitRecon.py line 102 uses importlib without importing it, so the sample-data setup path would raise NameError unless the wildcard import supplies it. Sample-data checksums are None and URIs point to a moving branch. Errors in widget setup are printed rather than surfaced."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README and quick tutorial are thorough, with sample data and video links. Module metadata is still template text: helpText links to github.com/organization/projectname and acknowledgementText says 'Will update soon' (PlateRegistration.py lines 53 and 57). Tests are commented out in Testing/Python/CMakeLists.txt. The modules are tier 3."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Sample-data downloader executes a setup.py from an unverified downloaded archive",
+   "file": "PlateRegistration/PlateRegistration.py",
+   "line_start": 112,
+   "line_end": 117,
+   "evidence": "filepath=destFolderPath+\"/setup.py\"\n  if (os.path.exists(filepath)):\n    spec = importlib.util.spec_from_file_location(\"setup\",filepath)\n    setup = importlib.util.module_from_spec(spec)\n    spec.loader.exec_module(setup)",
+   "explanation": "After the user picks a folder, downloadSampleDataInFolder downloads the sample zip with checksum None and then, if setup.py exists in the destination folder, loads it with spec.loader.exec_module and calls setup.setup(). The zip comes from a moving branch (refs/heads/main) of a third-party GitHub repo with no integrity check, so anyone who controls that repo or the branch gets arbitrary code execution in the user's Slicer process. The same pattern appears in MirrorOrbitRecon. This is a download-and-run path that the extension's advertised function (plate registration) does not need.",
+   "suggestion": "Remove the setup.py execution entirely, or require a pinned checksum for the sample archive and explicit user confirmation before running any code from it. Do the same in MirrorOrbitRecon/MirrorOrbitRecon.py lines 100-105.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Sample-data zips are fetched without checksums from a moving branch",
+   "file": "PlateRegistration/PlateRegistration.py",
+   "line_start": 82,
+   "line_end": 93,
+   "evidence": "uris=\"https://github.com/chz31/orbitSurgeySim_sampleData/raw/refs/heads/main/plateRegistrationSampleData.zip\",\n        loadFiles=False,\n        fileNames=\"PlateRegistrationSampleData.zip\",\n        loadFileType='ZipFile',\n        checksums=None,",
+   "explanation": "Both registerSampleData functions set checksums=None and point to refs/heads/main URLs. The content can change without notice, so the sample data the user gets is not reproducible or verified, and it feeds the setup.py execution above.",
+   "suggestion": "Pin the download to a release tag or commit and publish a SHA-256 checksum that Slicer's downloadFile can verify.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Unconfirmed runtime pip installs of pandas and matplotlib on module setup",
+   "file": "PlateRegistration/PlateRegistration.py",
+   "line_start": 202,
+   "line_end": 224,
+   "evidence": "needInstall = False\n        try:\n            import pandas\n            import matplotlib\n        except ModuleNotFoundError:\n            needInstall = True",
+   "explanation": "When the PlateRegistration widget is first created and pandas or matplotlib cannot be imported, it installs them with pip without asking the user. This happens in the user's shared Slicer environment, and the installs are unpinned. Matplotlib is also installed again on demand inside plotScalarHistogram. The effect is limited to Slicer installs where the packages are missing, but the user is not informed before modifying the environment.",
+   "suggestion": "Ask for user confirmation before pip_install, state the packages and their size, and avoid unpinned installs in the shared environment. Check whether these packages are already bundled with the Slicer version targeted (5.10).",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "importlib used without import in MirrorOrbitRecon sample-data setup",
+   "file": "MirrorOrbitRecon/MirrorOrbitRecon.py",
+   "line_start": 100,
+   "line_end": 105,
+   "evidence": "filepath=destFolderPath+\"/setup.py\"\n      if (os.path.exists(filepath)):\n        spec = importlib.util.spec_from_file_location(\"setup\",filepath)",
+   "explanation": "downloadSampleDataInFolder uses importlib.util, but MirrorOrbitRecon.py does not import importlib (its imports are logging, os, typing, vtk, numpy, copy, math, qt, slicer, and the ScriptedLoadableModule wildcard). This raises NameError in the setup.py path unless a wildcard import happens to provide it. The same missing import exists in PlateRegistration.py.",
+   "suggestion": "Remove the setup.py mechanism (see the safety finding) or add an explicit import importlib.util.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Template placeholder metadata left in shipped modules",
+   "file": "PlateRegistration/PlateRegistration.py",
+   "line_start": 51,
+   "line_end": 58,
+   "evidence": "See more information in <a href=\"https://github.com/organization/projectname#PlateRegistration\">module documentation</a>.\n\"\"\")\n        # TODO: replace with organization, grant and thanks\n        self.parent.acknowledgementText = _(\"\"\"\nWill update soon",
+   "explanation": "The help text links to a placeholder URL and the acknowledgement says 'Will update soon'. Users reading the module's help in Slicer will see a dead link and incomplete attribution. This does not affect how the extension runs.",
+   "suggestion": "Point helpText to the README or tutorials and write the acknowledgement text (the README already contains the grant and acknowledgements).",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Test scaffolding is commented out",
+   "file": "PlateRegistration/Testing/Python/CMakeLists.txt",
+   "line_start": 2,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The per-module Testing/Python CMake entries are commented out, and the test classes are templates. There is no automated regression coverage for registration or metrics. This is non-blocking for the admission review.",
+   "suggestion": "Add a small test that loads the sample data and checks the registration outputs.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Stray tutorial stub files in the repository",
+   "file": "Tutorials/02_Edit_existing_plate_registration",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "",
+   "explanation": "Files named '02_Edit_existing_plate_registration' and 'Generate_Plate_Fit_Metrics' (about 100 bytes each) and duplicate images in Tutorials/ look like leftovers. They clutter the repo and may confuse readers.",
+   "suggestion": "Remove the stubs or turn them into proper tutorial pages.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Most of PlateRegistration/PlateRegistration.py (about 3,300 lines) was not read in full. I searched it for dangerous patterns (exec, eval, pickle, subprocess, network calls, and file writes) and read the setup, sample-data, and plotting sections, but not the registration, file I/O, or metrics logic",
+  "Upstream SlicerMorph ALPACA/cpdalp behavior and the MirrorOrbitRecon logic were not inspected beyond the calls shown.",
+  "The .ui files, icons, and the Testing contents were not read.",
+  "The remote source repo at revision 144ec0d was not fetched. I could not verify that the commit matches the catalog's 'main' reference, and I could not confirm the sample-data zip's contents or license.",
+  "The build and the Slicer load were not run. Import-time behavior and the SlicerMorph dependency were inferred from code."
+ ],
+ "questions_for_author": []
+}

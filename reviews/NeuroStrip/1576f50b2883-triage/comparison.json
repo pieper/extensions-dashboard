@@ -1,0 +1,669 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Missing NeuroStrip/CMakeLists.txt: extension cannot be configured or installed",
+   "category": "packaging",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "blocking"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 22,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "Missing NeuroStrip/CMakeLists.txt: extension cannot be configured or installed",
+     "file": "CMakeLists.txt",
+     "line_start": 22,
+     "line_end": 22,
+     "evidence": "add_subdirectory(NeuroStrip)",
+     "explanation": "The top-level CMakeLists.txt adds the NeuroStrip subdirectory, but the repository has no NeuroStrip/CMakeLists.txt (directory listing shows only NeuroStrip.py, Resources/Icons/NeuroStrip.png, Resources/Icons/NeuroStrip1.png, Resources/UI/NeuroStrip.ui). CMake configuration of the catalog entry therefore fails, and even if it did not, nothing would install NeuroStrip.py, the .ui file or the icons, so the module would not load from the Extension Manager build.",
+     "suggestion": "Add NeuroStrip/CMakeLists.txt using slicerMacroBuildScriptedModule(NAME NeuroStrip) with the standard Resources install rules (UI, Icons) and verify the extension builds from the catalog entry.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 22
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "blocking",
+     "title": "Root CMake calls add_subdirectory(NeuroStrip) but NeuroStrip/CMakeLists.txt does not exist",
+     "file": "CMakeLists.txt",
+     "line_start": 22,
+     "line_end": 22,
+     "evidence": "add_subdirectory(NeuroStrip)",
+     "explanation": "The catalog entry uses build_subdirectory '.', so the build runs the root CMakeLists.txt. Line 22 calls add_subdirectory(NeuroStrip), and CMake fails if that folder has no CMakeLists.txt. The NeuroStrip/ folder lists only NeuroStrip.py and Resources/, and reading NeuroStrip/CMakeLists.txt returned 'No such file'. The extension therefore cannot be configured, built, or packaged, and the module is not installed. Other Slicer extensions normally put a CMakeLists.txt in the module folder that calls slicer_add_python_scripted_module-style install rules (or the equivalent for this extension) to install NeuroStrip.py and Resources.",
+     "suggestion": "Add NeuroStrip/CMakeLists.txt that installs NeuroStrip.py and the Resources/ folder (UI, Icons) into the extension's lib/Slicer-X/qt-scripted-modules directories, following the standard ScriptedLoadableModule template, then confirm the extension builds in the Slicer extension CI.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 22
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Direction matrix copy is wrong: list passed to GetIJKToRASDirections and identity hardcoded",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line": 339,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Direction matrix copy is wrong: list passed to GetIJKToRASDirections and identity hardcoded",
+     "file": "NeuroStrip/NeuroStrip.py",
+     "line_start": 339,
+     "line_end": 344,
+     "evidence": "outputMask.SetAndObserveImageData(tempMaskNode.GetImageData())\n                    outputMask.SetOrigin(tempMaskNode.GetOrigin())\n                    outputMask.SetSpacing(tempMaskNode.GetSpacing())\n                    directionMatrix = np.eye(3, 3).tolist()\n                    tempMaskNode.GetIJKToRASDirections(directionMatrix)",
+     "explanation": "vtkMRMLVolumeNode.GetIJKToRASDirections expects a vtkMatrix4x4 (or a wrapped C array), not a Python list, so this call is likely to raise a TypeError after the (expensive) prediction has already run, making Apply fail with 'Failed to compute results.' Even if it did not raise, the direction is overwritten with identity rather than the input volume's orientation, so results for oblique or non-axially-aligned MRI would be misoriented in the scene. The same pattern is repeated at lines 357-359 for the masked volume.",
+     "suggestion": "Use `outputMask.SetIJKToRASMatrix(tempMaskNode.GetIJKToRASMatrix())` (or copy the input volume's IJKToRAS matrix) instead of building an identity list, and add a test with a non-identity direction.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuroStrip/NeuroStrip.py",
+      "line": 339
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Unpinned pip install of neurostrip[cpu] into Slicer's shared Python environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line": 31,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Unpinned pip install of neurostrip[cpu] into Slicer's shared Python environment",
+     "file": "NeuroStrip/NeuroStrip.py",
+     "line_start": 31,
+     "line_end": 37,
+     "evidence": "def installPythonDependencies() -> None:\n    msg = \"Extra python packages (neurostrip and onnxruntime) are required.\"\n    msg += \"\\nClick OK to install them for NeuroStrip.\"\n    if not slicer.util.confirmOkCancelDisplay(msg):\n        logging.info('Installation of neurostrip aborted by user')\n        return\n    slicer.util.pip_install(\"neurostrip[cpu]\")",
+     "explanation": "The module installs a third-party package with no version constraint into the Slicer Python environment shared by all extensions. The transitive dependency set of `neurostrip[cpu]` (onnxruntime, and possibly torch or pinned numpy) could not be inspected from this repository, so it cannot be confirmed that it does not pull PyTorch from PyPI, does not pin/downgrade numpy or other Slicer-bundled packages, or does not bundle its own Qt/VTK. Any such dependency would affect users who never open this module, and an unpinned install means the code that runs changes silently over time.",
+     "suggestion": "Pin a reviewed version range, verify the dependency tree of neurostrip[cpu] (no torch, no pins of Slicer-bundled packages, headless-only Qt/VTK), and document the reviewed dependency set; consider shipping the model via a Slicer data/extension mechanism instead of a pip package.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "NeuroStrip/NeuroStrip.py",
+      "line": 31
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Unpinned pip install of neurostrip[cpu] into Slicer's Python environment, repeated prompts if declined",
+     "file": "NeuroStrip/NeuroStrip.py",
+     "line_start": 37,
+     "line_end": 37,
+     "evidence": "slicer.util.pip_install(\"neurostrip[cpu]\")",
+     "explanation": "On first enter of the module, the code installs neurostrip[cpu] into Slicer's shared Python environment, which can bring in onnxruntime and other packages that may conflict with Slicer-bundled ones. The install is gated by a confirm dialog, which is good. However, if the user cancels, _dependenciesInstalled stays False, so the prompt reappears on every module enter. The dependency tree was not verified.",
+     "suggestion": "Remember the user's decline for the session, state the approximate download size in the prompt, and check that the neurostrip dependency set does not pin or replace packages Slicer bundles.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "NeuroStrip/NeuroStrip.py",
+      "line": 37
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Brittle test assertion on exact intensity maximum",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line": 411,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Brittle test assertion on exact intensity maximum",
+     "file": "NeuroStrip/NeuroStrip.py",
+     "line_start": 411,
+     "line_end": 413,
+     "evidence": "outputScalarRange = outputMaskedVolume.GetImageData().GetScalarRange()\n        self.assertEqual(outputScalarRange[0], 0)\n        self.assertEqual(outputScalarRange[1], 605)  # Maximum value in mask",
+     "explanation": "The test asserts an exact maximum intensity of 605, which depends on the model version and preprocessing; any model update or minor numerical difference will fail the test even when the module works. It also requires the pip dependency to be installed, so the test cannot run in a clean build environment.",
+     "suggestion": "Assert structural properties (non-empty mask, mask values in {0,1}, masked volume zero outside the mask) instead of exact intensity values.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuroStrip/NeuroStrip.py",
+      "line": 411
+     }
+    }
+   ]
+  },
+  {
+   "title": "CNN inference runs synchronously on the GUI thread without progress reporting",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line": 263,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "CNN inference runs synchronously on the GUI thread without progress reporting",
+     "file": "NeuroStrip/NeuroStrip.py",
+     "line_start": 261,
+     "line_end": 271,
+     "evidence": "with slicer.util.tryWithErrorDisplay(\n            _(\"Failed to compute results.\"), waitCursor=True\n        ):\n            # Compute output\n            self.logic.process(",
+     "explanation": "The whole prediction (potentially minutes on CPU) runs inside the button handler with only a wait cursor; Slicer's UI is frozen and the user gets no progress or cancel option, which looks like a hang for large volumes. Errors are at least surfaced via tryWithErrorDisplay, so this is a usability/robustness issue rather than a safety one.",
+     "suggestion": "Run the prediction in a background thread/CLI node with progress reporting, or at minimum show a modal progress dialog and process events.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuroStrip/NeuroStrip.py",
+      "line": 263
+     }
+    }
+   ]
+  },
+  {
+   "title": "Inference runs synchronously on the GUI thread with no progress feedback",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line": 323,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Inference runs synchronously on the GUI thread with no progress feedback",
+     "file": "NeuroStrip/NeuroStrip.py",
+     "line_start": 323,
+     "line_end": 328,
+     "evidence": "neurostrip.predict(\n                      image_path=input_path,",
+     "explanation": "process() calls neurostrip.predict in the main thread, so the Slicer UI freezes for the whole CNN run on a full MRI volume. The README acknowledges that processing takes time. A user may think Slicer has hung, and the window may be marked unresponsive.",
+     "suggestion": "Show a progress dialog or run inference in a worker thread, with an explicit device choice (the CPU is hardcoded at line 327).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuroStrip/NeuroStrip.py",
+      "line": 323
+     }
+    }
+   ]
+  },
+  {
+   "title": "Install prompt repeats on every module entry if the user declines",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line": 182,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Install prompt repeats on every module entry if the user declines",
+     "file": "NeuroStrip/NeuroStrip.py",
+     "line_start": 182,
+     "line_end": 186,
+     "evidence": "# Make sure dependencies are installed\n        if not self._dependenciesInstalled:\n            self._dependenciesInstalled = checkPythonDependencies()\n            if not self._dependenciesInstalled:\n                installPythonDependencies()",
+     "explanation": "If the user cancels the installation dialog, `_dependenciesInstalled` stays False and the confirmation dialog reappears every time the module is entered; conversely, after a successful install the flag is not re-checked, so a failed install is only detected on the next Apply. Minor UX issue.",
+     "suggestion": "Remember the user's decline for the session and re-check availability before running the algorithm.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuroStrip/NeuroStrip.py",
+      "line": 182
+     }
+    }
+   ]
+  },
+  {
+   "title": "No clinical-use disclaimer or model provenance/validation information",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "README.md",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "No clinical-use disclaimer or model provenance/validation information",
+     "file": "README.md",
+     "line_start": 1,
+     "line_end": 13,
+     "evidence": "# NeuroStrip 3D Slicer Extension\n\nThis extension provides CNN-based skull stripping (brain masking) from MRI using the [NeuroStrip library](https://github.com/dyollb/neurostrip) directly within 3D Slicer.",
+     "explanation": "The README describes features and usage but gives no information about the training data, model version, reported accuracy, or a research-use-only disclaimer, which users of an AI-based segmentation tool need in order to judge whether results are trustworthy.",
+     "suggestion": "Document model provenance, validation results and add a research-use-only disclaimer.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 1
+     }
+    }
+   ]
+  },
+  {
+   "title": "No clinical-use disclaimer or model validation information",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line": 56,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "No clinical-use disclaimer or model validation information",
+     "file": "NeuroStrip/NeuroStrip.py",
+     "line_start": 54,
+     "line_end": 58,
+     "evidence": "It can generate brain masks and apply them to create masked brain images.",
+     "explanation": "The module produces brain masks used for medical image analysis, but the help text and README contain no statement that the output is unvalidated for clinical use and no information on the model's training or validation. The README points to external docs only.",
+     "suggestion": "Add a research-use disclaimer and a short note on model provenance and validation to the help text and README.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "NeuroStrip/NeuroStrip.py",
+      "line": 56
+     }
+    }
+   ]
+  },
+  {
+   "title": "Screenshot URL points to the sample-data thumbnail rather than a screenshot",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 12,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Screenshot URL points to the sample-data thumbnail rather than a screenshot",
+     "file": "CMakeLists.txt",
+     "line_start": 12,
+     "line_end": 12,
+     "evidence": "set(EXTENSION_SCREENSHOTURLS \"https://raw.githubusercontent.com/dyollb/SlicerNeuroStrip/main/NeuroStrip/Resources/Icons/NeuroStrip1.png\")",
+     "explanation": "NeuroStrip1.png is registered as the Sample Data thumbnail (NeuroStrip.py:90) and is not the Screenshot01.png committed at the repository root, so the catalog screenshot will show the thumbnail image. Cosmetic only.",
+     "suggestion": "Point EXTENSION_SCREENSHOTURLS at Screenshot01.png.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 12
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Missing NeuroStrip/CMakeLists.txt: extension cannot be configured or installed",
+   "category": "packaging",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "blocking"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 22,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "Missing NeuroStrip/CMakeLists.txt: extension cannot be configured or installed",
+     "file": "CMakeLists.txt",
+     "line_start": 22,
+     "line_end": 22,
+     "evidence": "add_subdirectory(NeuroStrip)",
+     "explanation": "The top-level CMakeLists.txt adds the NeuroStrip subdirectory, but the repository has no NeuroStrip/CMakeLists.txt (directory listing shows only NeuroStrip.py, Resources/Icons/NeuroStrip.png, Resources/Icons/NeuroStrip1.png, Resources/UI/NeuroStrip.ui). CMake configuration of the catalog entry therefore fails, and even if it did not, nothing would install NeuroStrip.py, the .ui file or the icons, so the module would not load from the Extension Manager build.",
+     "suggestion": "Add NeuroStrip/CMakeLists.txt using slicerMacroBuildScriptedModule(NAME NeuroStrip) with the standard Resources install rules (UI, Icons) and verify the extension builds from the catalog entry.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 22
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "blocking",
+     "title": "Root CMake calls add_subdirectory(NeuroStrip) but NeuroStrip/CMakeLists.txt does not exist",
+     "file": "CMakeLists.txt",
+     "line_start": 22,
+     "line_end": 22,
+     "evidence": "add_subdirectory(NeuroStrip)",
+     "explanation": "The catalog entry uses build_subdirectory '.', so the build runs the root CMakeLists.txt. Line 22 calls add_subdirectory(NeuroStrip), and CMake fails if that folder has no CMakeLists.txt. The NeuroStrip/ folder lists only NeuroStrip.py and Resources/, and reading NeuroStrip/CMakeLists.txt returned 'No such file'. The extension therefore cannot be configured, built, or packaged, and the module is not installed. Other Slicer extensions normally put a CMakeLists.txt in the module folder that calls slicer_add_python_scripted_module-style install rules (or the equivalent for this extension) to install NeuroStrip.py and Resources.",
+     "suggestion": "Add NeuroStrip/CMakeLists.txt that installs NeuroStrip.py and the Resources/ folder (UI, Icons) into the extension's lib/Slicer-X/qt-scripted-modules directories, following the standard ScriptedLoadableModule template, then confirm the extension builds in the Slicer extension CI.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 22
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Direction matrix copy is wrong: list passed to GetIJKToRASDirections and identity hardcoded",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line": 339,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Direction matrix copy is wrong: list passed to GetIJKToRASDirections and identity hardcoded",
+     "file": "NeuroStrip/NeuroStrip.py",
+     "line_start": 339,
+     "line_end": 344,
+     "evidence": "outputMask.SetAndObserveImageData(tempMaskNode.GetImageData())\n                    outputMask.SetOrigin(tempMaskNode.GetOrigin())\n                    outputMask.SetSpacing(tempMaskNode.GetSpacing())\n                    directionMatrix = np.eye(3, 3).tolist()\n                    tempMaskNode.GetIJKToRASDirections(directionMatrix)",
+     "explanation": "vtkMRMLVolumeNode.GetIJKToRASDirections expects a vtkMatrix4x4 (or a wrapped C array), not a Python list, so this call is likely to raise a TypeError after the (expensive) prediction has already run, making Apply fail with 'Failed to compute results.' Even if it did not raise, the direction is overwritten with identity rather than the input volume's orientation, so results for oblique or non-axially-aligned MRI would be misoriented in the scene. The same pattern is repeated at lines 357-359 for the masked volume.",
+     "suggestion": "Use `outputMask.SetIJKToRASMatrix(tempMaskNode.GetIJKToRASMatrix())` (or copy the input volume's IJKToRAS matrix) instead of building an identity list, and add a test with a non-identity direction.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuroStrip/NeuroStrip.py",
+      "line": 339
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Unpinned pip install of neurostrip[cpu] into Slicer's shared Python environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line": 31,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Unpinned pip install of neurostrip[cpu] into Slicer's shared Python environment",
+     "file": "NeuroStrip/NeuroStrip.py",
+     "line_start": 31,
+     "line_end": 37,
+     "evidence": "def installPythonDependencies() -> None:\n    msg = \"Extra python packages (neurostrip and onnxruntime) are required.\"\n    msg += \"\\nClick OK to install them for NeuroStrip.\"\n    if not slicer.util.confirmOkCancelDisplay(msg):\n        logging.info('Installation of neurostrip aborted by user')\n        return\n    slicer.util.pip_install(\"neurostrip[cpu]\")",
+     "explanation": "The module installs a third-party package with no version constraint into the Slicer Python environment shared by all extensions. The transitive dependency set of `neurostrip[cpu]` (onnxruntime, and possibly torch or pinned numpy) could not be inspected from this repository, so it cannot be confirmed that it does not pull PyTorch from PyPI, does not pin/downgrade numpy or other Slicer-bundled packages, or does not bundle its own Qt/VTK. Any such dependency would affect users who never open this module, and an unpinned install means the code that runs changes silently over time.",
+     "suggestion": "Pin a reviewed version range, verify the dependency tree of neurostrip[cpu] (no torch, no pins of Slicer-bundled packages, headless-only Qt/VTK), and document the reviewed dependency set; consider shipping the model via a Slicer data/extension mechanism instead of a pip package.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "NeuroStrip/NeuroStrip.py",
+      "line": 31
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Unpinned pip install of neurostrip[cpu] into Slicer's Python environment, repeated prompts if declined",
+     "file": "NeuroStrip/NeuroStrip.py",
+     "line_start": 37,
+     "line_end": 37,
+     "evidence": "slicer.util.pip_install(\"neurostrip[cpu]\")",
+     "explanation": "On first enter of the module, the code installs neurostrip[cpu] into Slicer's shared Python environment, which can bring in onnxruntime and other packages that may conflict with Slicer-bundled ones. The install is gated by a confirm dialog, which is good. However, if the user cancels, _dependenciesInstalled stays False, so the prompt reappears on every module enter. The dependency tree was not verified.",
+     "suggestion": "Remember the user's decline for the session, state the approximate download size in the prompt, and check that the neurostrip dependency set does not pin or replace packages Slicer bundles.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "NeuroStrip/NeuroStrip.py",
+      "line": 37
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "minor"
+   }
+  },
+  {
+   "title": "Rating of packaging",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "deepseek": "blocking",
+    "flash-lite": "ok",
+    "haiku": "blocking"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D6",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "minor"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "packaging": {
+   "deepseek": "blocking",
+   "flash-lite": "ok",
+   "haiku": "blocking"
+  },
+  "license": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 6,
+  "single": 8,
+  "unverified": 0,
+  "total": 10
+ }
+}

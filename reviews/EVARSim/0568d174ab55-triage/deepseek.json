@@ -1,0 +1,224 @@
+{
+ "purpose": "EVARSim is a 3D Slicer scripted module for simulating endovascular stent grafts (EVAR): it builds tube/stent geometry along a markup centerline curve or along polylines extracted from a VTK model, with per-stent radius, length, position, resolution and smoothing controls. It targets clinicians and researchers doing procedural planning/simulation, not diagnosis.",
+ "summary": "No network access, downloads, subprocesses, eval/exec, pickle or file writes: the module only manipulates MRML nodes, so the security and environment requirements are met (numpy is imported lazily and ships with Slicer; no pip installs, no sys.path or logging changes). Apache-2.0 LICENSE is present and the catalog entry (category Modeling, build_subdirectory \".\", EXTENSION_DEPENDS \"NA\" vs empty build_dependencies) is consistent. Main defects are quality issues: the registered in-module unittest calls logic.process() with the wrong signature and will fail, the sample CL_model.vtk is not installed by CMake although the README says it is included, a stale __pycache__ .pyc is committed, and the smoothing slider is ignored by process(). 🟢 Recommend merge per index policy; the listed items are non-blocking fixes.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Searched EVARSim.py for socket/urllib/requests/subprocess/os.system/eval/exec/pickle/open/shutil/pip_install and found none; the only URLs are Slicer documentation links in comments. The module only reads MRML nodes and writes polydata into user-selected model nodes (e.g. line 1491 outputModel.SetAndObservePolyData)."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Module-level imports are limited to logging, os, typing, vtk, slicer and slicer helpers (lines 1-17); numpy is imported inside functions (e.g. line 641, 707, 745). No pip installs, no sys.path or environment changes, no global logging configuration, no monkey-patching."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "EVARSim/CMakeLists.txt installs EVARSim.py plus Resources/Icons and Resources/UI, but not EVARSim/CL_model.vtk, which README line 122 says the extension includes; a stale EVARSim/__pycache__/EVARSim.cpython-39.pyc is committed; and the registered unittest (slicer_add_python_unittest at EVARSim/CMakeLists.txt line 27) calls process() with the wrong argument list and will fail."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is the full Apache License 2.0 text, permitting redistribution; no third-party code, model weights or downloads are bundled. README line 157 points to a non-existent 'License.txt' and the provenance/license of the bundled CL_model.vtk sample is not stated (minor documentation gaps)."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The ScriptedLoadableModule/parameter-node structure is conventional and observers are removed in exit()/cleanup(), but process() hardcodes smoothingFactor = 0.3 ignoring the GUI slider (line 1470), additional tubes are positioned along the already-reduced 20-point segment of tube 1 (line 1483), and several handlers swallow exceptions with print() (e.g. line 438)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents workflow, file format and algorithm, and a sample branched centerline is in the repo, but the sample is not installed with the extension, the self-test is broken, README parameter ranges and module category ('Examples', line 30) disagree with the UI/catalog, and there is no validation or clinical-use disclaimer beyond 'medical research and educational purposes'."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Registered unit test calls logic.process() with the wrong signature and will fail",
+   "file": "EVARSim/EVARSim.py",
+   "line_start": 1567,
+   "line_end": 1567,
+   "evidence": "logic.process(centerlineCurve, outputModel, radius, length, resolution)",
+   "explanation": "process() is defined as process(self, centerlineCurve, inputModel, outputModel, radius, length, position, numberOfTubes, resolution, showResult=True) (lines 1403-1412), so this call passes only 5 of 8 required positional arguments and raises TypeError. EVARSim/CMakeLists.txt line 27 registers this class as a ctest (slicer_add_python_unittest(SCRIPT ${MODULE_NAME}.py)), so the extension's test step fails and the core geometry code is effectively untested.",
+   "suggestion": "Update the test to the current signature, e.g. logic.process(centerlineCurve, None, outputModel, radius, length, 0.0, 1, resolution), and add a second case using a polyline model input.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Sample data CL_model.vtk is committed but not installed by CMake",
+   "file": "EVARSim/CMakeLists.txt",
+   "line_start": 9,
+   "line_end": 12,
+   "evidence": "  Resources/UI/${MODULE_NAME}.ui",
+   "explanation": "MODULE_PYTHON_RESOURCES lists only the icon and the .ui file, so EVARSim/CL_model.vtk (290 KB) is not copied into the installed extension. README line 122 states 'The extension includes `CL_model.vtk` - a sample branched centerline file of the aorta and the aortic bifurcation.', which is false for users who install from the extension manager; they have no sample data to try the module with.",
+   "suggestion": "Either install the file (add it to MODULE_PYTHON_RESOURCES / a data directory) or register it as Sample Data, or remove the claim from the README.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Stale compiled bytecode committed to the repository",
+   "file": "EVARSim/__pycache__/EVARSim.cpython-39.pyc",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "",
+   "explanation": "A 36 KB Python 3.9 bytecode cache of the module is checked in and .gitignore only lists '.DS_Store' and '.git'. It is not installed by CMake so it does not shadow the source, but it is a stale binary artifact that can drift from EVARSim.py and confuses review of what actually runs.",
+   "suggestion": "Remove EVARSim/__pycache__ from the repository and add '__pycache__/' and '*.pyc' to .gitignore.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Smoothing-factor slider has no effect on Apply",
+   "file": "EVARSim/EVARSim.py",
+   "line_start": 1470,
+   "line_end": 1472,
+   "evidence": "smoothingFactor = 0.3  # Default smoothing factor for the process method",
+   "explanation": "The GUI exposes a smoothingFactor slider (UI lines 331-350, parameter node line 86) and the live preview uses it, but onApplyButton() (lines 602-611) never passes it to process(), which hardcodes 0.3. A user who sets smoothing to 0 or 1 and presses Apply silently gets 0.3, so the applied result differs from the preview.",
+   "suggestion": "Add a smoothingFactor argument to process() and pass self.ui.smoothingFactorSliderWidget.value from onApplyButton().",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Additional tubes are placed along tube 1's reduced segment, not the full centerline",
+   "file": "EVARSim/EVARSim.py",
+   "line_start": 1483,
+   "line_end": 1483,
+   "evidence": "self._createAdditionalTubes(reducedPoints, radius, length, numberOfTubes, resolution)",
+   "explanation": "reducedPoints is the 4-point spline of the already positioned segment for tube 1 (lines 1475-1479). _createAdditionalTubes then distributes positions 0.2-0.8 along that short segment (line 1130), so tubes 2..N are stacked inside tube 1's span instead of being spread along the vessel; with the default length of 10 mm and a long centerline the extra stents overlap almost completely.",
+   "suggestion": "Pass the full (smoothed) curvePoints to _createAdditionalTubes and let each tube position itself along the whole centerline.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Errors swallowed with print() instead of being reported to the user",
+   "file": "EVARSim/EVARSim.py",
+   "line_start": 437,
+   "line_end": 438,
+   "evidence": "print(f\"Error updating selected tube: {e}\")",
+   "explanation": "_updateSelectedTube, _analyzeBranches, _createBranchLabels, _removeBranchLabels, _extractBranchCenterline, _smoothCenterline, _reduceCenterlinePoints and _applySplineSmoothing all catch Exception and only print to stdout. In a GUI session the user sees nothing when, for example, branch extraction fails, and the module appears to do nothing; the same pattern also hides real bugs from the test suite.",
+   "suggestion": "Report failures via slicer.util.errorDisplay or logging.warning, and let unexpected exceptions propagate to the tryWithErrorDisplay wrapper in onApplyButton.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Scene nodes are deleted by name, which can remove user-created nodes",
+   "file": "EVARSim/EVARSim.py",
+   "line_start": 1176,
+   "line_end": 1181,
+   "evidence": "slicer.mrmlScene.RemoveNode(existingNode)",
+   "explanation": "_clearExistingTubes removes any node named EVARSim_Tube_2..EVARSim_Tube_10 and _removeBranchLabels removes any node whose name starts with 'EVARSim_BranchLabel_' (line 592). If a user renamed their own model or fiducial to such a name, pressing Apply or changing the input model deletes it without confirmation.",
+   "suggestion": "Track the created nodes in the parameter node or a member list and remove only those instances.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Selecting an input model silently adds fiducial nodes to the scene",
+   "file": "EVARSim/EVARSim.py",
+   "line_start": 563,
+   "line_end": 568,
+   "evidence": "fiducialNode = slicer.mrmlScene.AddNewNodeByClass(\"vtkMRMLMarkupsFiducialNode\")",
+   "explanation": "_onInputModelChanged calls _analyzeBranches, which calls _createBranchLabels and inserts one markup fiducial per detected line segment into the user's scene. Merely choosing an input model therefore modifies the scene (and the saved .mrrl if the user saves), which is unexpected and can pollute a clinical scene.",
+   "suggestion": "Make branch labels opt-in via a checkbox, or use a single non-persistent display node / 3D text actor instead of MRML nodes.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Division by zero on duplicate centerline points",
+   "file": "EVARSim/EVARSim.py",
+   "line_start": 804,
+   "line_end": 807,
+   "evidence": "t = (startDistance - segmentStart) / segmentLengths[i]",
+   "explanation": "segmentLengths[i] is zero when two consecutive curve points coincide (common in imported polylines), producing inf/nan points; the same risk exists in _addRigidEndCaps (line 904, 909) and _createCircularCap (line 935) where a zero-length direction vector is normalized. In process() this surfaces as a confusing error or an empty/garbage model rather than a clear message.",
+   "suggestion": "Skip zero-length segments and guard the normalizations with a length check.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "process() assumes a 3D view exists when showResult is True",
+   "file": "EVARSim/EVARSim.py",
+   "line_start": 1507,
+   "line_end": 1510,
+   "evidence": "threeDWidget = layoutManager.threeDWidget(0)",
+   "explanation": "If the user has a layout without a 3D view (e.g. only slice views), threeDWidget(0) returns None and threeDView.resetFocalPoint() raises AttributeError after the model was already created, so the operation reports failure even though it succeeded.",
+   "suggestion": "Check threeDWidget for None before calling resetFocalPoint().",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Dead code and unused imports left in the module",
+   "file": "EVARSim/EVARSim.py",
+   "line_start": 980,
+   "line_end": 981,
+   "evidence": "def _createMultipleTubes(self, curvePoints: vtk.vtkPoints, radius: float, length: float,",
+   "explanation": "_createMultipleTubes (line 980) and _createSeparateTubes (line 1055) are never called, and numpy is imported but unused in _extractCenterlineFromModel (line 641). This makes the actual behaviour harder to follow for reviewers and future maintainers.",
+   "suggestion": "Remove the unused methods and imports, or wire them up if they are intended features.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Integer-valued parameters typed as float in the parameter node",
+   "file": "EVARSim/EVARSim.py",
+   "line_start": 84,
+   "line_end": 85,
+   "evidence": "numberOfTubes: Annotated[float, WithinRange(1.0, 10.0)] = 1.0",
+   "explanation": "numberOfTubes and cylinderResolution are counts but are declared as float and converted with int() at every use site (lines 269, 609-610), which is fragile if a non-integral value ever reaches them.",
+   "suggestion": "Use Annotated[int, WithinRange(1, 10)] and Annotated[int, WithinRange(6, 64)].",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Full geometry rebuild on every slider tick runs on the GUI thread",
+   "file": "EVARSim/EVARSim.py",
+   "line_start": 142,
+   "line_end": 147,
+   "evidence": "self.ui.cylinderRadiusSliderWidget.connect(\"valueChanged(double)\", self._onParameterChanged)",
+   "explanation": "Each slider movement triggers _updateSelectedTube, which re-extracts/smooths the centerline and rebuilds the tube synchronously in the GUI thread; with a large input model (the O(points x 20 slices) scan in _findCenterAtLevel) the UI will freeze while dragging.",
+   "suggestion": "Debounce the preview (e.g. QTimer) or move the computation to a background thread with progress reporting.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "README instructions and parameter ranges disagree with the module",
+   "file": "README.md",
+   "line_start": 30,
+   "line_end": 47,
+   "evidence": "Find \"EVARSim\" in the module dropdown under the \"Examples\" category",
+   "explanation": "The module registers itself under the 'Modeling' category (EVARSim.py line 33) and the UI allows radius 0.1-50, length 0.1-200 and resolution 6-64, while the README says 'Examples', radius 0.1-10.0, length 1.0-200 and resolution 4-32. Users following the README will look in the wrong category and expect different limits.",
+   "suggestion": "Update the README to match the implemented category and slider ranges.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No validation or clinical-use disclaimer for a device-sizing simulation tool",
+   "file": "README.md",
+   "line_start": 155,
+   "line_end": 157,
+   "evidence": "See License.txt. This extension is developed for medical research and educational purposes.",
+   "explanation": "The module produces stent geometry from centerlines that users may interpret as sizing information, yet there is no statement that results are not validated for clinical decision making, no accuracy/validation data, and the license pointer names a file that does not exist (the file is LICENSE).",
+   "suggestion": "Add an explicit research-only / not-for-clinical-use disclaimer, state the intended accuracy and validation status, and fix the license filename reference.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not verify that the catalog scm_revision 'main' resolves to the stated commit 0568d174ab552f3ff41e42d380e2cfaf80a35e8e (no network access); the review covers the file contents provided for that revision.",
+  "Could not inspect the binary files EVARSim/CL_model.vtk, EVARSim.png, EVARSim/Resources/Icons/1.jpeg and EVARSim/__pycache__/EVARSim.cpython-39.pyc; the .vtk sample was not parsed for embedded scripts or unexpected content.",
+  "Could not run the module, the registered unittest, or the extension build, so the reported test failure is derived from reading the call site and the process() signature, not from an executed test run.",
+  "Could not check CI/build results for this extension on the Slicer extension factory or the repository's issue tracker/maintenance activity."
+ ],
+ "questions_for_author": [
+  "Was the in-module test (EVARSim.py line 1567) ever run after the process() signature changed? It currently raises TypeError.",
+  "Should CL_model.vtk be installed with the extension or registered as Sample Data so users can try the module?",
+  "Is the smoothing-factor slider intended to affect the applied result, or only the live preview?"
+ ]
+}

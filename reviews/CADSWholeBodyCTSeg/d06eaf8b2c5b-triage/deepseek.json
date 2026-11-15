@@ -1,0 +1,215 @@
+{
+ "purpose": "A 3D Slicer module that runs the CADS nnU-Net model to fully automatically segment 167 anatomical structures in whole-body CT, for researchers and clinicians doing CT anatomy segmentation. It installs the CADS Python package and model weights on demand and imports results as Slicer segmentation nodes with SNOMED terminology.",
+ "summary": "Well-documented, Apache-2.0 extension with a clean CMake layout and no telemetry or data exfiltration. However it installs an exact numpy pin (numpy==1.26.4) and downgrades dynamic_network_architectures/acvl_utils in Slicer's shared Python, which the index policy explicitly asks to change, and it rewrites installed package metadata. There are also real code bugs (UnboundLocalError after a failed run, tests asserting messages that do not exist) and the model weights are CC BY-NC-SA (non-commercial), which is disclosed only in the README. Needs fixes before merge.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "No telemetry, no network servers, no credential access; input volumes stay in a local temp folder (CADSWholeBodyCTSeg.py:1192-1244). It does download a pinned zip from GitHub and pip-install it (lines 503, 772-799) and rewrites installed package METADATA (846-869), which is unusual but not concealed."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "setupPythonRequirements installs exact pins into Slicer's shared Python: numpy==1.26.4 and scikit-image==0.22.0 (lines 995-1001), acvl_utils==0.2 (1014) and downgrades dynamic_network_architectures to 0.2.0 (1114), which is a dependency of the NNUNet extension. The policy explicitly requests changes for exactly pinning/downgrading packages Slicer bundles."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CADSWholeBodyCTSeg/CMakeLists.txt installs the single Python file and all four resources (term.json, icon, .ui, csv), all of which exist; EXTENSION_DEPENDS \"PyTorch NNUNet\" matches build_dependencies. Only cosmetic issues: 1.8 MB screenshots committed and self.parent.dependencies left empty."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "Code is Apache-2.0 (LICENSE) and the weights are CC BY-NC-SA 4.0 (LICENSE_MODEL:3), which permits redistribution but is non-commercial; README:111 discloses this, but the link points to MODEL_LICENSE while the file is LICENSE_MODEL, and the module acknowledgementText never mentions the non-commercial restriction."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "onApplyButton references segmentationNodes after tryWithErrorDisplay, so a failed run raises UnboundLocalError (lines 411-433); the bundled tests assert error strings and a default TargetMode that the code does not produce (1544, 1722-1729); pip installs and inference run on the GUI thread with no progress reporting (386-388, 1284-1285)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README is thorough (install steps, task/segment tables, troubleshooting, screenshots) and the paper/weights are cited, but there is no explicit not-for-clinical-use disclaimer and the tests are effectively smoke tests that do not exercise real inference."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Exact numpy pin installed into Slicer's shared Python environment",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 995,
+   "line_end": 1001,
+   "evidence": "        base_packages = [\n            \"numpy==1.26.4\",\n            \"scikit-image==0.22.0\",\n        ]\n        for package in base_packages:\n            self.log(f'Installing {package}...')\n            slicer.util.pip_install(package)",
+   "explanation": "numpy is bundled with Slicer. Installing an exact pin on the first Apply silently replaces the numpy that Slicer and every other installed extension use, for the rest of that Slicer installation. If the Slicer version ships a different numpy (e.g. numpy 2.x in newer previews), other extensions that were built against it can break even though the user never intended to change them. The index policy lists exact pinning/downgrading of bundled packages such as numpy as a request-changes item.",
+   "suggestion": "Do not pin numpy; only install it if missing, or use a minimum-version requirement, and let the CADS package resolve against Slicer's numpy. Same for scikit-image if it is not strictly required at a fixed version.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Downgrades dynamic_network_architectures shared with the NNUNet extension",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 1108,
+   "line_end": 1114,
+   "evidence": "            if version.parse(installed_version) == version.parse(\"0.4\"):\n                raise importlib.metadata.PackageNotFoundError\n        except importlib.metadata.PackageNotFoundError:\n            self.log(f'dynamic_network_architectures package version is incompatible or not installed. Installing working version...')\n            slicer.util.pip_install(\"dynamic_network_architectures==0.2.0\")",
+   "explanation": "dynamic_network_architectures is a dependency of nnunetv2, which the NNUNet extension installs and other nnU-Net based extensions rely on. Forcing 0.2.0 whenever the installed version is 0.4 (or anything else that raises PackageNotFoundError) can break the NNUNet extension and other nnU-Net modules for the same user, in the same shared environment.",
+   "suggestion": "Report the incompatibility to the user and let them resolve it via the NNUNet extension, or coordinate the required version with the NNUNet extension instead of silently downgrading.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Exact pin of acvl_utils==0.2 in shared environment",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 1013,
+   "line_end": 1014,
+   "evidence": "        if needToInstallAcvlUtils:\n            slicer.util.pip_install(\"acvl_utils==0.2\")",
+   "explanation": "acvl_utils is also used by nnunetv2; pinning it to 0.2 for all users of the shared Slicer Python can conflict with the version the NNUNet extension expects. The comment acknowledges this is a temporary upstream workaround.",
+   "suggestion": "Prefer a version range, or document/coordinate the pin with the NNUNet extension and remove it once upstream is fixed.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Terminology file loaded into global terminology logic at Slicer startup",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 31,
+   "line_end": 40,
+   "evidence": "        slicer.app.connect(\"startupCompleted()\",\n                           self.configureDefaultTerminology)",
+   "explanation": "Every Slicer start with the extension installed loads the CADS terminology into the shared terminology logic, even for users who never open the module. This is a global side effect (extra startup work and an extra terminology context visible in other modules' terminology selectors).",
+   "suggestion": "Load the terminology lazily on first module entry (enter()) or when the logic is first used.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Downloaded zip is extracted without member validation and then pip-installed",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 772,
+   "line_end": 784,
+   "evidence": "                if installURL.startswith(('http://', 'https://')):\n                    self.log(f'Downloading package from {installURL}...')\n                    urllib.request.urlretrieve(installURL, zip_path)\n                    source_url = installURL",
+   "explanation": "The module downloads a zip from GitHub and runs pip install on the extracted setup.py, i.e. it executes third-party code. The URL is pinned to a commit hash in the author's own repository (line 503), which limits the risk, but zip_ref.extractall(temp_dir) (line 784) does not validate member paths, so a tampered archive could write outside the temp folder. No hash/signature check is performed on the download.",
+   "suggestion": "Validate archive members before extraction (reject absolute paths and '..'), and optionally verify a pinned SHA-256 of the downloaded zip.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Installed package METADATA is rewritten in place to strip requirements",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 866,
+   "line_end": 869,
+   "evidence": "                    file.seek(0)\n                    file.write(filteredMetadata)\n                    file.truncate()",
+   "explanation": "The extension edits the dist-info METADATA of the just-installed CADS package to remove Requires-Dist lines, and writes a custom direct_url.json. This leaves the environment with metadata that no longer matches the package, which can confuse pip (dependency resolution, 'pip check', later upgrades) and other tools. It is not malicious, but it is a fragile modification of the shared Python environment.",
+   "suggestion": "Install with --no-deps and install the needed dependencies explicitly instead of mutating installed metadata.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "UnboundLocalError after a failed processing run",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 411,
+   "line_end": 433,
+   "evidence": "        self.ui.statusLabel.appendPlainText(\n            f\"\\nProcessing finished. Created {len(segmentationNodes)} segmentation nodes.\"\n        )",
+   "explanation": "segmentationNodes is assigned only inside the 'with slicer.util.tryWithErrorDisplay(...)' block. tryWithErrorDisplay catches the exception and returns, so execution continues to line 431 where segmentationNodes is undefined, raising UnboundLocalError. The user sees the real error plus a second, confusing traceback instead of a clean failure message.",
+   "suggestion": "Initialize segmentationNodes = [] before the with-block, or return from onApplyButton inside the error path.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Bundled tests assert behavior the code does not implement",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 1722,
+   "line_end": 1725,
+   "evidence": "                expected_messages = [\n                    \"Invalid organs in subset\",\n                    \"Cannot validate subset for task\"\n                ]",
+   "explanation": "No code path raises these messages (grep finds them only in the test), and test_Logic expects TargetMode default 'subset' while setDefaultParameters sets 'all' (lines 1130-1131, 1544). test_SegmentationProcessing passes cadsCommand=[\"echo\",\"test\"] and asserts nothing, so it passes trivially. The test suite therefore does not validate the pipeline and will likely fail in CI.",
+   "suggestion": "Align the tests with the actual implementation and add at least one assertion on produced segments (or mark heavy tests as manual).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Long-running install and inference block the GUI thread without progress",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 386,
+   "line_end": 388,
+   "evidence": "            slicer.app.setOverrideCursor(qt.Qt.WaitCursor)\n            self.logic.setupPythonRequirements()\n            slicer.app.restoreOverrideCursor()",
+   "explanation": "pip installs (potentially several GB with model weights) and the CADS subprocess (logProcessOutput loops until the process ends, line 1139-1153) run on the GUI thread; the only relief is slicer.app.processEvents() inside addLog. Slicer appears frozen for many minutes with no progress bar or cancel option, and the ~727 MB per-task weight download happens without an explicit size confirmation.",
+   "suggestion": "Run installation and inference in a CLI node / worker thread with progress reporting and a cancel button, and confirm the download size with the user before fetching weights.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Target list construction can KeyError on structures missing from the CSV mapping",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 289,
+   "line_end": 292,
+   "evidence": "                availableTargets_snomed = [\n                    self.logic.getSegmentLabelColor(self.logic.cadsLabelTerminology[i]['terminologyStr'])[0] \n                    for i in all_targets\n                ]",
+   "explanation": "Structure names come from the CADS package's label maps, while cadsLabelTerminology is built from the bundled CSV. If the installed CADS version adds or renames a structure, the lookup raises KeyError, which is caught by the generic handler at line 329 and silently disables the target list, leaving the user unable to select targets.",
+   "suggestion": "Use .get() with a fallback to the raw structure name and log which structures lack terminology.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Non-commercial model license disclosed only in README, with a broken link",
+   "file": "README.md",
+   "line_start": 111,
+   "line_end": 111,
+   "evidence": "- **Model weights** released in the [Releases](https://github.com/murong-xu/CADS/releases) section are licensed under [CC BY-NC-SA 4.0](MODEL_LICENSE) for research-only purposes.",
+   "explanation": "The weights the extension downloads are CC BY-NC-SA 4.0 (LICENSE_MODEL:3), i.e. non-commercial and share-alike. That permits distribution, but users must know they may not use the output commercially; the README link points to MODEL_LICENSE while the file is named LICENSE_MODEL, and the in-module acknowledgementText (CADSWholeBodyCTSeg.py:24-30) does not mention the restriction at all.",
+   "suggestion": "Fix the link to LICENSE_MODEL and state the non-commercial/research-only restriction in the module acknowledgementText and help text.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No clinical-use disclaimer",
+   "file": "README.md",
+   "line_start": 8,
+   "line_end": 8,
+   "evidence": "👉 This repository focuses only on the plugin for [CADS-model](https://github.com/murong-xu/CADS), providing an easy-to-use interface for clinical and research workflows.",
+   "explanation": "The README advertises clinical workflows but nowhere states that the segmentation is a research tool and must not be used for diagnosis or treatment decisions without validation. For an AI segmentation tool this disclaimer matters to users.",
+   "suggestion": "Add an explicit 'not for clinical use / research only' statement to the README and module help text.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Large screenshots committed to the repository",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_SCREENSHOTURLS \"https://raw.githubusercontent.com/murong-xu/SlicerCADSWholeBodyCTSeg/main/Screenshot_01.png\")",
+   "explanation": "Screenshot_01.png and Screenshot_02.png are ~1.8 MB each and are committed rather than fetched on demand; this is not a functional problem but bloats the extension package.",
+   "suggestion": "Downscale the screenshots or host them outside the packaged source.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Module declares no dependencies although it requires PyTorch and NNUNet",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 18,
+   "line_end": 18,
+   "evidence": "        self.parent.dependencies = []",
+   "explanation": "The extension-level EXTENSION_DEPENDS is correct, but the module itself reports no dependencies, so Slicer's module dependency checks cannot warn the user when PyTorch/NNUNet are missing.",
+   "suggestion": "Set self.parent.dependencies = [\"PyTorch\", \"NNUNet\"].",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The upstream CADS package downloaded at runtime (https://github.com/murong-xu/CADS/archive/457638bac28e8618a66e9d4c56d5ade824acc87c.zip) was not inspected; its setup.py, dependencies and model-weight download logic are outside this repository.",
+  "The model weights themselves (CC BY-NC-SA 4.0, ~727 MB per task) and the CADS-dataset on HuggingFace were not inspected.",
+  "Whether numpy==1.26.4 conflicts with the numpy bundled in the targeted Slicer versions (5.10.0 / 5.11.0) could not be verified without a Slicer installation.",
+  "The full content of Resources/SegmentationCategoryTypeModifier-CADS.term.json (107 KB) and cads_snomed_mapping.csv (168 lines) was only spot-checked, not fully reviewed.",
+  "No CI/build results were available, so a successful build on all platforms is unverified; the catalog entry uses scm_revision \"main\" and I reviewed the snapshot at d06eaf8b2c5b3800227d38266ffbc24f8024a5ed.",
+  "The extension was not executed, so runtime behavior of the pip-install and inference paths is inferred from code reading only."
+ ],
+ "questions_for_author": [
+  "Can the numpy==1.26.4 and scikit-image==0.22.0 exact pins be relaxed so Slicer's bundled numpy is not replaced?",
+  "Can the dynamic_network_architectures==0.2.0 downgrade be avoided or coordinated with the NNUNet extension, since it is shared with nnunetv2?",
+  "Can the ~727 MB per-task model weight download be confirmed with the user (size and license) before it starts?",
+  "Would you add the CC BY-NC-SA 4.0 non-commercial restriction and a not-for-clinical-use statement to the module help/acknowledgement text?"
+ ]
+}

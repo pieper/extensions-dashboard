@@ -1,0 +1,138 @@
+{
+ "purpose": "A 3D Slicer scripted module that runs the CADS whole-body CT segmentation model (167 anatomical structures) on a selected volume through the CADS Python package, which it installs into Slicer's Python environment. It is for Slicer users doing segmentation research, and it depends on the PyTorch and NNUNet extensions.",
+ "summary": "No malicious or data-exfiltration behavior seen in the module; patient data stays in a temp folder and the CADS package is pinned to a commit hash. The main concerns are environmental: on every Apply the module pins numpy and scikit-image and installs CADS and its dependencies into the shared Slicer Python environment, with rewriting of installed package metadata and no confirmation for the initial large install. Licensing is clear for the code (Apache-2.0) but the model weights are non-commercial. I could not inspect the CADS package, the UI file, or the model weights, and I did not run anything.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Read CADSWholeBodyCTSeg.py in full. No telemetry or network calls besides pinned GitHub downloads; input is written to a temp folder and removed. Concerns are installation of unreviewed code from a zip, and rewriting of installed package METADATA (lines 846-869) in the shared environment; the downloaded CADS package and model weights were not inspected."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "setupPythonRequirements (lines 995-1001, 1014, 1087, 1114) pip-installs numpy==1.26.4, scikit-image==0.22.0, acvl_utils==0.2, TPTBox==x and dynamic_network_architectures==0.2.0 into Slicer's shared environment on every Apply. These are exact pins of packages Slicer may bundle, and installs happen without a user prompt for the first CADS install."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CADSWholeBodyCTSeg/CMakeLists.txt installs the .py, term.json, csv, Icons and UI resources; EXTENSION_DEPENDS 'PyTorch NNUNet' (root CMakeLists.txt line 13) matches build_dependencies in the catalog entry. Revision is 'main' rather than a fixed commit, so the reviewed commit is not pinned."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "Code is Apache-2.0 (LICENSE). Model weights are CC BY-NC-SA 4.0 non-commercial (LICENSE_MODEL) and downloaded at runtime rather than bundled. README line 111 links MODEL_LICENSE, which does not exist at the root; the file is LICENSE_MODEL. Users need the non-commercial restriction flagged."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Observers are removed in cleanup and exit (lines 122-141). Long processing runs on the GUI thread through logProcessOutput (lines 1139-1156). The check at line 1412 is ineffective, and readSegmentation's glob '*{task}*.nii.gz' (line 1419) could match unrelated files. The test case that does real work is in a commented-out CMake entry (Testing/Python/CMakeLists.txt)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README gives installation steps, task lists and troubleshooting. No clinical-use disclaimer is present, even though the description claims 'clinical and research workflows'. Model provenance is noted with a citation. Tests depend on SampleData downloads and are not run in CI."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Exact pins of numpy and scikit-image are applied to Slicer's shared Python environment on every Apply",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 995,
+   "line_end": 1001,
+   "evidence": "base_packages = [\n            \"numpy==1.26.4\",\n            \"scikit-image==0.22.0\",\n        ]",
+   "explanation": "setupPythonRequirements installs numpy==1.26.4 and scikit-image==0.22.0 unconditionally each time the user clicks Apply (until the class-level flag is set). If the Slicer build bundles a different numpy, this downgrades a package Slicer and other extensions depend on, affecting users who never open this module. The cached _requirements_checked flag only limits repeats within a session.",
+   "suggestion": "Do not pin packages Slicer bundles; only install a version when the installed one is incompatible, and check the installed version first. Document the dependency on a specific numpy if it is truly required.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Multiple packages are pip-installed into the shared environment, including exact pins, without a confirmation for the initial install",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 1053,
+   "line_end": 1087,
+   "evidence": "self.log(f'CADS Python package is required. Installing it from {self.cadsPythonPackageDownloadUrl}... (it may take several minutes)')\n\n            if upgrade:\n                # CADS version information is usually not updated with each git revision, therefore we must uninstall it to force the upgrade\n                slicer.util.pip_uninstall(\"CADS\")",
+   "explanation": "On the first Apply, the module downloads and installs the CADS package from a GitHub zip and its dependencies, with several-minute installs, with no user confirmation. It also installs exact versions of acvl_utils, TPTBox and dynamic_network_architectures. These changes persist in the shared Slicer environment and can conflict with other extensions. Only the update path asks the user (line 1046).",
+   "suggestion": "Ask for explicit user confirmation before the large first-time install and before exact-version installs, and mention the packages to be installed in the UI. Avoid installing into the shared environment without consent.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Installer edits the METADATA of installed packages and installs dependencies by hand, bypassing pip resolution",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 843,
+   "line_end": 869,
+   "evidence": "with open(metadataPath.locate(), \"r+\", encoding=\"latin1\") as file:\n                    for line in file:\n                        skipThisPackage = False\n                        requirementPrefix = 'Requires-Dist: '",
+   "explanation": "pipInstallSelectiveFromURL installs CADS with --no-deps, rewrites its METADATA file in place to remove requirements, and then installs the remaining requirements one by one. Pip's dependency resolver is bypassed, so conflicts are not checked and the installed metadata no longer matches the real requirements. This can leave the environment inconsistent for other extensions.",
+   "suggestion": "Install with pip's normal resolver, using constraints that exclude the packages Slicer provides, instead of editing installed metadata. If editing is unavoidable, document it and verify with pip check.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Broken link to model license and non-commercial model terms not surfaced to users in the extension",
+   "file": "README.md",
+   "line_start": 111,
+   "line_end": 111,
+   "evidence": "- **Model weights** released in the [Releases](https://github.com/murong-xu/CADS/releases) section are licensed under [CC BY-NC-SA 4.0](MODEL_LICENSE) for research-only purposes.",
+   "explanation": "The README links the model license to 'MODEL_LICENSE', which is not in the repository; the file is LICENSE_MODEL. The model weights are CC BY-NC-SA 4.0 (non-commercial, research), and the extension downloads them at runtime. Users may not notice the restriction from inside Slicer.",
+   "suggestion": "Fix the link to LICENSE_MODEL and state the non-commercial restriction in the module helpText or the Slicer documentation.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No clinical-use disclaimer for a segmentation tool that is advertised for clinical workflows",
+   "file": "README.md",
+   "line_start": 8,
+   "line_end": 8,
+   "evidence": "👉 This repository focuses only on the plugin for [CADS-model](https://github.com/murong-xu/CADS), providing an easy-to-use interface for clinical and research workflows.",
+   "explanation": "The README describes the tool for 'clinical and research workflows', but there is no statement that output is not validated for diagnostic or treatment use. Users could rely on automated organ segmentations without review.",
+   "suggestion": "Add a research-use-only disclaimer and a note that results need human review, both in the README and in the module help text.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Long-running segmentation blocks the GUI thread while reading process output",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 1139,
+   "line_end": 1146,
+   "evidence": "while True:\n                try:\n                    line = proc.stdout.readline()\n                    if not line:\n                        break",
+   "explanation": "logProcessOutput reads the child process stdout in a blocking loop on the GUI thread. The UI only gets processEvents in addLog. The app may appear frozen for minutes during CPU inference, and cancellation is not possible.",
+   "suggestion": "Run the process asynchronously (QProcess or a thread), or pump events regularly, and offer cancellation.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Pattern-based result lookup can pick the wrong file",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 1419,
+   "line_end": 1429,
+   "evidence": "pattern = os.path.join(outputSegmentationFolder, f'*{task}*.nii.gz')\n        matching_files = glob.glob(pattern)",
+   "explanation": "readSegmentation locates results with glob('*{task}*.nii.gz') and uses the first match. Task IDs such as '551' can match unrelated filenames in the output folder, and the code logs a warning but continues with an arbitrary file. The range check at line 1412 can never trigger for label values, since it tests the minimum key.",
+   "suggestion": "Use the exact expected output filename from CADS, and fail instead of silently choosing one of several matches.",
+   "confidence": "low"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Unit tests that exercise processing are disabled and rely on network sample data",
+   "file": "CADSWholeBodyCTSeg/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The only real test registration is commented out in Testing/Python/CMakeLists.txt. The unittest class depends on SampleData.downloadSample('CTChest') and on the CADS model, so CI does not verify the processing path.",
+   "suggestion": "Enable a lightweight test that does not download large data, and mock the CADS call for CI.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "The CADS Python package (github.com/murong-xu/CADS at the pinned commit) was not inspected: its entry point CADSSlicer, its model download logic, and any network access during inference.",
+  "Model weights downloaded from the CADS GitHub release were not inspected for integrity or format (no pickle check).",
+  "The UI file Resources/UI/CADSWholeBodyCTSeg.ui and icon were not read; only their presence in the file list was confirmed.",
+  "The scm_revision is 'main' rather than a fixed commit, so the exact reviewed revision is unknown; I reviewed the content shown in the catalog listing only.",
+  "No CI results, Slicer build, or runtime behavior were available; I did not run anything.",
+  "Whether numpy 1.26.4 or scikit-image 0.22.0 conflicts with the Slicer version bundled packages was not verified."
+ ],
+ "questions_for_author": []
+}

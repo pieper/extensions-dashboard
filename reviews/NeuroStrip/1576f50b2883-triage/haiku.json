@@ -1,0 +1,90 @@
+{
+ "purpose": "NeuroStrip is a Slicer scripted module that runs CNN-based skull stripping (brain masking) on MRI volumes by calling the external neurostrip Python package. It is intended for Slicer users in the Segmentation category who want brain masks and optionally masked brain volumes.",
+ "summary": "The root CMakeLists.txt calls add_subdirectory(NeuroStrip), but the NeuroStrip/ folder has no CMakeLists.txt (confirmed by list_files and a direct read, which returned \"No such file\"). CMake configure will therefore fail, so the extension cannot build from the catalog entry. The Python module itself is reasonable: it asks before pip-installing neurostrip[cpu], uses temporary directories, and downloads sample data with a SHA256 check. The packaging defect must be fixed before admission.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read CMakeLists.txt and NeuroStrip/NeuroStrip.py in full. The only pip install is neurostrip[cpu], which runs after an OK/Cancel confirmation (NeuroStrip.py lines 31-37). Sample data is fetched from a GitHub URL with a SHA256 checksum. No telemetry, eval, or pickle was seen. I did not audit the neurostrip package or its transitive dependencies."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "The module installs neurostrip[cpu] into Slicer's Python environment on first enter, not at startup, and only after confirmation (NeuroStrip.py lines 183-186). The install is unpinned, so it could pull in packages that conflict with Slicer-bundled ones. If the user declines, the prompt repeats on every enter because _dependenciesInstalled stays False (lines 183-186). I could not verify the neurostrip dependency tree."
+  },
+  "packaging": {
+   "rating": "blocking",
+   "rationale": "Root CMakeLists.txt line 22 has add_subdirectory(NeuroStrip). The NeuroStrip/ folder contains only NeuroStrip.py and Resources/, with no CMakeLists.txt. Configure would fail, so the extension cannot be built from the catalog entry with build_subdirectory '.'."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is a standard MIT text (Copyright 2025 Bryn Lloyd), which permits distribution. The README says the plugin follows the NeuroStrip library's MIT license, which I did not verify. Sample data is an external SlicerTestingData release, and its license was not checked."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Processing runs synchronously on the GUI thread with no progress indication, and the sample-data test expects a max of 605 with no stated reason. Otherwise the logic handles temp files, error display (tryWithErrorDisplay), and observer cleanup reasonably. The scene observers in setup are removed in cleanup."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "There is a README with install and usage steps, a screenshot, and a sample dataset plus test. The test only checks scalar ranges, not segmentation quality. The module has no clinical-use disclaimer or model validation notes, and it defers to the external neurostrip project docs."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "blocking",
+   "title": "Root CMake calls add_subdirectory(NeuroStrip) but NeuroStrip/CMakeLists.txt does not exist",
+   "file": "CMakeLists.txt",
+   "line_start": 22,
+   "line_end": 22,
+   "evidence": "add_subdirectory(NeuroStrip)",
+   "explanation": "The catalog entry uses build_subdirectory '.', so the build runs the root CMakeLists.txt. Line 22 calls add_subdirectory(NeuroStrip), and CMake fails if that folder has no CMakeLists.txt. The NeuroStrip/ folder lists only NeuroStrip.py and Resources/, and reading NeuroStrip/CMakeLists.txt returned 'No such file'. The extension therefore cannot be configured, built, or packaged, and the module is not installed. Other Slicer extensions normally put a CMakeLists.txt in the module folder that calls slicer_add_python_scripted_module-style install rules (or the equivalent for this extension) to install NeuroStrip.py and Resources.",
+   "suggestion": "Add NeuroStrip/CMakeLists.txt that installs NeuroStrip.py and the Resources/ folder (UI, Icons) into the extension's lib/Slicer-X/qt-scripted-modules directories, following the standard ScriptedLoadableModule template, then confirm the extension builds in the Slicer extension CI.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Unpinned pip install of neurostrip[cpu] into Slicer's Python environment, repeated prompts if declined",
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line_start": 37,
+   "line_end": 37,
+   "evidence": "slicer.util.pip_install(\"neurostrip[cpu]\")",
+   "explanation": "On first enter of the module, the code installs neurostrip[cpu] into Slicer's shared Python environment, which can bring in onnxruntime and other packages that may conflict with Slicer-bundled ones. The install is gated by a confirm dialog, which is good. However, if the user cancels, _dependenciesInstalled stays False, so the prompt reappears on every module enter. The dependency tree was not verified.",
+   "suggestion": "Remember the user's decline for the session, state the approximate download size in the prompt, and check that the neurostrip dependency set does not pin or replace packages Slicer bundles.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Inference runs synchronously on the GUI thread with no progress feedback",
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line_start": 323,
+   "line_end": 328,
+   "evidence": "neurostrip.predict(\n                      image_path=input_path,",
+   "explanation": "process() calls neurostrip.predict in the main thread, so the Slicer UI freezes for the whole CNN run on a full MRI volume. The README acknowledges that processing takes time. A user may think Slicer has hung, and the window may be marked unresponsive.",
+   "suggestion": "Show a progress dialog or run inference in a worker thread, with an explicit device choice (the CPU is hardcoded at line 327).",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No clinical-use disclaimer or model validation information",
+   "file": "NeuroStrip/NeuroStrip.py",
+   "line_start": 54,
+   "line_end": 58,
+   "evidence": "It can generate brain masks and apply them to create masked brain images.",
+   "explanation": "The module produces brain masks used for medical image analysis, but the help text and README contain no statement that the output is unvalidated for clinical use and no information on the model's training or validation. The README points to external docs only.",
+   "suggestion": "Add a research-use disclaimer and a short note on model provenance and validation to the help text and README.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "The neurostrip PyPI package and its transitive dependencies (for example whether torch or other large or conflicting packages are pulled in) were not inspected.",
+  "The upstream source at commit 1576f50 was not fetched; the catalog entry uses scm_revision 'main', so I could not confirm the revision.",
+  "The NeuroStrip.ui file (5303 bytes) was not read, so widget and parameter wiring was not verified.",
+  "The sample data file on GitHub SlicerTestingData and its license were not checked.",
+  "The MIT license of the neurostrip library referenced in the README was not verified.",
+  "No CI build results were available, so the build and load were not verified."
+ ],
+ "questions_for_author": []
+}
