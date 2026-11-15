@@ -1,0 +1,228 @@
+{
+ "purpose": "SlicerMultiverSeg adds a \"MultiverSeg\" Segment Editor effect that runs the MultiverSeg/ScribblePrompt in-context segmentation models on 2D slices or a slice range of a loaded volume, guided by user-drawn positive/negative scribbles and a small set of user-curated example slices (\"tasks\"). It targets researchers who want to segment new biomedical datasets from a few examples.",
+ "summary": "Well-structured Segment Editor effect with tests, CI and documentation, and no telemetry or import-time installs. Three concrete concerns keep it from merging as-is: (1) it pip-installs an unpinned third-party git repository (`git+https://github.com/halleewong/MultiverSeg.git`) into Slicer's Python environment at runtime, so any future commit to that repo runs arbitrary code in every user's Slicer and its declared dependencies can pull/downgrade packages Slicer bundles; (2) two pickle model checkpoints are downloaded from Dropbox shared links with no hash verification and then loaded by third-party code; (3) the PyTorch extension is used via PyTorchUtils but is not declared in `EXTENSION_DEPENDS`/`build_dependencies`. License of the downloaded weights and of the pip-installed package is not documented and could not be verified. 🔴 Do not merge yet.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "No telemetry, no network servers, no obfuscation; downloads are user-confirmed (InstallLogic.py:37-38, 51). But InstallLogic.py:160 pip-installs an unpinned third-party git repo and InstallLogic.py:12/15 download pickle checkpoints from Dropbox links with no integrity check before third-party code loads them."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Torch is correctly installed through PyTorchUtils (InstallLogic.py:174-177) and nothing is installed at import, but the PyTorch extension is not declared (CMakeLists.txt:12 `set(EXTENSION_DEPENDS \"NA\")`, catalog `build_dependencies: []`), the unpinned multiverseg git install can pull/downgrade bundled packages, and ContextLogic.py:31 pip-installs `packaging` at runtime."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "MultiverSeg/CMakeLists.txt lists every Python file and resource the module imports, all listed files exist, checkpoints are gitignored (`*.pt`) so nothing large is committed, and the catalog entry is well-formed. The only mismatch is the undeclared PyTorch dependency."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "LICENSE.txt is Apache-2.0 and covers the extension code, but the two downloaded model checkpoints and the pip-installed `multiverseg` package have no license statement anywhere in the repo (README.md:82-86 only links sources); I could not verify their terms."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read all of SegmentEditorEffect.py, SegmentationLogic.py, ContextLogic.py, InstallLogic.py and the tests. Structure follows Slicer conventions, but state is written into the extension install directory, 3D prediction runs on the GUI thread, download failures are silent, and several user-input paths are used unchecked as directory names."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md documents usage, task management, video tutorials and model provenance, and there are unit tests plus a CI workflow. Missing: any research-use/clinical disclaimer, and CI is non-gating (`continue-on-error: true`)."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Unpinned third-party git repository pip-installed into Slicer's Python environment",
+   "file": "MultiverSeg/SegmentEditorMultiverSegLib/InstallLogic.py",
+   "line_start": 158,
+   "line_end": 160,
+   "evidence": "    def installMultiverSeg(cls):\n        slicer.util.pip_install(\"git+https://github.com/halleewong/MultiverSeg.git\")",
+   "explanation": "On first Initialize the user is asked to confirm, then pip installs the current HEAD of a third-party GitHub repository into Slicer's shared Python environment. There is no commit pin, so any future commit (or compromise of that account) executes arbitrary code in every user's Slicer at install time, and the package's own declared requirements can pull torch from PyPI or upgrade/downgrade numpy/scipy/torchvision that Slicer bundles. I could not inspect that repository's setup.py, so the exact dependency impact is unverified.",
+   "suggestion": "Pin an exact commit (`git+https://github.com/halleewong/MultiverSeg.git@<sha>`) and install with `--no-deps`, installing only the specific dependencies that are known to be safe (torch/torchvision via PyTorchUtils).",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Model checkpoints downloaded from Dropbox without integrity verification, then unpickled",
+   "file": "MultiverSeg/SegmentEditorMultiverSegLib/InstallLogic.py",
+   "line_start": 11,
+   "line_end": 15,
+   "evidence": "    MULTIVERSEG_FILE_NAME = \"MultiverSeg_v0_nf256_res128.pt\"\n    MULTIVERSEG_DOWNLOAD_URL = \"https://www.dropbox.com/scl/fi/5sup9s5l9xkp28wbwkm9g/MultiverSeg_v0_nf256_res128.pt?rlkey=tquwxhezdgl2v8a2akvco5jim&st=1gnbqplc&dl=1\"\n\n    SCRIBBLEPROMPT_FILE_NAME = \"ScribblePrompt_unet_v1_nf192_res128.pt\"\n    SCRIBBLEPROMPT_DOWNLOAD_URL = \"https://www.dropbox.com/scl/fi/pnw88n05irnv5z1snlklr/ScribblePrompt_unet_v1_nf192_res128.pt?rlkey=dr8xvkf0wj2r082h1zzpcmz5o&dl=1\"",
+   "explanation": "The two .pt files are pickle-based checkpoints fetched from personal Dropbox shared links and then loaded by the multiverseg/scribbleprompt code (SegmentationLogic.py:97-101 points the model weights at these paths). Nothing verifies size or hash after download, so a replaced/expired link, a compromised Dropbox account, or a tampered file results in arbitrary code execution via torch.load in the user's Slicer. The download is at least user-confirmed (74MB / 16MB prompts).",
+   "suggestion": "Host the weights at a stable, project-controlled URL and verify a pinned SHA-256 of each file before use; fail loudly on mismatch.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "PyTorch extension used at runtime but not declared in EXTENSION_DEPENDS / build_dependencies",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_DEPENDS \"NA\")",
+   "explanation": "InstallLogic.py:118 imports PyTorchUtils and InstallLogic.py:130-139 installs the PyTorch extension from the extension server on demand, but the catalog entry declares `\"build_dependencies\": []` and CMake declares `EXTENSION_DEPENDS \"NA\"`. The index therefore does not know the extension needs PyTorch, and users get a runtime prompt plus a required Slicer restart instead of having the dependency resolved at install time.",
+   "suggestion": "Add `PyTorch` to `EXTENSION_DEPENDS` in CMakeLists.txt and to `build_dependencies` in the catalog entry, keeping the runtime check as a fallback.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Runtime pip install of `packaging` without confirmation",
+   "file": "MultiverSeg/SegmentEditorMultiverSegLib/ContextLogic.py",
+   "line_start": 27,
+   "line_end": 32,
+   "evidence": "    try:\n        from packaging.version import Version\n    except ModuleNotFoundError:\n        print(\"Installing packaging\")\n        slicer.util.pip_install(\"packaging\")",
+   "explanation": "If `packaging` is missing, it is installed into Slicer's shared environment silently from inside a model-loading helper, with no user confirmation. `packaging` is bundled with current Slicer, so this is mostly dead code, but it is an unannounced environment mutation on a code path that runs during prediction.",
+   "suggestion": "Remove the fallback and rely on the bundled `packaging`, or compare versions without it.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Task contexts and model checkpoints are stored inside the extension installation directory",
+   "file": "MultiverSeg/SegmentEditorMultiverSegLib/ContextLogic.py",
+   "line_start": 16,
+   "line_end": 16,
+   "evidence": "        self.contextRootPath = pathlib.Path(__file__).parent.joinpath(\"../Context\").resolve()",
+   "explanation": "By default user-created tasks (PNG images and masks of the user's data) are written to `<extension>/MultiverSeg/Context` and the 90MB of checkpoints to `<extension>/MultiverSeg/Resources/Checkpoints` (InstallLogic.py:10). On macOS (/Applications) and Windows (Program Files) or a system-wide Linux install these paths are not writable, so task creation and model download fail; on any install the data is silently lost when the extension is updated or reinstalled. The user's own image data is also stored outside any user-chosen folder.",
+   "suggestion": "Default to a per-user writable location (e.g. `slicer.util.getUserResourceDirectory()` or `qt.QStandardPaths`), keeping the extension directory read-only.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Failed or cancelled checkpoint download is silent and leaves the progress dialog open",
+   "file": "MultiverSeg/SegmentEditorMultiverSegLib/InstallLogic.py",
+   "line_start": 69,
+   "line_end": 73,
+   "evidence": "        fileDest = sampleDataLogic.downloadFileIntoCache(modelURI, modelName)\n\n        if sampleDataLogic.downloadPercent and sampleDataLogic.downloadPercent == 100:\n            shutil.copyfile(fileDest, modelPath)\n            slicer.progressWindow.close()",
+   "explanation": "If the download does not reach 100% (network error, server error), no file is copied, no exception is raised and the progress window is never closed; `downloadCheckpointsIfNeeded` then returns False and `initModel` (SegmentationLogic.py:88-90) returns False, so `onInit` simply returns and the user sees nothing. `slicer.progressWindow` is also set as an attribute on the global `slicer` module, which is a process-wide side effect.",
+   "suggestion": "Raise/report an error when the download does not complete, always close the progress dialog in a finally block, and keep the progress window as an instance attribute.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "3D prediction runs on the GUI thread and leaves the slice view moved",
+   "file": "MultiverSeg/SegmentEditorMultiverSegLib/SegmentationLogic.py",
+   "line_start": 291,
+   "line_end": 318,
+   "evidence": "            sliceLogic.SetSliceOffset(sliceOffset)",
+   "explanation": "`predict3d` is connected directly to a button click (SegmentEditorEffect.py:165) and loops over every slice in the range on the main thread, calling `slicer.app.processEvents()`; for a large volume this keeps the UI busy for a long time. It also permanently changes the slice offset of the user's view and never restores it, and there is no try/except around `predict`/`predict3d`, so exceptions such as the `ValueError` raised by `computeSliceAxis` for oblique views (SegmentationLogic.py:359) only appear in the Python console.",
+   "suggestion": "Wrap the prediction entry points in try/except with `slicer.util.errorDisplay`, restore the original slice offset afterwards, and consider a CLI/worker thread for the 3D loop.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Division by zero when normalising a constant slice or volume",
+   "file": "MultiverSeg/SegmentEditorMultiverSegLib/SegmentationLogic.py",
+   "line_start": 395,
+   "line_end": 397,
+   "evidence": "        if not isSegmentation:\n            result -= torch.min(result)\n            result /= torch.max(result)",
+   "explanation": "The same pattern appears in `preprocessVolume` (lines 422-424). For a uniform slice (e.g. air-only slice, or a constant-valued volume) `torch.max(result)` is 0 after the subtraction, producing NaN/Inf inputs and a meaningless prediction instead of a clear message.",
+   "suggestion": "Guard with `if torch.max(result) > 0:` or clamp the denominator.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Observer connected to the Segment Editor widget is never disconnected; assertion in the callback",
+   "file": "MultiverSeg/SegmentEditorMultiverSegLib/SegmentEditorEffect.py",
+   "line_start": 64,
+   "line_end": 70,
+   "evidence": "        self.sew.connect(\"currentSegmentIDChanged(QString)\", self.tryToPreselectTask)",
+   "explanation": "`sourceVolumeNodeChanged` caches the shared Segment Editor widget and connects a callback to it, but nothing disconnects it when the effect is destroyed or the module is reloaded, so stale effect instances keep receiving signals. The callback also starts with `assert segmentID == sen.GetSelectedSegmentID()`, which raises AssertionError if the signal arrives in a different order.",
+   "suggestion": "Disconnect in a cleanup/`__del__`-style hook or use a weak connection, and replace the assertion with an early return.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Adding a context example changes the user's segment display visibility",
+   "file": "MultiverSeg/SegmentEditorMultiverSegLib/SegmentEditorEffect.py",
+   "line_start": 318,
+   "line_end": 322,
+   "evidence": "            displayNode.SetAllSegmentsVisibility(False)\n            displayNode.SetSegmentVisibility(segmentID, True)",
+   "explanation": "`addImageDialog` hides all segments and shows only the selected one, then at line 378 restores `SetAllSegmentsVisibility(True)` — i.e. it does not restore the user's previous per-segment visibility, and if the dialog is closed abnormally the segmentation stays mostly hidden. This silently alters the user's scene display state.",
+   "suggestion": "Save and restore the per-segment visibility states instead of forcing all-visible.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "User-supplied task names are used directly as directory names",
+   "file": "MultiverSeg/SegmentEditorMultiverSegLib/ContextLogic.py",
+   "line_start": 158,
+   "line_end": 176,
+   "evidence": "        destDir = self.contextRootPath.joinpath(name)\n\n        if destDir.is_dir():\n            return False\n\n        destDir.mkdir(parents=True)",
+   "explanation": "`createTask` and `renameTask` take the raw text from `qt.QInputDialog().getText` (SegmentEditorEffect.py:467, 488) and join it to the context root without validation. A name containing `../` or an absolute path creates or moves directories outside the chosen root, and `deleteCurrentTask` (line 156) then `shutil.rmtree`s whatever `activeContext` names. This requires deliberate user input, so it is a robustness issue rather than an attack path.",
+   "suggestion": "Reject names containing path separators or `..`, and verify the resolved path stays under `contextRootPath`.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "Zip import of task archives is not vulnerable to path traversal",
+   "file": "MultiverSeg/SegmentEditorMultiverSegLib/ContextLogic.py",
+   "line_start": 147,
+   "line_end": 152,
+   "evidence": "        dest = self.contextRootPath.joinpath(file.stem)\n\n        if dest.is_dir(): raise IsADirectoryError(f\"Task {file.stem} already exist.\")\n\n        shutil.unpack_archive(file, dest, \"zip\")",
+   "explanation": "I checked the only archive-extraction path: it uses `shutil.unpack_archive` with the zip format, whose `ZipFile.extractall` strips absolute paths and `..` components, and the destination is a fresh directory that must not already exist. No traversal or overwrite of existing user files was identified here; a zip bomb remains theoretically possible but requires the user to import a hostile archive.",
+   "suggestion": "Optional: cap the number and total size of extracted entries.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "No license information for the downloaded model weights or the pip-installed package",
+   "file": "README.md",
+   "line_start": 82,
+   "line_end": 86,
+   "evidence": "- [MultiverSeg official implementation](https://github.com/halleewong/MultiverSeg)\n- [MultiverSeg Project Page](https://multiverseg.csail.mit.edu/)\n- [MultiverSeg Paper](https://arxiv.org/abs/2412.15058)",
+   "explanation": "The extension itself is Apache-2.0 (LICENSE.txt), but the two checkpoints it downloads (MultiverSeg_v0, ScribblePrompt_unet_v1) and the `multiverseg` package it installs from git are third-party material whose terms are not stated anywhere in the repository. I could not access those sources, so I cannot confirm that redistribution/use of the weights is permitted; this is unverified rather than proven incompatible.",
+   "suggestion": "State the license of each downloaded checkpoint and of the multiverseg package in the README, and confirm the weights may be redistributed/downloaded by users.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No research-use or clinical-use disclaimer",
+   "file": "README.md",
+   "line_start": 1,
+   "line_end": 9,
+   "evidence": "MultiverSeg is a model that enables users to rapidly segment new biomedical imaging datasets. This extension add a\nsegmentation effect that uses MultiverSeg.",
+   "explanation": "This is an AI segmentation tool applied to medical images, but neither the README nor the module help text (SegmentEditorMultiverSeg.py:27-31) states that output is not validated for clinical use. Users could reasonably treat the predictions as diagnostic-quality segmentations.",
+   "suggestion": "Add a short research-use-only / not-for-clinical-use notice to the README and the effect help text.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "CI test workflow is non-gating",
+   "file": "github/workflows/windows-testing.yml",
+   "line_start": 14,
+   "line_end": 20,
+   "evidence": "  Running-Tests:\n    timeout-minutes: 30\n    continue-on-error: true",
+   "explanation": "The workflow runs the unit tests on three platforms, but `continue-on-error: true` means a failing test never fails the run, so regressions (including broken model loading) can go unnoticed. This is a maintenance observation, not an admission blocker.",
+   "suggestion": "Drop `continue-on-error` once the suite is stable, or split the torch-dependent tests into a separate non-gating job.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The multiverseg package installed from https://github.com/halleewong/MultiverSeg (its setup.py dependencies, license, and any torch.load call sites) — no network access.",
+  "The contents and license of the two Dropbox-hosted checkpoints (MultiverSeg_v0_nf256_res128.pt, ScribblePrompt_unet_v1_nf192_res128.pt).",
+  "The scribbleprompt package imported at SegmentationLogic.py:81 — its origin and license are not visible in this repository.",
+  "Whether the catalog entry's `scm_revision: \"main\"` currently resolves to the reviewed commit 6a2d3d57b26c0107274ae4926c0d8aa44afc8260, and whether the Extensions Index schema v1.0.1 validation passes.",
+  "Actual build/load of the extension in Slicer and the CI results of the windows-testing workflow.",
+  "Binary resources (icons, screenshots, test .nrrd/.png/.zip data) were not inspected beyond their sizes."
+ ],
+ "questions_for_author": [
+  "Can the multiverseg dependency be pinned to a specific commit and installed with --no-deps, with torch/torchvision coming only from PyTorchUtils?",
+  "Can the model checkpoints be hosted at a stable project URL with published SHA-256 hashes verified after download?",
+  "Why is the PyTorch extension not declared in EXTENSION_DEPENDS / build_dependencies even though PyTorchUtils is required at runtime?",
+  "What are the licenses of the MultiverSeg and ScribblePrompt checkpoints and of the multiverseg package?",
+  "Would you consider storing tasks and checkpoints in a per-user writable directory instead of the extension installation folder?"
+ ]
+}
