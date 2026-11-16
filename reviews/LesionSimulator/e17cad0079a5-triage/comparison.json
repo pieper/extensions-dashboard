@@ -1,0 +1,1103 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Bare except blocks hide all processing failures from the user",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line": 470,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Bare except blocks hide all processing failures from the user",
+     "file": "MSLesionSimulator/MSLesionSimulator.py",
+     "line_start": 470,
+     "line_end": 472,
+     "evidence": "self.conformInputSpace(referenceVolume, inputT2Volume, inputT2Volume, regT2toRefTransform, numberOfThreads)\n          except:\n            logging.info(\"Exception caught when trying to conform T2 image to reference space.\")",
+     "explanation": "Every registration, mask generation, lesion deformation and space-restoration step (lines 464-512, 638-724, 732-770, 780-808) is wrapped in a bare `except:` that only writes an info-level log line. If registration or a CLI fails, the run continues and produces images in the wrong space or with no lesions, and the user sees only 'Processing completed' (line 810-811). For a tool whose output is used as simulated ground truth, silently wrong results are worse than an error.",
+     "suggestion": "Catch specific exceptions, report them with slicer.util.errorDisplay / slicer.util.showStatusMessage and abort or mark the affected modality as failed.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/MSLesionSimulator.py",
+      "line": 470
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Input volume nodes are overwritten in place by the simulation pipeline",
+     "file": "MSLesionSimulator/MSLesionSimulator.py",
+     "line_start": 470,
+     "line_end": 470,
+     "evidence": "self.conformInputSpace(referenceVolume, inputT2Volume, inputT2Volume, regT2toRefTransform, numberOfThreads)",
+     "explanation": "conformInputSpace passes inputT2Volume as both the moving and the result node, so BRAINSFit writes the resampled data back into the user's loaded T2 node. Line 641 does the same for the lesion step: doSimulateLesions(inputT1Volume, \"T1\", lesionMapT1, inputT1Volume, ...) uses the input node as its output. The original scan in the Slicer scene is therefore replaced by a lesioned, resampled version, with no warning and no copy. A user who saves the scene or reruns with the same inputs loses the original data. The same pattern appears for FLAIR, PD, FA and ADC.",
+     "suggestion": "Clone each input into a new output node before any processing, write results only to new nodes, and state the behavior in the UI and docs if in-place modification is intended.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/MSLesionSimulator.py",
+      "line": 470
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Bundled MNI152 templates and lesion database have no stated license or provenance",
+   "category": "license",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "docs/index.md",
+   "line": 143,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Bundled MNI152 templates and lesion database have no stated license or provenance",
+     "file": "docs/index.md",
+     "line_start": 143,
+     "line_end": 143,
+     "evidence": "T1 weighted MRI brain in axial orientation (provided by the ICBM-MNI152 non linear brain template)",
+     "explanation": "The extension ships MNI152_T1_1mm.nii.gz (10 MB) and MNI152_T1_1mm_brain.nii.gz (3 MB) plus ~2229 lesion label NIfTIs derived from manual MS lesion mark-ups. The only license statement (README.md:21 'Apache 2.0 - Read file: LICENSE') covers the code; nothing states the terms under which the MNI/ICBM template or the lesion database may be redistributed, nor the provenance/de-identification of the source lesion mark-ups. Users and the index cannot confirm distribution permission for this bundled data.",
+     "suggestion": "Add a data-provenance/license section (or NOTICE file) stating the source and redistribution terms of the MNI152 templates and the lesion database, and confirm the mark-ups are de-identified and redistributable.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "docs/index.md",
+      "line": 143
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Compiled bytecode MSLesionSimulator.pyc committed next to the source",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "MSLesionSimulator/CMakeLists.txt",
+   "line": 5,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Compiled bytecode MSLesionSimulator.pyc committed next to the source",
+     "file": "MSLesionSimulator/CMakeLists.txt",
+     "line_start": 5,
+     "line_end": 7,
+     "evidence": "set(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n  )",
+     "explanation": "The repository contains MSLesionSimulator/MSLesionSimulator.pyc (12777 bytes, binary) alongside MSLesionSimulator.py. CMake installs only the .py, so users do not load the .pyc, but a compiled blob in the source tree cannot be reviewed and could contain code different from the visible source; it also goes stale silently. Reviewers and users cannot verify what it contains.",
+     "suggestion": "Delete MSLesionSimulator/MSLesionSimulator.pyc and add *.pyc / __pycache__ to .gitignore.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/CMakeLists.txt",
+      "line": 5
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Failures are swallowed by bare except blocks and reported only to the log",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line": 471,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Failures are swallowed by bare except blocks and reported only to the log",
+     "file": "MSLesionSimulator/MSLesionSimulator.py",
+     "line_start": 470,
+     "line_end": 472,
+     "evidence": "except:\n            logging.info(\"Exception caught when trying to conform T2 image to reference space.\")",
+     "explanation": "Every processing step (registration, conform, deformation, longitudinal exams, and the return-to-original-space step) is wrapped in a bare except that logs at info level and continues. The user sees a completed run with missing or unprocessed modalities, and no error dialog. Examples include lines 638-643, 683-689 and 736-738. This is a silent-failure path for a medical image tool.",
+     "suggestion": "Catch specific exceptions, log at warning or error level, show a message to the user, and abort or mark the run as failed when a requested output could not be produced.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/MSLesionSimulator.py",
+      "line": 471
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Large binary data committed to git instead of downloaded on demand",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "MSLesionSimulator/CMakeLists.txt",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Large binary data committed to git instead of downloaded on demand",
+     "file": "MSLesionSimulator/CMakeLists.txt",
+     "line_start": 9,
+     "line_end": 14,
+     "evidence": "file(GLOB MSSimulator_50_100_DATA RELATIVE \"${CMAKE_CURRENT_SOURCE_DIR}\" \"Resources/MSlesion_database/labels-database/50-100/*.nii.gz\")\nfile(GLOB MSSimulator_100_500_DATA RELATIVE \"${CMAKE_CURRENT_SOURCE_DIR}\" \"Resources/MSlesion_database/labels-database/100-500/*.nii.gz\")",
+     "explanation": "The repository commits 2229 NIfTI files (951 + 945 + 139 + 118 + 76 in the five label directories) plus the 10 MB and 3 MB MNI152 templates, all packaged into every extension build. This bloats the source repository and every extension archive for all users, and the data cannot be updated without a new commit.",
+     "suggestion": "Move the lesion database and templates to ExternalData or a versioned download fetched on first use (with user confirmation), or at minimum document the total size.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/CMakeLists.txt",
+      "line": 9
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "All CLI processing runs synchronously on the GUI thread",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line": 828,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "All CLI processing runs synchronously on the GUI thread",
+     "file": "MSLesionSimulator/MSLesionSimulator.py",
+     "line_start": 853,
+     "line_end": 853,
+     "evidence": "slicer.cli.run(slicer.modules.brainsfit, None, regParams, wait_for_completion=True)",
+     "explanation": "onApplyButton calls logic.run directly, and every step (BrainsFit registration, GenerateMask, FilterMask, DeformImage, MSLongitudinalExams) uses wait_for_completion=True. A full run with several modalities and follow-ups can take many minutes, during which Slicer's UI is frozen with no progress bar or cancel option.",
+     "suggestion": "Run the pipeline in a background thread (e.g. ScriptedLoadableModuleLogic with a CLI status observer) or use slicer.cli.run with a completion callback and progress reporting.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "MSLesionSimulator/MSLesionSimulator.py",
+      "line": 828
+     }
+    }
+   ]
+  },
+  {
+   "title": "Apply button enabled state is assigned a node object instead of a boolean",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line": 351,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Apply button enabled state is assigned a node object instead of a boolean",
+     "file": "MSLesionSimulator/MSLesionSimulator.py",
+     "line_start": 351,
+     "line_end": 355,
+     "evidence": "def onSelect(self):\n    self.applyButton.enabled = self.inputT1Selector.currentNode()\\\n                               or self.inputT2Selector.currentNode()\\\n                               or self.inputFLAIRSelector.currentNode()\\\n                               or self.inputPDSelector.currentNode()",
+     "explanation": "The expression yields a vtkMRMLScalarVolumeNode (or None), not a bool, and is assigned to the Qt `enabled` property. Depending on the PyQt binding this either raises a TypeError during setup() or relies on implicit truthiness conversion; the intended `bool(...)` is missing.",
+     "suggestion": "Wrap the expression in bool(...).",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/MSLesionSimulator.py",
+      "line": 351
+     }
+    }
+   ]
+  },
+  {
+   "title": "Cxx CLI tests are unmodified templates that pass parameters the CLIs do not accept",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "FilterMask/Testing/Cxx/CMakeLists.txt",
+   "line": 16,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Cxx CLI tests are unmodified templates that pass parameters the CLIs do not accept",
+     "file": "FilterMask/Testing/Cxx/CMakeLists.txt",
+     "line_start": 16,
+     "line_end": 21,
+     "evidence": "ExternalData_add_test(${CLP}Data NAME ${testname} COMMAND ${SEM_LAUNCH_COMMAND} $<TARGET_FILE:${CLP}Test>\n  --compare DATA{${BASELINE}/${CLP}Test.nhdr,${CLP}Test.raw}\n  ${TEMP}/${CLP}Test.nhdr\n  ModuleEntryPoint\n  --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nhdr",
+     "explanation": "The same boilerplate test is used for FilterMask, GenerateMask, DeformImage and MSLongitudinalExams: it passes `--sigma 2.5` and a CT head volume, but FilterMask requires inputMask/cutFactor, GenerateMask requires lesionLoad/databasePath, and MSLongitudinalExams requires lesionLabel/outputFolder. These tests cannot pass and provide no verification of the modules.",
+     "suggestion": "Write per-module tests with the actual required arguments and baseline data, or remove the placeholder tests.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "FilterMask/Testing/Cxx/CMakeLists.txt",
+      "line": 16
+     }
+    }
+   ]
+  },
+  {
+   "title": "Lesion database file counts are off by one, so the last lesion of each size class is never selected",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "GenerateMask/GenerateMask.cxx",
+   "line": 66,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Lesion database file counts are off by one, so the last lesion of each size class is never selected",
+     "file": "GenerateMask/GenerateMask.cxx",
+     "line_start": 66,
+     "line_end": 69,
+     "evidence": "int numberOfSizes = 5;\n    int infoArray [5] = {950, 944, 138, 117, 75};\n    int maxSizeArray [5] = {100, 500, 1000, 5000, 15000};\n    std::string nameArray [5] = {\"50-100\", \"100-500\", \"500-1000\", \"1000-5000\", \"5000-more\"};",
+     "explanation": "The directories contain 951, 945, 139, 118 and 76 files respectively, but the hard-coded counts are one lower, so `rand() % infoArray[size]` never reaches the highest-numbered label file. The counts are also hard-coded rather than derived from the directory, so any database update silently breaks the mapping.",
+     "suggestion": "Count the files at runtime (or fix the constants to match) and derive the arrays from the database directory.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "GenerateMask/GenerateMask.cxx",
+      "line": 66
+     }
+    }
+   ]
+  },
+  {
+   "title": "Longitudinal output files overwrite existing files without confirmation",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MSLongitudinalExams/MSLongitudinalExams.cxx",
+   "line": 351,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Longitudinal output files overwrite existing files without confirmation",
+     "file": "MSLongitudinalExams/MSLongitudinalExams.cxx",
+     "line_start": 368,
+     "line_end": 375,
+     "evidence": "stringstream outputTimePoint;\n          outputTimePoint<<outputFolder<<PATH_SEPARATOR;\n          outputTimePoint<<\"vol\"<<imageModality<<\"_TimePoint_\"<<t<<\".nii.gz\";",
+     "explanation": "Output names are fixed (volT1_TimePoint_1.nii.gz, ...) in the user-selected folder, so a second run silently overwrites previous results. If outputFolder is left empty (the XML <directory> parameter has no default), files are written relative to the process working directory.",
+     "suggestion": "Create a timestamped subfolder or refuse to overwrite existing files, and validate that outputFolder is non-empty.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "MSLongitudinalExams/MSLongitudinalExams.cxx",
+      "line": 351
+     }
+    }
+   ]
+  },
+  {
+   "title": "No research-use / clinical-use disclaimer despite clinical framing",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "docs/index.md",
+   "line": 18,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No research-use / clinical-use disclaimer despite clinical framing",
+     "file": "docs/index.md",
+     "line_start": 18,
+     "line_end": 20,
+     "evidence": "- **Use Case 2:** Simulate longitudinal MS lesion progression on clinical healthy individuals MRI images\n\n    - Another important issue in Multiple Sclerosis diagnosis is the lesion progression, where drive the therapeutic strategy by the health professionals.",
+     "explanation": "The documentation motivates the tool with clinical diagnosis and therapy decisions but never states that simulated images are synthetic research data and must not be used for diagnosis or treatment decisions. Users could mistake simulated lesions for real findings.",
+     "suggestion": "Add an explicit statement that outputs are synthetic research data, not for clinical diagnosis or treatment planning.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "docs/index.md",
+      "line": 18
+     }
+    }
+   ]
+  },
+  {
+   "title": "Registered unit test uses Python-2-only urllib and a retired download URL",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line": 986,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Registered unit test uses Python-2-only urllib and a retired download URL",
+     "file": "MSLesionSimulator/MSLesionSimulator.py",
+     "line_start": 986,
+     "line_end": 995,
+     "evidence": "import urllib\n      downloads = (\n          ('http://slicer.kitware.com/midas3/download?items=5767', 'FA.nrrd', slicer.util.loadVolume),\n          )",
+     "explanation": "`urllib.urlretrieve` does not exist in Python 3 (it is urllib.request.urlretrieve), and slicer.kitware.com/midas3 is retired, so this test raises AttributeError or fails the download. Because MSLesionSimulator/CMakeLists.txt:38 registers it via slicer_add_python_unittest, the extension's own test suite fails in CI and gives no real coverage.",
+     "suggestion": "Use slicer.util.downloadFile / urllib.request.urlretrieve with a current URL, or use slicer.util.loadVolume on a Slicer sample data node.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/MSLesionSimulator.py",
+      "line": 986
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Bundled test downloads over plain HTTP with a Python 2 API",
+     "file": "MSLesionSimulator/MSLesionSimulator.py",
+     "line_start": 986,
+     "line_end": 995,
+     "evidence": "import urllib\ndownloads = (\n        ('http://slicer.kitware.com/midas3/download?items=5767', 'FA.nrrd', slicer.util.loadVolume),\n        )",
+     "explanation": "The test fetches FA.nrrd over unencrypted HTTP with no checksum, and calls urllib.urlretrieve, which does not exist in Python 3 (Slicer's runtime), so the test raises AttributeError. The test is registered via slicer_add_python_unittest in MSLesionSimulator/CMakeLists.txt, so it fails under ctest when it runs. The download is not a user-facing risk, but it is a real defect.",
+     "suggestion": "Use urllib.request.urlretrieve over HTTPS, verify a checksum, or ship small test data through ExternalData. Remove the dead legacy URL.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/MSLesionSimulator.py",
+      "line": 986
+     }
+    }
+   ]
+  },
+  {
+   "title": "Spin box configured with a fractional single step",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line": 239,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Spin box configured with a fractional single step",
+     "file": "MSLesionSimulator/MSLesionSimulator.py",
+     "line_start": 239,
+     "line_end": 243,
+     "evidence": "self.setBalanceHypo2IsoWidget = qt.QSpinBox()\n      self.setBalanceHypo2IsoWidget.setMaximum(100)\n      self.setBalanceHypo2IsoWidget.setMinimum(1)\n      self.setBalanceHypo2IsoWidget.setSingleStep(0.1)",
+     "explanation": "QSpinBox is integer-valued, so setSingleStep(0.1) truncates to 0 or 1 depending on the Qt version. The user may be unable to step the value as intended. This is an ordinary UI bug, not a safety issue.",
+     "suggestion": "Use a QDoubleSpinBox or an integer step of 1.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/MSLesionSimulator.py",
+      "line": 239
+     }
+    }
+   ]
+  },
+  {
+   "title": "Stale compiled Python 2 artifact is committed to the source tree",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MSLesionSimulator/MSLesionSimulator.pyc",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Stale compiled Python 2 artifact is committed to the source tree",
+     "file": "MSLesionSimulator/MSLesionSimulator.pyc",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "MSLesionSimulator/MSLesionSimulator.pyc  (12777 bytes, binary)",
+     "explanation": "A binary bytecode file is versioned next to the module source. It can be stale relative to MSLesionSimulator.py and is not needed by the build. It adds confusion about what was reviewed.",
+     "suggestion": "Remove the .pyc from the repository and add *.pyc to .gitignore (the current .gitignore is only 23 bytes).",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Terms for bundled brain template and lesion database are not stated",
+   "category": "license",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 19,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Terms for bundled brain template and lesion database are not stated",
+     "file": "README.md",
+     "line_start": 17,
+     "line_end": 21,
+     "evidence": "Please, note that this code is under the following license\n\n * Apache 2.0 - Read file: LICENSE",
+     "explanation": "The README and LICENSE cover only the code. The package redistributes MNI152 templates (MNI152_T1_1mm.nii.gz and related files) and a lesion-label database derived from manual mark-ups (about 2,200 files under MSLesionSimulator/Resources/MSlesion_database). Their redistribution terms are not stated anywhere in the repository. The MNI152 template and the lesion data may carry their own terms, which the reviewers could not verify here.",
+     "suggestion": "Add a data/NOTICE file naming the source and license of the MNI152 template and the lesion database, and confirm that redistribution is permitted.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 19
+     }
+    }
+   ]
+  },
+  {
+   "title": "Windows default output folder is the literal string '%userprofile%'",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line": 253,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Windows default output folder is the literal string '%userprofile%'",
+     "file": "MSLesionSimulator/MSLesionSimulator.py",
+     "line_start": 253,
+     "line_end": 257,
+     "evidence": "if platform.system() == \"Windows\":\n        home = expanduser(\"%userprofile%\")\n      else:\n        home = expanduser(\"~\")\n      self.outputFollowUpsSelector.directory = home",
+     "explanation": "os.path.expanduser does not expand Windows environment variables, so on Windows the longitudinal output directory defaults to a relative path named '%userprofile%'. MSLongitudinalExams then writes vol<modality>_TimePoint_<t>.nii.gz into that non-existent directory and the writer fails, or files land in an unexpected location.",
+     "suggestion": "Use os.path.expanduser('~') or os.environ.get('USERPROFILE') on Windows.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/MSLesionSimulator.py",
+      "line": 253
+     }
+    }
+   ]
+  },
+  {
+   "title": "Documentation license link points to a different repository",
+   "category": "license",
+   "severity": "info",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "info",
+    "info"
+   ],
+   "file": "docs/index.md",
+   "line": 167,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Documentation license link points to a different repository",
+     "file": "docs/index.md",
+     "line_start": 167,
+     "line_end": 167,
+     "evidence": "This project is under Apache version 2.0 license and following details are given at the [LICENSE](https://github.com/CSIM-Toolkits/SlicerDiffusionComplexityMap/blob/main/LICENSE) file in the project repository.",
+     "explanation": "The link targets SlicerDiffusionComplexityMap, not this repository, so the license reference is misleading (the local LICENSE file is Apache 2.0, so this is a documentation defect only).",
+     "suggestion": "Point the link at this repository's LICENSE file.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "docs/index.md",
+      "line": 167
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "License references point to a different project",
+     "file": "docs/index.md",
+     "line_start": 167,
+     "line_end": 167,
+     "evidence": "This project is under Apache version 2.0 license and following details are given at the [LICENSE](https://github.com/CSIM-Toolkits/SlicerDiffusionComplexityMap/blob/main/LICENSE) file in the project repository.",
+     "explanation": "The docs link the license to another repository (SlicerDiffusionComplexityMap). GenerateMask/GenerateMask.xml also has an empty <license/>. These are documentation inconsistencies, not a distribution blocker, since the root LICENSE is Apache-2.0.",
+     "suggestion": "Point the link to this repository's LICENSE and set the GenerateMask license field to match.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "docs/index.md",
+      "line": 167
+     }
+    }
+   ]
+  },
+  {
+   "title": "Extension description contains an empty DOI placeholder",
+   "category": "utility",
+   "severity": "info",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "info",
+    "info"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 12,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Extension description contains an empty DOI placeholder",
+     "file": "CMakeLists.txt",
+     "line_start": 12,
+     "line_end": 12,
+     "evidence": "For more details about this project, please see the original paper (DOI: ) and the wiki page.",
+     "explanation": "The catalog/extension description shows an empty DOI even though the paper DOI (10.1088/2057-1976/ab08fc) is known and cited in README.md and docs/index.md.",
+     "suggestion": "Fill in the DOI in EXTENSION_DESCRIPTION.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 12
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Catalog entry tracks a branch, not a pinned revision",
+     "file": "CMakeLists.txt",
+     "line_start": 9,
+     "line_end": 12,
+     "evidence": "set(EXTENSION_DESCRIPTION \"This extension offer a set of tools for brain lesion simulation, based on MRI images.",
+     "explanation": "The catalog entry uses scm_revision \"main\", so the built source changes with every commit and what is built is not fixed. The description also has an empty DOI placeholder (\"(DOI: )\"). These are metadata and reproducibility issues rather than admission blockers, but the review covers only the revision I could inspect (the entry's commit is given as e17cad0), and I could not verify that it matches main.",
+     "suggestion": "Pin scm_revision to a reviewed commit or release tag, and fill in the DOI in the description.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 12
+     }
+    }
+   ]
+  },
+  {
+   "title": "Inconsistent CLI license metadata",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "GenerateMask/GenerateMask.xml",
+   "line": 8,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Inconsistent CLI license metadata",
+     "file": "GenerateMask/GenerateMask.xml",
+     "line_start": 8,
+     "line_end": 8,
+     "evidence": "<license/>",
+     "explanation": "GenerateMask.xml declares an empty license while the other three XMLs declare `<license>Slicer</license>`; neither matches the Apache-2.0 LICENSE file. This is metadata only and does not affect loading.",
+     "suggestion": "Set the license field to Apache-2.0 in all four XML descriptions.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GenerateMask/GenerateMask.xml",
+      "line": 8
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Bare except blocks hide all processing failures from the user",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line": 470,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Bare except blocks hide all processing failures from the user",
+     "file": "MSLesionSimulator/MSLesionSimulator.py",
+     "line_start": 470,
+     "line_end": 472,
+     "evidence": "self.conformInputSpace(referenceVolume, inputT2Volume, inputT2Volume, regT2toRefTransform, numberOfThreads)\n          except:\n            logging.info(\"Exception caught when trying to conform T2 image to reference space.\")",
+     "explanation": "Every registration, mask generation, lesion deformation and space-restoration step (lines 464-512, 638-724, 732-770, 780-808) is wrapped in a bare `except:` that only writes an info-level log line. If registration or a CLI fails, the run continues and produces images in the wrong space or with no lesions, and the user sees only 'Processing completed' (line 810-811). For a tool whose output is used as simulated ground truth, silently wrong results are worse than an error.",
+     "suggestion": "Catch specific exceptions, report them with slicer.util.errorDisplay / slicer.util.showStatusMessage and abort or mark the affected modality as failed.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/MSLesionSimulator.py",
+      "line": 470
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Input volume nodes are overwritten in place by the simulation pipeline",
+     "file": "MSLesionSimulator/MSLesionSimulator.py",
+     "line_start": 470,
+     "line_end": 470,
+     "evidence": "self.conformInputSpace(referenceVolume, inputT2Volume, inputT2Volume, regT2toRefTransform, numberOfThreads)",
+     "explanation": "conformInputSpace passes inputT2Volume as both the moving and the result node, so BRAINSFit writes the resampled data back into the user's loaded T2 node. Line 641 does the same for the lesion step: doSimulateLesions(inputT1Volume, \"T1\", lesionMapT1, inputT1Volume, ...) uses the input node as its output. The original scan in the Slicer scene is therefore replaced by a lesioned, resampled version, with no warning and no copy. A user who saves the scene or reruns with the same inputs loses the original data. The same pattern appears for FLAIR, PD, FA and ADC.",
+     "suggestion": "Clone each input into a new output node before any processing, write results only to new nodes, and state the behavior in the UI and docs if in-place modification is intended.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/MSLesionSimulator.py",
+      "line": 470
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Bundled MNI152 templates and lesion database have no stated license or provenance",
+   "category": "license",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "docs/index.md",
+   "line": 143,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Bundled MNI152 templates and lesion database have no stated license or provenance",
+     "file": "docs/index.md",
+     "line_start": 143,
+     "line_end": 143,
+     "evidence": "T1 weighted MRI brain in axial orientation (provided by the ICBM-MNI152 non linear brain template)",
+     "explanation": "The extension ships MNI152_T1_1mm.nii.gz (10 MB) and MNI152_T1_1mm_brain.nii.gz (3 MB) plus ~2229 lesion label NIfTIs derived from manual MS lesion mark-ups. The only license statement (README.md:21 'Apache 2.0 - Read file: LICENSE') covers the code; nothing states the terms under which the MNI/ICBM template or the lesion database may be redistributed, nor the provenance/de-identification of the source lesion mark-ups. Users and the index cannot confirm distribution permission for this bundled data.",
+     "suggestion": "Add a data-provenance/license section (or NOTICE file) stating the source and redistribution terms of the MNI152 templates and the lesion database, and confirm the mark-ups are de-identified and redistributable.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "docs/index.md",
+      "line": 143
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Compiled bytecode MSLesionSimulator.pyc committed next to the source",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "MSLesionSimulator/CMakeLists.txt",
+   "line": 5,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Compiled bytecode MSLesionSimulator.pyc committed next to the source",
+     "file": "MSLesionSimulator/CMakeLists.txt",
+     "line_start": 5,
+     "line_end": 7,
+     "evidence": "set(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n  )",
+     "explanation": "The repository contains MSLesionSimulator/MSLesionSimulator.pyc (12777 bytes, binary) alongside MSLesionSimulator.py. CMake installs only the .py, so users do not load the .pyc, but a compiled blob in the source tree cannot be reviewed and could contain code different from the visible source; it also goes stale silently. Reviewers and users cannot verify what it contains.",
+     "suggestion": "Delete MSLesionSimulator/MSLesionSimulator.pyc and add *.pyc / __pycache__ to .gitignore.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/CMakeLists.txt",
+      "line": 5
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Failures are swallowed by bare except blocks and reported only to the log",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line": 471,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Failures are swallowed by bare except blocks and reported only to the log",
+     "file": "MSLesionSimulator/MSLesionSimulator.py",
+     "line_start": 470,
+     "line_end": 472,
+     "evidence": "except:\n            logging.info(\"Exception caught when trying to conform T2 image to reference space.\")",
+     "explanation": "Every processing step (registration, conform, deformation, longitudinal exams, and the return-to-original-space step) is wrapped in a bare except that logs at info level and continues. The user sees a completed run with missing or unprocessed modalities, and no error dialog. Examples include lines 638-643, 683-689 and 736-738. This is a silent-failure path for a medical image tool.",
+     "suggestion": "Catch specific exceptions, log at warning or error level, show a message to the user, and abort or mark the run as failed when a requested output could not be produced.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/MSLesionSimulator.py",
+      "line": 471
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Large binary data committed to git instead of downloaded on demand",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "MSLesionSimulator/CMakeLists.txt",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Large binary data committed to git instead of downloaded on demand",
+     "file": "MSLesionSimulator/CMakeLists.txt",
+     "line_start": 9,
+     "line_end": 14,
+     "evidence": "file(GLOB MSSimulator_50_100_DATA RELATIVE \"${CMAKE_CURRENT_SOURCE_DIR}\" \"Resources/MSlesion_database/labels-database/50-100/*.nii.gz\")\nfile(GLOB MSSimulator_100_500_DATA RELATIVE \"${CMAKE_CURRENT_SOURCE_DIR}\" \"Resources/MSlesion_database/labels-database/100-500/*.nii.gz\")",
+     "explanation": "The repository commits 2229 NIfTI files (951 + 945 + 139 + 118 + 76 in the five label directories) plus the 10 MB and 3 MB MNI152 templates, all packaged into every extension build. This bloats the source repository and every extension archive for all users, and the data cannot be updated without a new commit.",
+     "suggestion": "Move the lesion database and templates to ExternalData or a versioned download fetched on first use (with user confirmation), or at minimum document the total size.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "MSLesionSimulator/CMakeLists.txt",
+      "line": 9
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D6",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of packaging",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "minor"
+   }
+  },
+  {
+   "title": "Rating of license",
+   "category": "license",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D8",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "minor"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D9",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8",
+  "D9"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "packaging": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 9,
+  "single": 15,
+  "unverified": 1,
+  "total": 19
+ }
+}

@@ -1,0 +1,131 @@
+{
+ "purpose": "Taranis is a suite of Slicer scripted modules for voxel-based Y-90 radioembolization dosimetry, lung shunt fraction, CBCT territory planning, and AI-assisted liver/lung segmentation. It is aimed at researchers and clinical physicists working with SPECT/PET/CT in Slicer.",
+ "summary": "No malicious or concealed behaviour found in the files read. Model downloads are SHA256-checked and user-confirmed, and MONAI is installed with --no-deps after confirmation. Main concerns: the CBCT module installs scikit-image with its dependencies into Slicer's shared Python without --no-deps, and model weights are loaded with torch.load. Licence is MIT. Coverage is partial: I read about a quarter of the ~20k lines and did not read Taranis.py, dosimetry.py or the other large modules in full.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Model downloads go to a fixed GitHub release URL with SHA256 checks and a user prompt (Taranis/TaranisLib/ai.py:165-177, LSFcalc/LSFcalc.py:1301-1316). Weights are loaded with torch.load without weights_only (ai.py:437), so a tampered local .pth in a user-chosen folder could run code. No telemetry or outbound data upload was found in the searches."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "CBCTPlanning/CBCTPlanning.py:822 runs a plain pip_install of scikit-image, which can pull or upgrade shared packages such as numpy or scipy. The MONAI path correctly uses --no-deps (Taranis/Taranis.py:2166). The module-level sys.path.append fallbacks in three module files are generic."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists files list the Python and resource files I checked. EXTENSION_DEPENDS is \"NA\" and build_dependencies is empty, while the runtime needs the PyTorch extension (optional) and TotalSegmentator (optional); this is documented in-app. banner.png (about 1.7 MB) is duplicated in four module folders, and the repository holds several multi-MB JPEG/PNG screenshots."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is MIT (Copyright 2025 Burak Demir), which permits distribution. Model weights come from SlicerAether, whose licence I did not check. TotalSegmentator liver-lesion tasks are non-commercial only, and the README and UI state this."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Inference runs on the main thread with a WaitCursor and no progress (ai.py:440-444). Temporary files are cleaned up in finally blocks (dicomexport.py:163-209, dosimetry.py:1520-1531). Several test CMake entries for the submodules are commented out."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md is long (~530 lines) with a user manual, a sample-data pointer, and clear research-use disclaimers shown in the UI (Taranis.py:104-105). Unit tests exist under Taranis/Testing/Python. Clinical use is explicitly disclaimed."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "CBCT planning installs scikit-image with dependencies into Slicer's shared Python",
+   "file": "CBCTPlanning/CBCTPlanning.py",
+   "line_start": 815,
+   "line_end": 825,
+   "evidence": "slicer.util.pip_install(\"scikit-image\")",
+   "explanation": "The user is asked to confirm, but the install is a plain pip_install with no --no-deps, so scikit-image's declared requirements (numpy/scipy/etc.) can be upgraded or changed in Slicer's shared environment and affect other extensions. The MONAI path already avoids this with --no-deps. Requirements are not pinned, so a downgrade of a bundled package is possible through transitive dependencies.",
+   "suggestion": "Install with --no-deps after checking that numpy/scipy/imageio/etc. are already present, or pin a compatible version range and document the change in the confirmation dialog.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "torch.load of model weights without weights_only",
+   "file": "Taranis/TaranisLib/ai.py",
+   "line_start": 437,
+   "line_end": 437,
+   "evidence": "model.load_state_dict(torch.load(modelPath, map_location=device))",
+   "explanation": "Weights are loaded with torch.load(modelPath) from any file found in user-selected or module folders. The download path verifies SHA256, but files already on disk, or files placed in the custom AI models folder, are trusted without a checksum. On PyTorch versions where weights_only defaults to False, a malicious .pth can execute code on load. Exposure is limited to users who place untrusted files in those folders.",
+   "suggestion": "Pass weights_only=True to torch.load (state_dict only), and verify the SHA256 of local files when they match a known model name.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Same torch.load pattern in the LSF calculator",
+   "file": "LSFcalc/LSFcalc.py",
+   "line_start": 1710,
+   "line_end": 1710,
+   "evidence": "model.load_state_dict(torch.load(modelPath, map_location=device))",
+   "explanation": "LSFcalc loads the same weights the same way, so the same risk applies to the LSF module's model folders.",
+   "suggestion": "Use weights_only=True and share the verified loader between the two modules.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "sys.path.append with a generic path at import time in three modules",
+   "file": "CBCTPlanning/CBCTPlanning.py",
+   "line_start": 27,
+   "line_end": 31,
+   "evidence": "sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), \"Taranis\"))",
+   "explanation": "When TaranisLib cannot be imported, these modules append a Taranis folder to sys.path. This is a global side effect at import in Slicer's process and may pick up an unrelated TaranisLib package. It is only reached in the fallback branch.",
+   "suggestion": "Rely on the extension's CMake install, which already installs TaranisLib next to each module, or remove the fallback for release builds.",
+   "confidence": "low"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Large binary images committed to the repository",
+   "file": "RadioembolizationDosimetryAbsolute/Resources/banner.png",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "RadioembolizationDosimetryAbsolute/Resources/banner.png  (1736880 bytes, binary)",
+   "explanation": "banner.png (about 1.7 MB) is duplicated in four module Resources folders, and several multi-megabyte screenshots and JPEGs are in the repository root. These bloat the clone and are not needed at runtime beyond the icon and banner.",
+   "suggestion": "Keep one shared copy of the banner and move the large screenshots to a release asset or external URL, which EXTENSION_SCREENSHOTURLS already references.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Licence of downloaded model weights not stated in what was reviewed",
+   "file": "README.md",
+   "line_start": 532,
+   "line_end": 533,
+   "evidence": "Taranis is released under the **MIT License**.",
+   "explanation": "The app downloads model weights from the SlicerAether release, but the licence of those weights is not stated in this repository. The extension's MIT licence covers only the code. TotalSegmentator-based liver-lesion tasks are non-commercial only, and the README and UI state this.",
+   "suggestion": "State the licence of the downloaded model weights (SlicerAether release) and the TotalSegmentator terms in the README.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Tests for submodules are not registered with CTest",
+   "file": "LSFcalc/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The per-module Testing/Python CMakeLists for LSFcalc, easy_reg, and the dosimetry modules only contain commented-out slicer_add_python_unittest calls. Only the hub has unit tests wired into the build, so regressions in those modules would not be caught by CI.",
+   "suggestion": "Register the existing module tests, or remove the empty test directories.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Taranis/Taranis.py, Taranis/TaranisLib/dosimetry.py, cbct.py, vascular.py, controller.py, segtools.py, workflow.py, and most other large modules were not read in full; findings there are unverified.",
+  "LSFcalc/LSFcalc.py, RadioembolizationDosimetry* and easy_reg.py were only sampled through search hits.",
+  "The scm_revision is 'main' (a moving branch); the reviewed source snapshot is not pinned to a commit.",
+  "No CI results or test runs were available; the test suite was not executed.",
+  "Licence terms of the SlicerAether model weights and the SampleImages data were not checked.",
+  "Large binary files (screenshots, banner) were listed but not inspected."
+ ],
+ "questions_for_author": [
+  "Why is scikit-image installed without --no-deps, and have you checked that its dependencies do not change numpy or scipy in Slicer?",
+  "Can torch.load be called with weights_only=True for both the Taranis and LSF model loaders?",
+  "What is the licence of the SlicerAether model weights, and are they cleared for redistribution through your download?",
+  "Can you pin scm_revision to a tagged commit instead of 'main'?"
+ ]
+}

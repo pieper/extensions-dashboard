@@ -1,0 +1,113 @@
+{
+ "purpose": "CADSWholeBodyCTSeg segments anatomical structures in whole-body CT images using the CADS model. It provides Slicer users with task and target selection, terminology mapping, and segmentation output.",
+ "summary": "The wrapper, build files, UI, documentation, and supplied licenses were inspected. Applying the module can replace Slicer's bundled NumPy with an exact older version and install dependencies without prior confirmation. The external CADS implementation and model download path were not available for safety review, and the catalog branch and supplied commit could not be independently resolved. 🔴 Do not merge yet: fix the shared-environment changes and complete the external payload and revision review.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "unknown",
+   "rationale": "The wrapper downloads and installs a pinned CADS archive and launches its executable on a temporary CT file; the downloaded code and its model-loading and network behavior were not available to inspect. No patient-data transmission is evident in the inspected wrapper, but the subprocess behavior remains unknown."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "setupPythonRequirements installs numpy==1.26.4 and other packages into Slicer's shared environment when Apply is clicked, without an installation confirmation. The package's transitive requirements were not available for inspection."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "CMake lists the Python module and the UI, icon, CSV and terminology resources, and its PyTorch and NNUNet dependencies match the supplied catalog entry. Repository accessibility, moving-branch resolution, and an actual build were not verifiable."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "The extension has Apache 2.0 terms and describes the model weights as CC BY-NC-SA 4.0, which permits redistribution subject to conditions and restricts commercial use. The actual downloaded model and external package licenses could not be independently checked."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The first-use import failure disables the all-targets radio button without a corresponding re-enable, and the subprocess output is read synchronously. Parameter-node state, temporary folder cleanup and error displays are otherwise present."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md provides a quick start, installation instructions, model reference and paper, but the test uses an echo command instead of validating real segmentation output. It describes clinical workflows while model weights are documented as non-commercial."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Apply pins and can downgrade Slicer's bundled NumPy",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 993,
+   "line_end": 1001,
+   "evidence": "        # Step 1) Install base dependencies first\n        # To avoid repeated uninstall/install of packages, we specify exact versions of some packages\n        base_packages = [\n            \"numpy==1.26.4\",\n            \"scikit-image==0.22.0\",",
+   "explanation": "The Apply handler invokes this setup before segmentation. On a Slicer installation with a different NumPy version, pip may replace the shared bundled package, breaking Slicer or other extensions, including in later sessions. The installation happens even before checking whether PyTorch is available.",
+   "suggestion": "Do not pin or replace Slicer-bundled NumPy; use compatible dependencies or isolate the inference environment from Slicer's Python.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "First Apply installs dependencies without asking for confirmation",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 385,
+   "line_end": 388,
+   "evidence": "        try:\n            slicer.app.setOverrideCursor(qt.Qt.WaitCursor)\n            self.logic.setupPythonRequirements()\n            slicer.app.restoreOverrideCursor()",
+   "explanation": "Clicking Apply immediately starts package installation and shared-environment changes, including the CADS archive and its dependencies when absent. There is no confirmation before this installation path; a status message after starting is not consent to downloads or changes.",
+   "suggestion": "Before modifying the environment, explain the packages and download size and obtain explicit confirmation; allow cancellation without changes.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "All-target mode stays disabled after first-use installation",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 319,
+   "line_end": 325,
+   "evidence": "        except ImportError:\n            self.ui.allTargetsRadio.setEnabled(False)\n            self.ui.targetsList.setEnabled(True)\n            # CADSWholeBodyCTSeg package not installed (when open this extension for the very 1st time)\n            self.ui.targetsList.addItem(\"CADSWholeBodyCTSeg package needs to be installed first.\")\n            self.ui.targetsList.addItem(\"You can either:\")",
+   "explanation": "On a fresh installation, opening the module before CADS is installed disables the all-targets radio button. The successful updateTargetsList path never re-enables it, and Apply does not refresh the list after installing CADS, so users cannot select that mode in the current widget session.",
+   "suggestion": "Refresh the list after successful setup and explicitly re-enable allTargetsRadio when the package becomes available.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Inference output blocks the GUI thread while awaiting lines",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 1139,
+   "line_end": 1146,
+   "evidence": "        while True:\n            try:\n                line = proc.stdout.readline()\n                if not line:\n                    break\n                if returnOutput:\n                    output += line\n                self.log(line.rstrip())",
+   "explanation": "Apply calls this synchronous reader after launching CADS. While inference emits no output, readline blocks the UI event loop, potentially making Slicer unresponsive for the lengthy inference interval.",
+   "suggestion": "Use asynchronous process notifications or a worker thread and provide responsive progress and cancellation.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Segmentation test does not verify segmentation output",
+   "file": "CADSWholeBodyCTSeg/CADSWholeBodyCTSeg.py",
+   "line_start": 1623,
+   "line_end": 1631,
+   "evidence": "                task=\"551\",\n                subset=None,\n                cpu=True,\n                cadsCommand=[\"echo\", \"test\"]\n            )\n            \n            shutil.rmtree(tempFolder)\n            \n            self.delayDisplay('Segmentation processing test passed')",
+   "explanation": "The test substitutes echo for inference and does not assert the returned result or any segments. A run returning an empty list because no output file exists can be reported as passing, so it does not detect a broken inference/import pipeline.",
+   "suggestion": "Add a deterministic test with representative generated labelmaps and assertions, and an integration test for real inference where practical.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Model weights carry non-commercial terms",
+   "file": "LICENSE_MODEL",
+   "line_start": 3,
+   "line_end": 5,
+   "evidence": "The model weights released in the Releases section of this repository are licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).\n\nThis licensing reflects the inclusion of training data with non-commercial restrictions.",
+   "explanation": "The stated license permits redistribution under conditions but limits commercial use; the README also calls the weights research-only while describing clinical workflows. Users should be made aware of these restrictions before downloading or using the model.",
+   "suggestion": "Surface the model terms and intended-use limitations in the module before model download or inference.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No network or execution tools were available to resolve main or independently verify the supplied commit d06eaf8b2c5b3800227d38266ffbc24f8024a5ed, repository accessibility, catalog schema validity, CI, or an actual Slicer build and run.",
+  "The externally downloaded CADS archive at 457638bac28e8618a66e9d4c56d5ade824acc87c, its transitive package requirements, inference code, network behavior, model acquisition and actual model license were not accessible for inspection.",
+  "Previous catalog entry, submission checklist and prior reviewed source baseline were not provided."
+ ],
+ "questions_for_author": [
+  "Can you provide the pinned CADS source and exact model download code and license for independent safety and distribution review?"
+ ]
+}

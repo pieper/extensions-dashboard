@@ -1,0 +1,663 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Calculation silently clears an existing named segmentation",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+   "line": 393,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Calculation silently clears an existing named segmentation",
+     "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+     "line_start": 393,
+     "line_end": 398,
+     "evidence": "    def _createSegmentation(self, referenceVolumeNode, cistern_masks, colors):\n        segmentationNode = slicer.mrmlScene.GetFirstNodeByName(\"Cisterna volumes\")\n        if segmentationNode is None:\n            segmentationNode = slicer.mrmlScene.AddNewNodeByClass(\"vtkMRMLSegmentationNode\", \"Cisterna volumes\")\n        else:\n            segmentationNode.GetSegmentation().RemoveAllSegments()",
+     "explanation": "Calculating again, including on another patient, removes all segments from the first scene node with this name without warning. A user may have edited the previous result or have an unrelated segmentation with that name, so unsaved work is lost. A same-named node of another type also causes an exception.",
+     "suggestion": "Create a uniquely named output by default, or let the user explicitly select an output and confirm replacement before modifying it.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+      "line": 393
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "CisternaMagnaVolumetry.py:393-398 reuses first node named 'Cisterna volumes' and calls RemoveAllSegments(). Real, but it is the module's own output node, so it is a re-run overwrite. It is not a safety blocker. Only a user-edited result or a same-named non-segmentation node would be affected, and the latter raises an error."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py:393-398 uses `segmentationNode = slicer.mrmlScene.GetFirstNodeByName(\"Cisterna volumes\")` and, if a node exists, `segmentationNode.GetSegmentation().RemoveAllSegments()`. Both calculation routes call this function (lines 294 and 367); no replacement confirmation is shown by the Calculate handler at lines 188-220. A repeat calculation or name collision can destroy unsaved edits or unrelated segments; a same-named node without GetSegmentation raises an exception. This is a concrete path to unintended data loss, not merely a correctness bug."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked CisternaMagnaVolumetry/CisternaMagnaVolumetry.py:393-398. `_createSegmentation` looks up `slicer.mrmlScene.GetFirstNodeByName(\"Cisterna volumes\")` and if found calls `segmentationNode.GetSegmentation().RemoveAllSegments()`. This is an ordinary UI/module design shortcoming (reusing a hardcoded output node name rather than using an output node selector or checking node class), not a blocking safety issue under AGENTS.md policy (\"Do not label ordinary bugs as safety issues merely because the extension processes medical images\")."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Canonical voxel spacing uses the forward permutation rather than its inverse",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py",
+   "line": 440,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Canonical voxel spacing uses the forward permutation rather than its inverse",
+     "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py",
+     "line_start": 440,
+     "line_end": 445,
+     "evidence": "        self.to_canonical = ornt_transform(orig_ornt, target_ornt)\n        self.from_canonical = ornt_transform(target_ornt, orig_ornt)\n        self._source_axis_for_canonical = [int(self.to_canonical[i, 0]) for i in range(3)]\n\n    def canonical_voxel_sizes(self, voxel_sizes: Tuple[float, float, float]) -> Tuple[float, float, float]:\n        return tuple(float(voxel_sizes[i]) for i in self._source_axis_for_canonical)",
+     "explanation": "Nibabel's orientation rows map input axes to output axes, whereas spacing in canonical order needs the inverse mapping. For a three-axis cyclic permutation with anisotropic voxels, distances and millimeter cutoffs are assigned to the wrong axes, producing incorrect masks and volumes despite correct reorientation of the array.",
+     "suggestion": "Invert the orientation permutation, for example using its argsort, and test all axis permutations with unequal spacings.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py",
+      "line": 440
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "cisterna_core.py:440-445: ornt_transform row i gives the output axis for input axis i. canonical_voxel_sizes indexes voxel_sizes by to_canonical[i,0] for each canonical axis i, which is the forward permutation where the inverse is needed. This is harmless for self-inverse swaps, such as axial Slicer arrays (S,A,R)->RAS. It is wrong for 3-cycles, such as coronal acquisitions (array A,S,R), when voxels are anisotropic. Distances and mm cutoffs then use the wrong axes."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py:440-448 sets `self._source_axis_for_canonical = [int(self.to_canonical[i, 0]) for i in range(3)]` and indexes voxel sizes using that list. Nibabel's orientation rows map input axes to output positions; canonical-axis indexing requires the inverse permutation. For a cyclic mapping [1,2,0], this returns sizes [s1,s2,s0] rather than [s2,s0,s1]. With unequal spacing this changes distance and cutoff calculations (lines 300-327) and therefore masks and measured volumes; the per-voxel volume itself is still the correct product (lines 486-487). This is a major correctness issue, non-blocking for admission."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py:437-446. In nibabel, `ornt_transform(orig_ornt, target_ornt)` has row `i` representing original axis `i` and `ornt[i, 0]` giving the canonical axis index that original axis `i` maps to (`out_ax = to_canonical[in_ax, 0]`). Using `self.to_canonical[i, 0]` to index `voxel_sizes` applies the forward permutation rather than its inverse (`self.from_canonical[i, 0]`), which swaps voxel spacings for 3-cycle axis permutations with anisotropic voxels."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Matching array dimensions are mistaken for matching physical geometry",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+   "line": 356,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Matching array dimensions are mistaken for matching physical geometry",
+     "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+     "line_start": 356,
+     "line_end": 364,
+     "evidence": "        t1 = slicer.util.arrayFromVolume(t1Node)\n        resampled = None\n        if t1.shape != seg.shape:\n            resampled = slicer.modules.volumes.logic().ResampleVolumeToReferenceVolume(t1Node, refNode)\n            t1 = slicer.util.arrayFromVolume(resampled)\n        affine = self._arrayAffineFromVolumeNode(refNode)\n        spacing = refNode.GetSpacing()\n        voxel_sizes = (spacing[2], spacing[1], spacing[0])\n        masks, external_csf, volumes, extra = run_cistern_analysis_synthseg(seg, affine, voxel_sizes, t1)",
+     "explanation": "Same-sized T1 and SynthSeg volumes with different origins, spacing, orientations, or transforms skip resampling, so T1 intensities are sampled at wrong anatomical positions during CSF refinement. The VolBrain path similarly checks only array shape before combining the label arrays with T1 geometry.",
+     "suggestion": "Compare complete image-to-world geometries including parent transforms; resample to a common reference or reject inputs that are not aligned.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+      "line": 356
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "CisternaMagnaVolumetry.py:358 resamples only when t1.shape != seg.shape, with no check of origin, spacing or direction. This is real. It matters only when the grids have the same dimensions but different geometry, which is uncommon. With a SlicerSynthSeg segmentation the reference is the T1 itself, so the problem does not arise there."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py:356-364 only resamples on `if t1.shape != seg.shape:` before passing T1 and labels to analysis. Matching shapes can still have different origins, spacings, orientations or parent transforms, so SynthSeg refinement can read intensities at corresponding indices rather than corresponding physical locations (cisterna_core.py:493-503). The VolBrain route likewise checks only array shapes and then uses T1 geometry for both label arrays (module lines 271-291); its core does not otherwise use T1 intensity. This can corrupt masks and measurements, but is an ordinary non-blocking correctness issue."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked CisternaMagnaVolumetry/CisternaMagnaVolumetry.py:271-285 and 356-364. Both `run` (VolBrain path) and `runSynthSeg` (SynthSeg volume path) only compare numpy array shapes (`t1.shape != seg.shape` or `tissues_array.shape != t1_array.shape`) without verifying that origin, spacing, direction matrix, or parent transforms match before combining voxel arrays."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Current method has limited independent validation",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 91,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Current method has limited independent validation",
+     "file": "README.md",
+     "line_start": 91,
+     "line_end": 97,
+     "evidence": "the reachable part. The ambiens and quadrigeminalis limits were set on the same case they are\nscored on, so these two Dice values are optimistic (so is the interpeduncular value: the\npeduncle limit was added after looking at this case). The SynthSeg route has no\nmanual-mask comparison yet; on 20 T1 scans (10 controls, 10 Parkinson's disease) the\ninterpeduncular cistern ranged 0.13–1.25 cm³ and every mask was checked visually. Two cases are not a validation\nstudy: treat the volumes as research measurements and check every result\nvisually.",
+     "explanation": "The documented tuning and evaluation overlap and lack of SynthSeg manual-mask comparisons limit confidence in measurements across subjects and scanners. The README appropriately warns users; this is non-blocking research-maturity feedback.",
+     "suggestion": "Add independent multi-case validation for both input paths and automated regression tests on shareable data.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 91
+     }
+    }
+   ]
+  },
+  {
+   "title": "Fallback junction may refer to a missing brainstem slice",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py",
+   "line": 311,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Fallback junction may refer to a missing brainstem slice",
+     "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py",
+     "line_start": 311,
+     "line_end": 315,
+     "evidence": "    Ss = np.where(bs.any(axis=(0, 2)))[0]; top = Ss.max()\n    ant = {S: np.argwhere(bs[:, S, :])[:, 0].min() for S in Ss}\n    a_mid = np.median([ant[S] for S in Ss if S > top - round(10 / v1)])\n    pons = [S for S in Ss if ant[S] <= a_mid - 6 / v0]\n    pmj = max(pons) if pons else top - round(18 / v1)",
+     "explanation": "When no pons jump is found, the fallback slice need not contain any brainstem voxels; the later ant[pmj] lookup then raises a KeyError and calculation fails. Slice ranges can also extend beyond image bounds for cropped inputs.",
+     "suggestion": "Clamp the analysis slab to the image and choose an existing brainstem slice for the fallback, or report a clear landmark error.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py",
+      "line": 311
+     }
+    }
+   ]
+  },
+  {
+   "title": "Self-test fails in a clean Slicer environment without nibabel installed",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+   "line": 428,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Self-test fails in a clean Slicer environment without nibabel installed",
+     "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+     "line_start": 428,
+     "line_end": 433,
+     "evidence": "    def test_ModuleImports(self):\n        self.delayDisplay(\"Testing cisterna_core import\")\n        moduleDir = os.path.dirname(__file__)\n        if moduleDir not in sys.path:\n            sys.path.insert(0, moduleDir)\n        from CisternaMagnaVolumetryLib import cisterna_core  # noqa: F401",
+     "explanation": "`CisternaMagnaVolumetryTest.test_ModuleImports` imports `cisterna_core` directly without calling `CisternaMagnaVolumetryLogic()._ensureDependencies()`. Because `cisterna_core.py` imports `nibabel` at top level (line 33), the automated self-test will fail with `ModuleNotFoundError: No module named 'nibabel'` in a fresh Slicer environment where `nibabel` has not yet been installed.",
+     "suggestion": "Ensure `nibabel` is installed before importing `cisterna_core` in the test, or avoid top-level `nibabel` dependency by implementing the simple axis permutation directly in NumPy.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+      "line": 428
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unnecessary pip_install of bundled scipy package",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+   "line": 259,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Unnecessary pip_install of bundled scipy package",
+     "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+     "line_start": 259,
+     "line_end": 262,
+     "evidence": "            if proceed:\n                slicer.util.pip_install(\"nibabel scipy\")\n            else:\n                raise RuntimeError(\"nibabel/scipy are not installed, cannot compute.\")",
+     "explanation": "Slicer already bundles `scipy`. Passing `scipy` to `pip_install` when `nibabel` is missing is unnecessary and can cause pip to resolve or reinstall `scipy` in Slicer's shared Python environment. Only `nibabel` needs to be installed if missing.",
+     "suggestion": "Check and install only `nibabel` via `slicer.util.pip_install(\"nibabel\")`, since `scipy` is already bundled with 3D Slicer.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+      "line": 259
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Calculation silently clears an existing named segmentation",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+   "line": 393,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Calculation silently clears an existing named segmentation",
+     "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+     "line_start": 393,
+     "line_end": 398,
+     "evidence": "    def _createSegmentation(self, referenceVolumeNode, cistern_masks, colors):\n        segmentationNode = slicer.mrmlScene.GetFirstNodeByName(\"Cisterna volumes\")\n        if segmentationNode is None:\n            segmentationNode = slicer.mrmlScene.AddNewNodeByClass(\"vtkMRMLSegmentationNode\", \"Cisterna volumes\")\n        else:\n            segmentationNode.GetSegmentation().RemoveAllSegments()",
+     "explanation": "Calculating again, including on another patient, removes all segments from the first scene node with this name without warning. A user may have edited the previous result or have an unrelated segmentation with that name, so unsaved work is lost. A same-named node of another type also causes an exception.",
+     "suggestion": "Create a uniquely named output by default, or let the user explicitly select an output and confirm replacement before modifying it.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+      "line": 393
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "CisternaMagnaVolumetry.py:393-398 reuses first node named 'Cisterna volumes' and calls RemoveAllSegments(). Real, but it is the module's own output node, so it is a re-run overwrite. It is not a safety blocker. Only a user-edited result or a same-named non-segmentation node would be affected, and the latter raises an error."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py:393-398 uses `segmentationNode = slicer.mrmlScene.GetFirstNodeByName(\"Cisterna volumes\")` and, if a node exists, `segmentationNode.GetSegmentation().RemoveAllSegments()`. Both calculation routes call this function (lines 294 and 367); no replacement confirmation is shown by the Calculate handler at lines 188-220. A repeat calculation or name collision can destroy unsaved edits or unrelated segments; a same-named node without GetSegmentation raises an exception. This is a concrete path to unintended data loss, not merely a correctness bug."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked CisternaMagnaVolumetry/CisternaMagnaVolumetry.py:393-398. `_createSegmentation` looks up `slicer.mrmlScene.GetFirstNodeByName(\"Cisterna volumes\")` and if found calls `segmentationNode.GetSegmentation().RemoveAllSegments()`. This is an ordinary UI/module design shortcoming (reusing a hardcoded output node name rather than using an output node selector or checking node class), not a blocking safety issue under AGENTS.md policy (\"Do not label ordinary bugs as safety issues merely because the extension processes medical images\")."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Canonical voxel spacing uses the forward permutation rather than its inverse",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py",
+   "line": 440,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Canonical voxel spacing uses the forward permutation rather than its inverse",
+     "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py",
+     "line_start": 440,
+     "line_end": 445,
+     "evidence": "        self.to_canonical = ornt_transform(orig_ornt, target_ornt)\n        self.from_canonical = ornt_transform(target_ornt, orig_ornt)\n        self._source_axis_for_canonical = [int(self.to_canonical[i, 0]) for i in range(3)]\n\n    def canonical_voxel_sizes(self, voxel_sizes: Tuple[float, float, float]) -> Tuple[float, float, float]:\n        return tuple(float(voxel_sizes[i]) for i in self._source_axis_for_canonical)",
+     "explanation": "Nibabel's orientation rows map input axes to output axes, whereas spacing in canonical order needs the inverse mapping. For a three-axis cyclic permutation with anisotropic voxels, distances and millimeter cutoffs are assigned to the wrong axes, producing incorrect masks and volumes despite correct reorientation of the array.",
+     "suggestion": "Invert the orientation permutation, for example using its argsort, and test all axis permutations with unequal spacings.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py",
+      "line": 440
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "cisterna_core.py:440-445: ornt_transform row i gives the output axis for input axis i. canonical_voxel_sizes indexes voxel_sizes by to_canonical[i,0] for each canonical axis i, which is the forward permutation where the inverse is needed. This is harmless for self-inverse swaps, such as axial Slicer arrays (S,A,R)->RAS. It is wrong for 3-cycles, such as coronal acquisitions (array A,S,R), when voxels are anisotropic. Distances and mm cutoffs then use the wrong axes."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py:440-448 sets `self._source_axis_for_canonical = [int(self.to_canonical[i, 0]) for i in range(3)]` and indexes voxel sizes using that list. Nibabel's orientation rows map input axes to output positions; canonical-axis indexing requires the inverse permutation. For a cyclic mapping [1,2,0], this returns sizes [s1,s2,s0] rather than [s2,s0,s1]. With unequal spacing this changes distance and cutoff calculations (lines 300-327) and therefore masks and measured volumes; the per-voxel volume itself is still the correct product (lines 486-487). This is a major correctness issue, non-blocking for admission."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py:437-446. In nibabel, `ornt_transform(orig_ornt, target_ornt)` has row `i` representing original axis `i` and `ornt[i, 0]` giving the canonical axis index that original axis `i` maps to (`out_ax = to_canonical[in_ax, 0]`). Using `self.to_canonical[i, 0]` to index `voxel_sizes` applies the forward permutation rather than its inverse (`self.from_canonical[i, 0]`), which swaps voxel spacings for 3-cycle axis permutations with anisotropic voxels."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Matching array dimensions are mistaken for matching physical geometry",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+   "line": 356,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Matching array dimensions are mistaken for matching physical geometry",
+     "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+     "line_start": 356,
+     "line_end": 364,
+     "evidence": "        t1 = slicer.util.arrayFromVolume(t1Node)\n        resampled = None\n        if t1.shape != seg.shape:\n            resampled = slicer.modules.volumes.logic().ResampleVolumeToReferenceVolume(t1Node, refNode)\n            t1 = slicer.util.arrayFromVolume(resampled)\n        affine = self._arrayAffineFromVolumeNode(refNode)\n        spacing = refNode.GetSpacing()\n        voxel_sizes = (spacing[2], spacing[1], spacing[0])\n        masks, external_csf, volumes, extra = run_cistern_analysis_synthseg(seg, affine, voxel_sizes, t1)",
+     "explanation": "Same-sized T1 and SynthSeg volumes with different origins, spacing, orientations, or transforms skip resampling, so T1 intensities are sampled at wrong anatomical positions during CSF refinement. The VolBrain path similarly checks only array shape before combining the label arrays with T1 geometry.",
+     "suggestion": "Compare complete image-to-world geometries including parent transforms; resample to a common reference or reject inputs that are not aligned.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+      "line": 356
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "CisternaMagnaVolumetry.py:358 resamples only when t1.shape != seg.shape, with no check of origin, spacing or direction. This is real. It matters only when the grids have the same dimensions but different geometry, which is uncommon. With a SlicerSynthSeg segmentation the reference is the T1 itself, so the problem does not arise there."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py:356-364 only resamples on `if t1.shape != seg.shape:` before passing T1 and labels to analysis. Matching shapes can still have different origins, spacings, orientations or parent transforms, so SynthSeg refinement can read intensities at corresponding indices rather than corresponding physical locations (cisterna_core.py:493-503). The VolBrain route likewise checks only array shapes and then uses T1 geometry for both label arrays (module lines 271-291); its core does not otherwise use T1 intensity. This can corrupt masks and measurements, but is an ordinary non-blocking correctness issue."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked CisternaMagnaVolumetry/CisternaMagnaVolumetry.py:271-285 and 356-364. Both `run` (VolBrain path) and `runSynthSeg` (SynthSeg volume path) only compare numpy array shapes (`t1.shape != seg.shape` or `tissues_array.shape != t1_array.shape`) without verifying that origin, spacing, direction matrix, or parent transforms match before combining voxel arrays."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (blocking, ok)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "I found no concrete path to harm in the code I read (CisternaMagnaVolumetry.py around 300-430). The 'blocking' rating rests only on D1, which is a re-run overwrite of the module's own output node. I rate safety ok."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": null,
+     "rating": "blocking",
+     "reason": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py:393-398 unconditionally calls `segmentationNode.GetSegmentation().RemoveAllSegments()` on an existing first node named Cisterna volumes. That is a concrete unintended loss of unsaved user segmentation data, so safety is blocking. I inspected both Python files, the CMake files, README, and repository-wide matches for relevant network, execution, and deletion APIs. Dependency installation is confirmed by the user (module lines 250-262); external package contents and exact source revision could not be independently verified with the available tools."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Checked CisternaMagnaVolumetry/CisternaMagnaVolumetry.py (lines 1-436) and CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py (lines 1-533). There is no malicious behavior, telemetry, network communication, unsafe deserialization, command execution, or filesystem destruction. Overwriting the in-scene MRML segmentation node named \"Cisterna volumes\" (D1) is a minor soundness/UX issue, not a safety defect."
+    }
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "concern"
+   },
+   "outcome": "settled: concern (concern, concern)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "The canonical voxel-size permutation bug (cisterna_core.py:440-445) can give wrong volumes for coronal-type anisotropic data. The shape-only geometry check (CisternaMagnaVolumetry.py:358) is a smaller issue. I rate soundness concern."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": null,
+     "rating": "concern",
+     "reason": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py:356-360 uses `if t1.shape != seg.shape:` as the only resampling condition, and cisterna_core.py:442-445 indexes spacings using the forward orientation permutation. Both can produce incorrect segmentations and volumetric measurements for legitimate differing geometries or anisotropic cyclic orientations. I inspected the widget and both analysis paths, including cisterna_core.py:297-327 and 470-487, 493-522; no Slicer execution or independent data validation was possible. These are substantive correctness concerns but non-blocking under the admission policy."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": null,
+     "rating": "concern",
+     "reason": "Checked CisternaMagnaVolumetry/CisternaMagnaVolumetry.py and CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py. Soundness has real issues: the inverse permutation bug in `Reorientation.canonical_voxel_sizes` (cisterna_core.py:440-445, D2), geometry checks relying only on array shape (CisternaMagnaVolumetry.py:275, 358, D3), and hardcoded output segmentation node lookup/clearing (CisternaMagnaVolumetry.py:394-398, D1)."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "no concerns",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 5,
+  "single": 7,
+  "unverified": 0,
+  "total": 7,
+  "open_disputes": 1
+ }
+}

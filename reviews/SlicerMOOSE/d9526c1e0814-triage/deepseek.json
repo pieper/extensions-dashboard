@@ -1,0 +1,165 @@
+{
+ "purpose": "SlicerMOOSE wraps the MOOSE/moosez multi-organ CT segmentation tool (nnU-Net based) in a Slicer module so researchers can produce multi-label organ segmentations of whole-body CT/PET-CT volumes from within Slicer.",
+ "summary": "The module is a thin, readable wrapper around the `moosez` CLI: it writes the selected volume to a temp folder, runs moosez in a subprocess, loads the resulting NIfTI segmentation and renames segments from the generated JSON. No telemetry, no data upload, no obfuscation, and licensing (Apache-2.0 code, CC BY 4.0 models) permits distribution. The blocking problem is environment handling: PyTorch is installed with `pip_install(\"torch\")` on Linux and a hard `torch==2.2.2 \"numpy<2\"` pin on macOS instead of through PyTorchUtils, and `moosez>=3.1.1` is pip-installed into Slicer's Python, pulling torch from PyPI and able to upgrade Slicer-bundled numpy. Otherwise only minor robustness issues.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "MOOSE.py contains no telemetry, credential access, eval/exec of untrusted input, or upload of image data; the only network use is the test's sample-CT download from an S3 bucket and moosez's own model downloads. Minor: the test writes into the user's ~/Downloads and then deletes that path (lines 444-459, 439), which can overwrite/remove a pre-existing file of the same name."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "MOOSE.py installs PyTorch outside the PyTorch extension: `slicer.util.pip_install(\"torch\")` on Linux (line 93) and `slicer.util.pip_install('torch==2.2.2 \"numpy<2\"')` on macOS (line 101), and pip-installs `moosez>=3.1.1` (line 62/68), which pulls torch from PyPI and can upgrade Slicer-bundled numpy. These change the shared Slicer Python environment for all users of that installation."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMakeLists.txt installs MOOSE.py plus Resources/Icons/MOOSE.png and Resources/UI/MOOSE.ui via slicerMacroBuildScriptedModule, all of which exist; EXTENSION_DEPENDS \"PyTorch\" matches the catalog build_dependencies; scm_url/scm_revision resolve to the reviewed commit d9526c1. Only committed binaries are images (icons/screenshots/GIFs)."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE.txt is Apache-2.0 for the extension code and MODEL_LICENSE.txt grants CC BY 4.0 for the AI models, both permitting redistribution; README points to the upstream MOOSE repository for further licensing information. The license of the pip-installed `moosez` package itself was not inspected."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "The ScriptedLoadableModule structure, temp-folder data preparation, subprocess execution and error display via tryWithErrorDisplay are conventional; heavy imports (moosez, PyTorchUtils) are inside functions. Minor issues: temp folder is only removed on success (line 197), segment renaming can raise KeyError (line 194), `shutil.which(\"PythonSlicer\")` may return None (line 276), and the long segmentation blocks the GUI thread with no progress bar or cancel."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents installation, the seven models with their label names, expected runtimes and FOV requirements, and there is an integration test plus a citation. Missing: no research-use/clinical disclaimer, no model validation or provenance details beyond the citation, and the ctest in MOOSE/Testing/Python/CMakeLists.txt is commented out."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "PyTorch installed with pip_install(\"torch\") on Linux instead of PyTorchUtils",
+   "file": "MOOSE/MOOSE.py",
+   "line_start": 92,
+   "line_end": 93,
+   "evidence": "        elif sys.platform.startswith(\"linux\"):\n            slicer.util.pip_install(\"torch\")",
+   "explanation": "On Linux the module installs torch directly from PyPI into Slicer's shared Python environment, bypassing the PyTorch extension. This is exactly the pattern the review policy forbids: it can install a torch build incompatible with Slicer's CUDA/VTK stack, and it affects every user of that Slicer installation, not just users of MOOSE. The Windows branch (lines 73-90) already does it correctly via PyTorchUtils.installTorch, so the same approach should be used on Linux.",
+   "suggestion": "Use PyTorchUtils.PyTorchUtilsLogic().installTorch(askConfirmation=True, torchVersionRequirement=...) on all platforms, and list PyTorch in build_dependencies/EXTENSION_DEPENDS (already done).",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Hard torch==2.2.2 and numpy<2 pins on macOS downgrade Slicer-bundled packages",
+   "file": "MOOSE/MOOSE.py",
+   "line_start": 95,
+   "line_end": 101,
+   "evidence": "            slicer.util.pip_install('torch==2.2.2 \"numpy<2\"')",
+   "explanation": "On macOS the module pip-installs an exact torch pin and forces numpy<2 into Slicer's Python. numpy is a package Slicer bundles; pinning/downgrading it can break Slicer core and other extensions for users who never open MOOSE. The policy explicitly lists exact torch pins and pins of Slicer-bundled packages (numpy) as blocking environment changes.",
+   "suggestion": "Install torch through PyTorchUtils (which handles platform-appropriate versions) and avoid constraining numpy; if a numpy constraint is truly required, document it and coordinate with the PyTorch extension rather than pinning in this module.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "moosez pip-installed into Slicer's Python pulls torch from PyPI and can upgrade numpy",
+   "file": "MOOSE/MOOSE.py",
+   "line_start": 60,
+   "line_end": 68,
+   "evidence": "            requirements = \"moosez>=3.1.1\"\n            if sys.platform.startswith(\"darwin\"):\n                requirements += ' \"numpy<2\"'\n            slicer.util.pip_install(requirements)",
+   "explanation": "moosez depends on torch (and on numpy/scipy and other scientific packages). Installing it with pip_install resolves those dependencies from PyPI inside Slicer's environment, so on Linux/Windows it can install or upgrade torch and numpy independently of the PyTorch extension, and on macOS the numpy<2 constraint is applied to a Slicer-bundled package. The policy names this exact case (packages that pull torch from PyPI, e.g. nnunetv2) as requiring the dedicated extension's install logic instead.",
+   "suggestion": "Install torch first via PyTorchUtils and then install moosez with `--no-deps` for torch (or use a dependency set that does not resolve torch/numpy), verifying the remaining dependencies do not upgrade Slicer-bundled packages; alternatively coordinate with the MOOSE/NNUNet extension install logic.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Test downloads into the user's Downloads folder and deletes that path",
+   "file": "MOOSE/MOOSE.py",
+   "line_start": 444,
+   "line_end": 459,
+   "evidence": "        download_directory = self.get_default_download_folder()\n        URL = \"https://enhance-pet.s3.eu-central-1.amazonaws.com/slicer_sample_data/sample_CT.nii.gz\"\n        download_file_name = os.path.basename(URL)\n        download_file_path = os.path.join(download_directory, download_file_name)",
+   "explanation": "The integration test writes sample_CT.nii.gz into the user's ~/Downloads (or %USERPROFILE%\\Downloads) and later calls os.remove(sampleVolume_path) (line 439). If a user already has a file with that name there, it is silently overwritten and then deleted. The download is also not integrity-checked.",
+   "suggestion": "Download into slicer.util.tempDirectory() (or a TemporaryDirectory) instead of the user's Downloads folder, and delete only that temporary copy.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Temporary working folder leaks when segmentation fails",
+   "file": "MOOSE/MOOSE.py",
+   "line_start": 180,
+   "line_end": 197,
+   "evidence": "                shutil.rmtree(moose_folder)",
+   "explanation": "moose_folder is created with slicer.util.tempDirectory() and only removed on the success path at line 197. Any exception (missing segmentation, KeyError while renaming segments, subprocess failure) leaves the copied CT volume and moosez outputs on disk; repeated failures accumulate patient image copies in the temp directory.",
+   "suggestion": "Move the cleanup into a finally block (or use a try/finally around prepare_data/run_segmentation).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Segment renaming can raise KeyError and abort after the segmentation was loaded",
+   "file": "MOOSE/MOOSE.py",
+   "line_start": 190,
+   "line_end": 195,
+   "evidence": "                    segmentID_numeric = int(segmentID.replace(\"Segment_\", \"\"))\n                    segment = segmentation.GetSegment(segmentID)\n                    newName = label_indices[segmentID_numeric]",
+   "explanation": "If the moosez JSON's organ_indices does not contain every label index present in the NIfTI (or the segment ID is not of the form Segment_<int>), the loop raises KeyError/ValueError after the segmentation node has already been added to the scene, so the user sees 'Segmentation failed.' even though a segmentation exists, and the temp folder is not cleaned up.",
+   "suggestion": "Use label_indices.get(segmentID_numeric) and skip/keep the default name when missing; guard the int() conversion.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "PythonSlicer path may be None, producing an unusable command",
+   "file": "MOOSE/MOOSE.py",
+   "line_start": 275,
+   "line_end": 276,
+   "evidence": "        self.moosez = os.path.join(sysconfig.get_path('scripts'), self.format_executable_name(\"moosez\"))\n        self.python_slicer = shutil.which(\"PythonSlicer\")",
+   "explanation": "If PythonSlicer is not on PATH (e.g. unusual launch environment), self.python_slicer is None and launchConsoleProcess receives None as argv[0], failing with an obscure error instead of a clear message. Similarly the moosez console script path is assumed rather than checked for existence.",
+   "suggestion": "Fall back to slicer.util.launchConsoleProcess with sys.executable or raise a clear InstallError when PythonSlicer/moosez are not found.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Long segmentation runs on the GUI thread without progress or cancel",
+   "file": "MOOSE/MOOSE.py",
+   "line_start": 312,
+   "line_end": 313,
+   "evidence": "        result = slicer.util.launchConsoleProcess(cmd)\n        self.forward_process_status(result)",
+   "explanation": "The readline loop in forward_process_status calls slicer.app.processEvents() via the status callback, so the UI is not fully frozen, but the whole run (up to ~40 minutes on CPU per README) executes inside the button slot with no progress bar, no cancel button and no way to abort; the module widget is disabled for the duration.",
+   "suggestion": "Run the subprocess in a worker thread (e.g. slicer.util.Process or a QThread) with a progress dialog and a cancel action.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No research-use disclaimer or model validation/provenance information",
+   "file": "README.md",
+   "line_start": 15,
+   "line_end": 20,
+   "evidence": "4. Select a volume (which has to be a CT image) and a model and click on `Run Segmentation` and wait for the process to finish.",
+   "explanation": "The extension produces organ segmentations intended for research, but the README and module helpText contain no statement that output is not for clinical use and no information on how/where the models were trained or validated beyond a citation. Users may otherwise treat the output as clinically validated.",
+   "suggestion": "Add a short research-use-only notice and a pointer to the model training/validation description in the upstream MOOSE repository.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Additional ctest in Testing/Python is commented out",
+   "file": "MOOSE/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The Testing/Python directory registers no test; the only test is the unittest subclass in MOOSE.py registered by MOOSE/CMakeLists.txt line 27. Not a defect, but the empty subdirectory is dead weight and the integration test requires network access and a full dependency install, so it will not run in a normal build environment.",
+   "suggestion": "Either remove the empty Testing/Python directory or add a lightweight test that does not require downloading models.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The `moosez` package itself (its license, its model download URLs, and whether it transmits any data) was not inspected; only the wrapper code in this repository was reviewed.",
+  "Whether moosez's first-run model download asks the user for confirmation before downloading large model files.",
+  "The exact source revision: the catalog entry uses scm_revision \"main\"; the reviewed content corresponds to commit d9526c1e0814bad1eb49349a73684544f690d078 as stated in the task, but I could not resolve the repository remotely.",
+  "Binary assets (SlicerMOOSE.png, Images/*.gif, Images/*.png) were not opened; only their presence and size were noted.",
+  "No build or runtime test was performed; CMake/CTest behaviour and the actual moosez CLI output layout were not verified."
+ ],
+ "questions_for_author": [
+  "Why is torch installed with pip_install on Linux and with an exact 2.2.2 pin plus numpy<2 on macOS, rather than through PyTorchUtils on all platforms?",
+  "Does moosez pull torch from PyPI as a dependency, and can it be installed without touching Slicer's bundled numpy/scipy?",
+  "Does moosez download model weights on first run, and does it ask the user before downloading them?"
+ ]
+}

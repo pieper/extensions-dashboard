@@ -1,0 +1,226 @@
+{
+ "purpose": "A research toolkit for simulating Multiple Sclerosis brain lesions on healthy-subject multimodal MRI (T1, T2, T2-FLAIR, PD, DTI-FA, DTI-ADC), including baseline lesion-load simulation and longitudinal follow-up series, aimed at neuroimaging researchers who need synthetic lesion ground truth.",
+ "summary": "Reviewed the full source at the catalog revision: one scripted module (MSLesionSimulator.py) plus four ITK CLI modules (GenerateMask, FilterMask, DeformImage, MSLongitudinalExams), CMake files, XML descriptions, docs and license. No network transmission of user data, no pip installs, no torch, no sys.path or global side effects — environment is clean. Concerns: a committed compiled .pyc binary, ~2200 bundled NIfTI files including 13 MB of MNI152 templates whose license/provenance is not stated, pervasive bare `except:` blocks that hide failures from the user, and tests that are unmodified templates (Python-2-only urllib download from a retired server; Cxx tests passing parameters the CLIs do not accept).",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Searched all files for urllib/requests/socket/subprocess/eval/exec/pickle/os.system: the only network use is a sample-data download inside the test class (MSLesionSimulator.py:986-995). No user data leaves the machine, no credentials, no obfuscation. However a compiled MSLesionSimulator.pyc is committed next to the source and cannot be reviewed."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "No pip_install, no PyTorch, no sys.path or environment-variable changes, no monkey-patching; imports are stdlib plus vtk/qt/ctk/slicer (MSLesionSimulator.py:14-23). requirements.txt only lists mkdocstrings for the docs build."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "CMake globs and installs the Python module and all database NIfTIs (MSLesionSimulator/CMakeLists.txt:9-23) and the globbed paths exist, but ~2229 lesion label files plus 13 MB of MNI152 templates are committed to git, and a stale .pyc is committed. The registered unittest (MSLesionSimulator/CMakeLists.txt:38) is broken."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "Apache-2.0 LICENSE and matching headers in all .py/.cxx files cover the code, but the bundled MNI152 templates and the lesion-label database are third-party material with no stated terms; docs only say 'provided by the ICBM-MNI152 non linear brain template' (docs/index.md:143)."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read MSLesionSimulator.py, all four .cxx files and their XML. The pipeline is plausible, but every processing step is wrapped in bare `except:` that only logs at info level, all CLI calls block the GUI thread with wait_for_completion=True, and the tests are non-functional templates."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "Good user documentation (docs/index.md, README, screenshots, cited paper DOI 10.1088/2057-1976/ab08fc) and a clear UI, but no working automated tests and no research-use/clinical disclaimer despite clinical framing."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Compiled bytecode MSLesionSimulator.pyc committed next to the source",
+   "file": "MSLesionSimulator/CMakeLists.txt",
+   "line_start": 5,
+   "line_end": 7,
+   "evidence": "set(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n  )",
+   "explanation": "The repository contains MSLesionSimulator/MSLesionSimulator.pyc (12777 bytes, binary) alongside MSLesionSimulator.py. CMake installs only the .py, so users do not load the .pyc, but a compiled blob in the source tree cannot be reviewed and could contain code different from the visible source; it also goes stale silently. Reviewers and users cannot verify what it contains.",
+   "suggestion": "Delete MSLesionSimulator/MSLesionSimulator.pyc and add *.pyc / __pycache__ to .gitignore.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "Bundled MNI152 templates and lesion database have no stated license or provenance",
+   "file": "docs/index.md",
+   "line_start": 143,
+   "line_end": 143,
+   "evidence": "T1 weighted MRI brain in axial orientation (provided by the ICBM-MNI152 non linear brain template)",
+   "explanation": "The extension ships MNI152_T1_1mm.nii.gz (10 MB) and MNI152_T1_1mm_brain.nii.gz (3 MB) plus ~2229 lesion label NIfTIs derived from manual MS lesion mark-ups. The only license statement (README.md:21 'Apache 2.0 - Read file: LICENSE') covers the code; nothing states the terms under which the MNI/ICBM template or the lesion database may be redistributed, nor the provenance/de-identification of the source lesion mark-ups. Users and the index cannot confirm distribution permission for this bundled data.",
+   "suggestion": "Add a data-provenance/license section (or NOTICE file) stating the source and redistribution terms of the MNI152 templates and the lesion database, and confirm the mark-ups are de-identified and redistributable.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Large binary data committed to git instead of downloaded on demand",
+   "file": "MSLesionSimulator/CMakeLists.txt",
+   "line_start": 9,
+   "line_end": 14,
+   "evidence": "file(GLOB MSSimulator_50_100_DATA RELATIVE \"${CMAKE_CURRENT_SOURCE_DIR}\" \"Resources/MSlesion_database/labels-database/50-100/*.nii.gz\")\nfile(GLOB MSSimulator_100_500_DATA RELATIVE \"${CMAKE_CURRENT_SOURCE_DIR}\" \"Resources/MSlesion_database/labels-database/100-500/*.nii.gz\")",
+   "explanation": "The repository commits 2229 NIfTI files (951 + 945 + 139 + 118 + 76 in the five label directories) plus the 10 MB and 3 MB MNI152 templates, all packaged into every extension build. This bloats the source repository and every extension archive for all users, and the data cannot be updated without a new commit.",
+   "suggestion": "Move the lesion database and templates to ExternalData or a versioned download fetched on first use (with user confirmation), or at minimum document the total size.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Bare except blocks hide all processing failures from the user",
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line_start": 470,
+   "line_end": 472,
+   "evidence": "self.conformInputSpace(referenceVolume, inputT2Volume, inputT2Volume, regT2toRefTransform, numberOfThreads)\n          except:\n            logging.info(\"Exception caught when trying to conform T2 image to reference space.\")",
+   "explanation": "Every registration, mask generation, lesion deformation and space-restoration step (lines 464-512, 638-724, 732-770, 780-808) is wrapped in a bare `except:` that only writes an info-level log line. If registration or a CLI fails, the run continues and produces images in the wrong space or with no lesions, and the user sees only 'Processing completed' (line 810-811). For a tool whose output is used as simulated ground truth, silently wrong results are worse than an error.",
+   "suggestion": "Catch specific exceptions, report them with slicer.util.errorDisplay / slicer.util.showStatusMessage and abort or mark the affected modality as failed.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Registered unit test uses Python-2-only urllib and a retired download URL",
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line_start": 986,
+   "line_end": 995,
+   "evidence": "import urllib\n      downloads = (\n          ('http://slicer.kitware.com/midas3/download?items=5767', 'FA.nrrd', slicer.util.loadVolume),\n          )",
+   "explanation": "`urllib.urlretrieve` does not exist in Python 3 (it is urllib.request.urlretrieve), and slicer.kitware.com/midas3 is retired, so this test raises AttributeError or fails the download. Because MSLesionSimulator/CMakeLists.txt:38 registers it via slicer_add_python_unittest, the extension's own test suite fails in CI and gives no real coverage.",
+   "suggestion": "Use slicer.util.downloadFile / urllib.request.urlretrieve with a current URL, or use slicer.util.loadVolume on a Slicer sample data node.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Cxx CLI tests are unmodified templates that pass parameters the CLIs do not accept",
+   "file": "FilterMask/Testing/Cxx/CMakeLists.txt",
+   "line_start": 16,
+   "line_end": 21,
+   "evidence": "ExternalData_add_test(${CLP}Data NAME ${testname} COMMAND ${SEM_LAUNCH_COMMAND} $<TARGET_FILE:${CLP}Test>\n  --compare DATA{${BASELINE}/${CLP}Test.nhdr,${CLP}Test.raw}\n  ${TEMP}/${CLP}Test.nhdr\n  ModuleEntryPoint\n  --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nhdr",
+   "explanation": "The same boilerplate test is used for FilterMask, GenerateMask, DeformImage and MSLongitudinalExams: it passes `--sigma 2.5` and a CT head volume, but FilterMask requires inputMask/cutFactor, GenerateMask requires lesionLoad/databasePath, and MSLongitudinalExams requires lesionLabel/outputFolder. These tests cannot pass and provide no verification of the modules.",
+   "suggestion": "Write per-module tests with the actual required arguments and baseline data, or remove the placeholder tests.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Windows default output folder is the literal string '%userprofile%'",
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line_start": 253,
+   "line_end": 257,
+   "evidence": "if platform.system() == \"Windows\":\n        home = expanduser(\"%userprofile%\")\n      else:\n        home = expanduser(\"~\")\n      self.outputFollowUpsSelector.directory = home",
+   "explanation": "os.path.expanduser does not expand Windows environment variables, so on Windows the longitudinal output directory defaults to a relative path named '%userprofile%'. MSLongitudinalExams then writes vol<modality>_TimePoint_<t>.nii.gz into that non-existent directory and the writer fails, or files land in an unexpected location.",
+   "suggestion": "Use os.path.expanduser('~') or os.environ.get('USERPROFILE') on Windows.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Longitudinal output files overwrite existing files without confirmation",
+   "file": "MSLongitudinalExams/MSLongitudinalExams.cxx",
+   "line_start": 368,
+   "line_end": 375,
+   "evidence": "stringstream outputTimePoint;\n          outputTimePoint<<outputFolder<<PATH_SEPARATOR;\n          outputTimePoint<<\"vol\"<<imageModality<<\"_TimePoint_\"<<t<<\".nii.gz\";",
+   "explanation": "Output names are fixed (volT1_TimePoint_1.nii.gz, ...) in the user-selected folder, so a second run silently overwrites previous results. If outputFolder is left empty (the XML <directory> parameter has no default), files are written relative to the process working directory.",
+   "suggestion": "Create a timestamped subfolder or refuse to overwrite existing files, and validate that outputFolder is non-empty.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Lesion database file counts are off by one, so the last lesion of each size class is never selected",
+   "file": "GenerateMask/GenerateMask.cxx",
+   "line_start": 66,
+   "line_end": 69,
+   "evidence": "int numberOfSizes = 5;\n    int infoArray [5] = {950, 944, 138, 117, 75};\n    int maxSizeArray [5] = {100, 500, 1000, 5000, 15000};\n    std::string nameArray [5] = {\"50-100\", \"100-500\", \"500-1000\", \"1000-5000\", \"5000-more\"};",
+   "explanation": "The directories contain 951, 945, 139, 118 and 76 files respectively, but the hard-coded counts are one lower, so `rand() % infoArray[size]` never reaches the highest-numbered label file. The counts are also hard-coded rather than derived from the directory, so any database update silently breaks the mapping.",
+   "suggestion": "Count the files at runtime (or fix the constants to match) and derive the arrays from the database directory.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "All CLI processing runs synchronously on the GUI thread",
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line_start": 853,
+   "line_end": 853,
+   "evidence": "slicer.cli.run(slicer.modules.brainsfit, None, regParams, wait_for_completion=True)",
+   "explanation": "onApplyButton calls logic.run directly, and every step (BrainsFit registration, GenerateMask, FilterMask, DeformImage, MSLongitudinalExams) uses wait_for_completion=True. A full run with several modalities and follow-ups can take many minutes, during which Slicer's UI is frozen with no progress bar or cancel option.",
+   "suggestion": "Run the pipeline in a background thread (e.g. ScriptedLoadableModuleLogic with a CLI status observer) or use slicer.cli.run with a completion callback and progress reporting.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Apply button enabled state is assigned a node object instead of a boolean",
+   "file": "MSLesionSimulator/MSLesionSimulator.py",
+   "line_start": 351,
+   "line_end": 355,
+   "evidence": "def onSelect(self):\n    self.applyButton.enabled = self.inputT1Selector.currentNode()\\\n                               or self.inputT2Selector.currentNode()\\\n                               or self.inputFLAIRSelector.currentNode()\\\n                               or self.inputPDSelector.currentNode()",
+   "explanation": "The expression yields a vtkMRMLScalarVolumeNode (or None), not a bool, and is assigned to the Qt `enabled` property. Depending on the PyQt binding this either raises a TypeError during setup() or relies on implicit truthiness conversion; the intended `bool(...)` is missing.",
+   "suggestion": "Wrap the expression in bool(...).",
+   "confidence": "low"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No research-use / clinical-use disclaimer despite clinical framing",
+   "file": "docs/index.md",
+   "line_start": 18,
+   "line_end": 20,
+   "evidence": "- **Use Case 2:** Simulate longitudinal MS lesion progression on clinical healthy individuals MRI images\n\n    - Another important issue in Multiple Sclerosis diagnosis is the lesion progression, where drive the therapeutic strategy by the health professionals.",
+   "explanation": "The documentation motivates the tool with clinical diagnosis and therapy decisions but never states that simulated images are synthetic research data and must not be used for diagnosis or treatment decisions. Users could mistake simulated lesions for real findings.",
+   "suggestion": "Add an explicit statement that outputs are synthetic research data, not for clinical diagnosis or treatment planning.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Documentation license link points to a different repository",
+   "file": "docs/index.md",
+   "line_start": 167,
+   "line_end": 167,
+   "evidence": "This project is under Apache version 2.0 license and following details are given at the [LICENSE](https://github.com/CSIM-Toolkits/SlicerDiffusionComplexityMap/blob/main/LICENSE) file in the project repository.",
+   "explanation": "The link targets SlicerDiffusionComplexityMap, not this repository, so the license reference is misleading (the local LICENSE file is Apache 2.0, so this is a documentation defect only).",
+   "suggestion": "Point the link at this repository's LICENSE file.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Inconsistent CLI license metadata",
+   "file": "GenerateMask/GenerateMask.xml",
+   "line_start": 8,
+   "line_end": 8,
+   "evidence": "<license/>",
+   "explanation": "GenerateMask.xml declares an empty license while the other three XMLs declare `<license>Slicer</license>`; neither matches the Apache-2.0 LICENSE file. This is metadata only and does not affect loading.",
+   "suggestion": "Set the license field to Apache-2.0 in all four XML descriptions.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Extension description contains an empty DOI placeholder",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 12,
+   "evidence": "For more details about this project, please see the original paper (DOI: ) and the wiki page.",
+   "explanation": "The catalog/extension description shows an empty DOI even though the paper DOI (10.1088/2057-1976/ab08fc) is known and cited in README.md and docs/index.md.",
+   "suggestion": "Fill in the DOI in EXTENSION_DESCRIPTION.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The committed binary MSLesionSimulator/MSLesionSimulator.pyc could not be decompiled or read, so its contents are unverified (it is not installed by CMake).",
+  "Total repository size and the size of the 2229 lesion-database NIfTI files could not be measured; only the two MNI152 templates (10 MB, 3 MB) were reported by the scan.",
+  "The MNI152 template files themselves were not opened, so their headers/provenance metadata were not verified.",
+  "No build or test run was possible; whether the extension configures and compiles against current Slicer/ITK (the CMake files request ITK 4.6 components and use the deprecated ITK_USE_FILE) is unverified.",
+  "The catalog entry uses scm_revision 'main' (a moving branch); the exact commit e17cad0 was not independently resolved, so the reviewed source is the snapshot provided.",
+  "Whether the lesion database derives from identifiable patient data could not be determined from the repository."
+ ],
+ "questions_for_author": [
+  "Under what terms may the bundled MNI152_T1_1mm.nii.gz / MNI152_T1_1mm_brain.nii.gz templates and the ~2229 lesion label files be redistributed, and are the source lesion mark-ups de-identified?",
+  "Why is MSLesionSimulator.pyc committed, and can it be removed and gitignored?",
+  "Can the bare `except:` handlers be replaced with error reporting so failed registration or CLI steps are visible to the user instead of producing silently wrong output?"
+ ]
+}

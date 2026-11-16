@@ -1,0 +1,76 @@
+{
+ "purpose": "AnatomyCarve is a 3D Slicer rendering extension for researchers and clinicians to interactively clip selected anatomical segments using sphere markups and OpenGL compute shaders. It enables textbook-style cutaway 3D volume visualizations where chosen segments are carved away inside user-placed spheres while preserving inner structures.",
+ "summary": "AnatomyCarve provides interactive segment-aware spherical clipping for 3D volume rendering using OpenGL 4.3 compute shaders and a C++ helper module (`VolumeTextureIDHelper`) that retrieves VTK's internal OpenGL texture handle. The codebase is clean, well-documented, and licensed under Apache-2.0 with no malicious or data-exfiltration behavior. However, `AnatomyCarve/AnatomyCarve.py` runs `slicer.util.pip_install('PyOpenGL')` at top-level module import time (which runs at Slicer startup). Per the Slicer Extensions Index review policy, package installation at module import or Slicer startup is a blocking environment issue. Additionally, the `vtkRenderWindow` `StartEvent` observer is never disconnected on scene close or module cleanup.\n\n🔴 Do not merge yet: move `pip_install('PyOpenGL')` out of module import/startup.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all Python files, C++ files, CMake files, and GLSL compute shaders. No malicious behavior, unauthorized network transmission, command injection, or unsafe deserialization was found; network activity is limited to standard Slicer SampleData registration from the extension's GitHub repository with a SHA256 checksum."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "Inspected `AnatomyCarve/AnatomyCarve.py` and all logic submodules. `AnatomyCarve.py` calls `slicer.util.pip_install('PyOpenGL')` at top-level module import time, which executes during Slicer startup for all users even if the module is never opened."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected root `CMakeLists.txt`, `AnatomyCarve/CMakeLists.txt`, and `VolumeTextureIDHelper/CMakeLists.txt`. All Python scripts, UI files, icons, and compute shaders are properly listed in CMake, and the C++ helper module is properly configured."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE.txt` (Apache-2.0) and source headers in `VolumeTextureIDHelper` (3D Slicer / BWH license). Licensing clearly permits distribution."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected `AnatomyCarve.py`, `AnatomyCarveLogic/*.py`, GLSL shaders, and `VolumeTextureIDHelper`. The `vtkRenderWindow` `StartEvent` observer added in `applyCarveVoxelsComputeShader` is never saved or removed on scene close or cleanup, and the self-test has all logic assertions commented out."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md`, `AnatomyCarve.py`, and shaders. The extension provides a clear step-by-step tutorial, registers sample segmentation data to pair with Slicer's Panoramix CTA dataset, and links to the accompanying arXiv paper."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Unconditional pip_install('PyOpenGL') at module import / Slicer startup",
+   "file": "AnatomyCarve/AnatomyCarve.py",
+   "line_start": 22,
+   "line_end": 25,
+   "evidence": "try:\n    from OpenGL.GL import *\nexcept ImportError:\n    slicer.util.pip_install('PyOpenGL')",
+   "explanation": "In AnatomyCarve/AnatomyCarve.py, `slicer.util.pip_install('PyOpenGL')` is called at the top level of the module file when `OpenGL.GL` cannot be imported. In 3D Slicer, scripted module files are imported during Slicer startup to discover modules. Installing Python packages at module import/startup modifies Slicer's shared Python environment and blocks startup with network/pip activity even for users who never open the AnatomyCarve module. Furthermore, if `pip_install` runs, `from OpenGL.GL import *` is not re-executed afterward, so the subsequent imports (`from AnatomyCarveLogic import *`) will still work only if they import `OpenGL.GL` themselves, while `glGetError()` in `AnatomyCarve.py` remains undefined until restart.",
+   "suggestion": "Do not call `slicer.util.pip_install` at module import time. Instead, defer the `OpenGL` import and `PyOpenGL` installation (with user confirmation or inside `setup()` / `onRenderButton()`) until the user actually enters or uses the module.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "RenderWindow StartEvent observer is never removed on scene close or module cleanup",
+   "file": "AnatomyCarve/AnatomyCarveLogic/AnatomyCarveLogic.py",
+   "line_start": 228,
+   "line_end": 234,
+   "evidence": "    def applyCarveVoxelsComputeShader(self):\n        \n\n        renderWindow = slicer.app.layoutManager().threeDWidget(self.context.getViewIndex()).threeDView().renderWindow()\n        \n        observerTag = renderWindow.AddObserver(vtk.vtkCommand.StartEvent, self.applyCarveVoxelsComputeShaderTick)",
+   "explanation": "When `startRender` is called, an observer for `vtkCommand.StartEvent` is added to the 3D view's `vtkRenderWindow`, but `observerTag` is stored only in a local variable and is never removed when the scene closes, when the module is exited/cleaned up, or if rendering is restarted. If the scene is closed afterwards, `applyCarveVoxelsComputeShaderTick` will continue to fire on every render of the 3D view and attempt to access deleted/stale MRML nodes and textures.",
+   "suggestion": "Store `observerTag` and the observed `renderWindow` on `self`, and provide a cleanup method (called on scene close and widget cleanup) that removes the observer from `renderWindow` and releases OpenGL textures.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Committed zip archive and binary assets in source repository",
+   "file": "CMakeLists.txt",
+   "line_start": 10,
+   "line_end": 11,
+   "evidence": "SlicerAnatomyCarve.png  (412956 bytes, binary)",
+   "explanation": "The repository commits sample data (`data/Panoramix-cropped.seg.nrrd`, ~934 KB), two large screenshots in `docs/` (~1.5 MB and ~2 MB), a duplicate top-level icon (`SlicerAnatomyCarve.png`, ~413 KB), and a leftover archive (`VolumeTextureIDHelper/VolumeTextureIDHelper.zip`, ~2 KB). While none of these break the build, keeping large binary assets and leftover zip archives out of the main source tree (or storing sample datasets in GitHub releases) keeps the repository lightweight.",
+   "suggestion": "Remove `VolumeTextureIDHelper/VolumeTextureIDHelper.zip` and consider hosting sample data and documentation images in releases or a separate branch/assets location.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Binary contents of VolumeTextureIDHelper/VolumeTextureIDHelper.zip and image files",
+  "Runtime execution of OpenGL 4.3 compute shaders and VTK internal mapper texture handle extraction across platforms"
+ ],
+ "questions_for_author": [
+  "Can the `PyOpenGL` installation and `OpenGL.GL` imports be moved from top-level module import into `AnatomyCarveWidget.setup()` or `onRenderButton()` so packages are not installed during Slicer startup?"
+ ]
+}

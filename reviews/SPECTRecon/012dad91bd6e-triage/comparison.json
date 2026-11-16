@@ -1,0 +1,1120 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Bundled PSF model files are not installed by CMake, so Advanced PSF fails in the installed extension",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SPECTRecon/CMakeLists.txt",
+   "line": 21,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Bundled PSF model files are not installed by CMake, so Advanced PSF fails in the installed extension",
+     "file": "SPECTRecon/CMakeLists.txt",
+     "line_start": 21,
+     "line_end": 27,
+     "evidence": "set(MODULE_PYTHON_RESOURCES\n  Resources/Icons/${MODULE_NAME}.png\n  Resources/UI/${MODULE_NAME}.ui\n  Resources/algorithmTestSettings.json",
+     "explanation": "MODULE_PYTHON_RESOURCES lists only the icon, the .ui and three JSON files. The 14 files in SPECTRecon/Resources/Data/PSF_models/*.pt are never installed, yet AdvancedPSF.get_psf_operator builds a path under Resources/Data/PSF_models and calls torch.load on it (AdvancedPSF.py:26-35). In an extension-manager installation, checking 'Advanced PSF' therefore raises FileNotFoundError instead of reconstructing.",
+     "suggestion": "Add the PSF model files (e.g. Resources/Data/PSF_models/*.pt) to MODULE_PYTHON_RESOURCES, or download them on demand with user consent.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/CMakeLists.txt",
+      "line": 21
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Catalog entry build_dependencies is empty while the extension declares EXTENSION_DEPENDS \"PyTorch\"",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 13,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Catalog entry build_dependencies is empty while the extension declares EXTENSION_DEPENDS \"PyTorch\"",
+     "file": "CMakeLists.txt",
+     "line_start": 13,
+     "line_end": 13,
+     "evidence": "set(EXTENSION_DEPENDS \"PyTorch\") # Specified as a list or \"NA\" if no dependencies",
+     "explanation": "The extension imports PyTorchUtils and raises InstallError if the PyTorch extension is absent (SPECTRecon.py:22-25), and the catalog entry supplied for review has \"build_dependencies\": []. The index therefore does not declare the PyTorch extension as a dependency of this entry, so the packaged dependency metadata and the index metadata disagree and the extension manager cannot be relied on to install PyTorch first; users who install only SPECTRecon hit the InstallError path.",
+     "suggestion": "Set \"build_dependencies\": [\"PyTorch\"] in the catalog entry (or remove EXTENSION_DEPENDS if it is genuinely not needed) so both declarations agree.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 13
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Catalog build_dependencies does not match EXTENSION_DEPENDS=PyTorch",
+     "file": "CMakeLists.txt",
+     "line_start": 13,
+     "line_end": 13,
+     "evidence": "set(EXTENSION_DEPENDS \"PyTorch\") # Specified as a list or \"NA\" if no dependencies",
+     "explanation": "The module requires the PyTorch extension (SPECTRecon.py lines 22-25 import PyTorchUtils and raise if missing), and CMakeLists declares it as EXTENSION_DEPENDS. The catalog entry declares an empty build_dependencies, so the index will not build or install PyTorch as a dependency. Users may load the module without PyTorch and then hit an error on first open.",
+     "suggestion": "Set build_dependencies in the catalog entry to [\"PyTorch\"] to match EXTENSION_DEPENDS.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 13
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Exactly pinned pip packages installed on module open, plus a silent multi-GB PyTorch download",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SPECTRecon/SPECTRecon.py",
+   "line": 29,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Exactly pinned pip packages installed on module open, plus a silent multi-GB PyTorch download",
+     "file": "SPECTRecon/SPECTRecon.py",
+     "line_start": 29,
+     "line_end": 38,
+     "evidence": "    if not torchLogic.torchInstalled():\n        torch = torchLogic.installTorch(askConfirmation=False, torchVersionRequirement = f\">={minimumTorchVersion}\", torchvisionVersionRequirement=f\">={minimumTorchvisionVersion}\")\n    installed_packages = {f'{pkg.key}=={pkg.version}'for pkg in pkg_resources.working_set}\n    required_packages = {\n        \"dill==0.3.9\",",
+     "explanation": "ensure_packages_installed() is called from setup() (SPECTRecon.py:152), i.e. as soon as the user opens the module, and runs slicer.util.pip_install for dill==0.3.9, torchquad==0.4.1, pytomography==3.3.2, spectpsftoolbox==0.1.0 and beautifulsoup4==4.13.3 with no confirmation dialog and no cancel button. PyTorch is installed through PyTorchUtils (correct path) but with askConfirmation=False, so a multi-gigabyte download starts without consent. The exact pins and pytomography's transitive requirements (numpy/scipy/pydicom are Slicer-bundled) can change the shared Slicer Python environment for every user of that Slicer installation.",
+     "suggestion": "Ask the user before installing (or at least before the torch download), avoid exact pins where possible, and verify/constrain pytomography's transitive requirements so Slicer-bundled numpy/scipy/pydicom are not upgraded or downgraded.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/SPECTRecon.py",
+      "line": 29
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Pinned pip packages installed into Slicer's Python environment without confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SPECTRecon/SPECTRecon.py",
+   "line": 40,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Pinned pip packages installed into Slicer's Python environment without confirmation",
+     "file": "SPECTRecon/SPECTRecon.py",
+     "line_start": 40,
+     "line_end": 44,
+     "evidence": "missing_all = required_packages - installed_packages\n    num_packages = len(missing_all)\n    logging.info('ensure_packages_installed called')\n    for i, missing in enumerate(missing_all):\n        slicer.util.pip_install(missing)",
+     "explanation": "On first opening the module, setup() calls ensure_packages_installed(), which pip-installs pytomography==3.3.2, torchquad, spectpsftoolbox, dill and beautifulsoup4 into the shared Slicer Python. No user confirmation is requested and the packages are not isolated. Transitive requirements can change packages Slicer relies on or other extensions use. The rubric treats installs without user confirmation as a concern.",
+     "suggestion": "Ask the user for confirmation before installing, show the package list and approximate size, and check resolved dependencies (numpy, scipy, pydicom, torch) against Slicer's bundled versions. Use the PyTorch extension's install logic for torch and avoid pulling torch from PyPI through pytomography.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/SPECTRecon.py",
+      "line": 40
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Registered test script name does not match the actual file (simind_To_dicom.py vs simind_to_dicom.py)",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "SPECTRecon/Logic/CMakeLists.txt",
+   "line": 2,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Registered test script name does not match the actual file (simind_To_dicom.py vs simind_to_dicom.py)",
+     "file": "SPECTRecon/Logic/CMakeLists.txt",
+     "line_start": 2,
+     "line_end": 2,
+     "evidence": "slicer_add_python_unittest(SCRIPT ./../Testing/Python/simind_To_dicom.py SLICER_ARGS --no-main-window)",
+     "explanation": "The repository contains SPECTRecon/Testing/Python/simind_to_dicom.py (lower-case 'to'), which is also what SPECTRecon.py:118 imports. On case-sensitive filesystems the registered ctest points at a non-existent path, so the SIMIND converter test can never run and the extension's CI test coverage silently disappears.",
+     "suggestion": "Change the path to ./../Testing/Python/simind_to_dicom.py.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Logic/CMakeLists.txt",
+      "line": 2
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Logic/CMakeLists.txt references a test file with the wrong case",
+     "file": "SPECTRecon/Logic/CMakeLists.txt",
+     "line_start": 2,
+     "line_end": 2,
+     "evidence": "slicer_add_python_unittest(SCRIPT ./../Testing/Python/simind_To_dicom.py SLICER_ARGS --no-main-window)",
+     "explanation": "The CMake test entry names simind_To_dicom.py, but the file is Testing/Python/simind_to_dicom.py. The test registration fails on case-sensitive filesystems when BUILD_TESTING is on.",
+     "suggestion": "Correct the filename to simind_to_dicom.py.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Logic/CMakeLists.txt",
+      "line": 2
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "store_recons path uses volume_node before assignment, so 'store iterations' and uncertainty estimation always fail",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+   "line": 171,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "store_recons path uses volume_node before assignment, so 'store iterations' and uncertainty estimation always fail",
+     "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+     "line_start": 171,
+     "line_end": 176,
+     "evidence": "        if store_recons:  # Store information for accessing later\n            \n            self.stored_recon_iters[volume_node.GetID()] = [recon_algorithm_all_beds, callbacks]\n        volume_node = self.create_volume_node_from_recon(reconstructed_image_multibed, files_NM, test_mode)\n        progressDialog.close()",
+     "explanation": "volume_node is only created on line 174, after it is dereferenced on line 173. Whenever the user ticks 'store iterations' (SPECTRecon.py:563 store_recons=self.ui.storeItersCheckBox.checked), reconstruct() raises UnboundLocalError after the whole reconstruction has already run, so the result is lost and the progress dialog is never closed. compute_uncertainty() depends on self.stored_recon_iters, so the uncertainty feature can never work either.",
+     "suggestion": "Create the volume node first, then store self.stored_recon_iters[volume_node.GetID()] = [recon_algorithm_all_beds, callbacks].",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+      "line": 171
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "store_recons path raises UnboundLocalError on volume_node",
+     "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+     "line_start": 171,
+     "line_end": 174,
+     "evidence": "if store_recons:  # Store information for accessing later\n\n             self.stored_recon_iters[volume_node.GetID()] = [recon_algorithm_all_beds, callbacks]\n        volume_node = self.create_volume_node_from_recon(reconstructed_image_multibed, files_NM, test_mode)",
+     "explanation": "When the 'store intermediate iterations' option is checked, reconstruct() reads volume_node before it is assigned, since volume_node is only created later by create_volume_node_from_recon. Any reconstruction with store_recons=True therefore fails at the end, after the full computation has run, and the result is lost.",
+     "suggestion": "Move the storage after create_volume_node_from_recon and key it on the returned node's ID. Add a test covering store_recons=True.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+      "line": 171
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "Broad bare except hides real errors when building the attenuation map",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+   "line": 50,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Broad bare except hides real errors when building the attenuation map",
+     "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+     "line_start": 50,
+     "line_end": 53,
+     "evidence": "            try: # typical DICOM CT\n                attenuation_map = dicom.get_attenuation_map_from_CT_slices(files_CT, file_NM, index_peak, HU2mu_technique='from_cortical_bone_fit')\n            except: # if saved by SIMIND\n                attenuation_map = dicom.get_attenuation_map_from_file(files_CT[0])",
+     "explanation": "Any failure in the CT-based attenuation map (wrong series selected, missing geometry, out-of-memory) is swallowed and retried as a SIMIND attenuation map, which then fails with a confusing secondary error or silently produces a wrong mu-map. Errors are not reported to the user.",
+     "suggestion": "Catch the specific exception raised for non-CT input and report other failures with slicer.util.errorDisplay.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+      "line": 50
+     }
+    }
+   ]
+  },
+  {
+   "title": "Deprecated pkg_resources import at module load",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SPECTRecon/SPECTRecon.py",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Deprecated pkg_resources import at module load",
+     "file": "SPECTRecon/SPECTRecon.py",
+     "line_start": 3,
+     "line_end": 3,
+     "evidence": "import slicer\nimport importlib\nimport pkg_resources",
+     "explanation": "pkg_resources is imported at module top level and is deprecated, and newer setuptools releases may remove it. That would break the module at import time on newer Slicer Python builds.",
+     "suggestion": "Use importlib.metadata to list installed packages, or import pkg_resources lazily with a fallback.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/SPECTRecon.py",
+      "line": 1
+     }
+    }
+   ]
+  },
+  {
+   "title": "License copyright line still contains template brackets",
+   "category": "license",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "LICENSE.txt",
+   "line": 3,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "License copyright line still contains template brackets",
+     "file": "LICENSE.txt",
+     "line_start": 3,
+     "line_end": 3,
+     "evidence": "Copyright (c) [2024] [Obed Dzikunu]",
+     "explanation": "The copyright line uses bracketed placeholders, which is a cosmetic defect in the license file. The grant itself is intact.",
+     "suggestion": "Replace with the full copyright holder name and year.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "LICENSE.txt",
+      "line": 3
+     }
+    }
+   ]
+  },
+  {
+   "title": "QComboBox currentText compared without calling it, so UI show/hide logic never matches",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SPECTRecon/SPECTRecon.py",
+   "line": 334,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "QComboBox currentText compared without calling it, so UI show/hide logic never matches",
+     "file": "SPECTRecon/SPECTRecon.py",
+     "line_start": 334,
+     "line_end": 343,
+     "evidence": "        if self.ui.spect_scatter_combobox.currentText=='Energy Window':\n            self.ui.upperwindowLabel.setVisible(True)\n            self.ui.lowerwindowLabel.setVisible(True)\n            self.ui.spect_upperwindow_combobox.setVisible(True)",
+     "explanation": "currentText is a bound method, so these comparisons are always False; the scatter window selectors and the Prior group box are never shown/hidden as intended (lines 334-343). Users selecting 'Energy Window' scatter correction may not see the window selectors, and the prior group box visibility does not follow the algorithm choice.",
+     "suggestion": "Call currentText() (or use currentTextChanged signals) in hideShowItems().",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/SPECTRecon.py",
+      "line": 334
+     }
+    }
+   ]
+  },
+  {
+   "title": "Reconstruction runs on the GUI thread with a non-cancellable progress dialog",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SPECTRecon/SPECTRecon.py",
+   "line": 16,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Reconstruction runs on the GUI thread with a non-cancellable progress dialog",
+     "file": "SPECTRecon/SPECTRecon.py",
+     "line_start": 526,
+     "line_end": 529,
+     "evidence": "        progress = slicer.util.createProgressDialog()\n        progress.labelText = \"Reconstructing...\"\n        progress.value = 0\n        progress.setCancelButton(None)",
+     "explanation": "onReconstructButton calls self.logic.reconstruct synchronously; the only event processing is slicer.app.processEvents() inside the callbacks (Callbacks.py:12, 25). A multi-bed, multi-iteration GPU reconstruction therefore freezes the Slicer UI with no way to cancel, and any exception leaves the modal progress dialog open (see the store_recons bug above).",
+     "suggestion": "Run the reconstruction in a CLI/worker thread (or at least keep a cancel button and close the dialog in a finally block).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "SPECTRecon/SPECTRecon.py",
+      "line": 16
+     }
+    }
+   ]
+  },
+  {
+   "title": "Scatter toggle checked as a widget object instead of its .checked state",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "SPECTRecon/SPECTRecon.py",
+   "line": 513,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Scatter toggle checked as a widget object instead of its .checked state",
+     "file": "SPECTRecon/SPECTRecon.py",
+     "line_start": 513,
+     "line_end": 520,
+     "evidence": "            if not self.ui.scatter_toggle: # enforce none if not checked\n                upperwindow_idx = lowerwindow_idx = [None] * num_peaks",
+     "explanation": "self.ui.scatter_toggle is a QCheckBox object, which is always truthy, so 'not self.ui.scatter_toggle' is always False and the scatter windows are never cleared when the user unchecks scatter correction. The same pattern appears on line 519 for the single-photopeak branch. Users who disable scatter correction can still get scatter estimates applied, silently changing quantification.",
+     "suggestion": "Use self.ui.scatter_toggle.checked in both places.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/SPECTRecon.py",
+      "line": 513
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Scatter-window guard is always false because it tests a widget object",
+     "file": "SPECTRecon/SPECTRecon.py",
+     "line_start": 513,
+     "line_end": 514,
+     "evidence": "if not self.ui.scatter_toggle: # enforce none if not checked\n                 upperwindow_idx = lowerwindow_idx = [None] * num_peaks",
+     "explanation": "The guard tests the widget object rather than its checked state. The widget is always truthy, so the 'enforce none' branch never runs. In multi-photopeak mode, scatter windows are kept even when scatter correction is unchecked.",
+     "suggestion": "Use self.ui.scatter_toggle.checked.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/SPECTRecon.py",
+      "line": 513
+     }
+    }
+   ]
+  },
+  {
+   "title": "Temporary DICOM directories are created but never removed",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SPECTRecon/Logic/VolumeUtils.py",
+   "line": 7,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Temporary DICOM directories are created but never removed",
+     "file": "SPECTRecon/Logic/VolumeUtils.py",
+     "line_start": 7,
+     "line_end": 8,
+     "evidence": "def createTempDir():\n    return tempfile.mkdtemp()",
+     "explanation": "create_volume_node_from_recon (SPECTReconLogic.py:216-221) creates a temp directory per reconstruction and never deletes it; removeNode() exists but is never called. Every reconstruction leaves DICOM copies of the reconstructed patient image in the system temp folder indefinitely, which is a privacy/hygiene issue on shared workstations.",
+     "suggestion": "Delete the temporary directory (shutil.rmtree) after the volume is loaded, e.g. in a finally block.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Logic/VolumeUtils.py",
+      "line": 7
+     }
+    }
+   ]
+  },
+  {
+   "title": "Temporary DICOM folders with patient data are never removed",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+   "line": 216,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Temporary DICOM folders with patient data are never removed",
+     "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+     "line_start": 216,
+     "line_end": 221,
+     "evidence": "temp_dir = createTempDir()\n        for i, dataset in enumerate(recon_ds):\n            temp_file_path = os.path.join(temp_dir, f\"temp_{i}.dcm\")\n            dataset.save_as(temp_file_path)",
+     "explanation": "Reconstructed DICOM slices are written to a fresh temp directory and loaded into the database, but the directory is never deleted. Patient-identifying DICOM files remain in the system temp location after use. removeNode with its dir-cleanup option exists but is unused.",
+     "suggestion": "Remove the temp directory after the DICOM import completes (try/finally with shutil.rmtree), or write directly to the Slicer DICOM database path.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+      "line": 216
+     }
+    }
+   ]
+  },
+  {
+   "title": "Test code hard-codes CUDA device",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SPECTRecon/Testing/Python/reconstruction.py",
+   "line": 191,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Test code hard-codes CUDA device",
+     "file": "SPECTRecon/Testing/Python/reconstruction.py",
+     "line_start": 191,
+     "line_end": 192,
+     "evidence": "        mse_upper = torch.sum((attenuation_map_upper.to(\"cuda\")-attenuation_map1)**2)/2",
+     "explanation": "The tests move reference tensors to \"cuda\" unconditionally, so they fail on CPU-only machines and on any non-CUDA GPU, even though pytomography.device is used elsewhere. This makes the registered ctests unreliable across the build farm.",
+     "suggestion": "Use pytomography.device (or the device of the computed tensor) instead of the literal \"cuda\".",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Testing/Python/reconstruction.py",
+      "line": 191
+     }
+    }
+   ]
+  },
+  {
+   "title": "torch.load without weights_only on bundled and downloaded .pt files",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "SPECTRecon/Logic/AdvancedPSF.py",
+   "line": 29,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "torch.load without weights_only on bundled and downloaded .pt files",
+     "file": "SPECTRecon/Logic/AdvancedPSF.py",
+     "line_start": 29,
+     "line_end": 35,
+     "evidence": "    gauss_amplitude_params = torch.load(path+'gauss_amplitude.pt')\n    gauss_sigma_params = torch.load(path+'gauss_sigma.pt')",
+     "explanation": "torch.load with the default pickle-based loader executes arbitrary code embedded in the file. The bundled PSF parameter files are trusted repository content, but the same pattern is used in the tests on archives downloaded from Zenodo (reconstruction.py:187-188, 259-260, 267-268), so a compromised or substituted download would execute code in the user's Slicer process. No evidence of malicious content was found in the committed .pt files (they are small, ~1.6-3 KB parameter tensors).",
+     "suggestion": "Pass weights_only=True (or map_location plus weights_only) when loading these parameter tensors, and verify checksums of downloaded test data.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Logic/AdvancedPSF.py",
+      "line": 29
+     }
+    }
+   ]
+  },
+  {
+   "title": "Documentation links point to a different repository name than the catalog entry",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "README.md",
+   "line": 3,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Documentation links point to a different repository name than the catalog entry",
+     "file": "README.md",
+     "line_start": 3,
+     "line_end": 3,
+     "evidence": "This is the official repository for the `Slicer` extension `SlicerSPECTRecon`. **For details on how to use, see the [user manual](https://github.com/PyTomography/Slicer/blob/main/User_Manual.md) and the [associated youtube video tutorial](https://www.youtube.com/watch?v=DzV1soWTzEA)**",
+     "explanation": "The catalog entry points to https://github.com/PyTomography/SlicerSPECTRecon.git while README/User_Manual/CONTRIBUTING link to PyTomography/Slicer and PyTomography/slicer_spect_recon. Users following the manual may clone a different repository than the one the extension manager builds, which is confusing but not a functional defect.",
+     "suggestion": "Update the documentation links to the canonical repository URL.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 3
+     }
+    }
+   ]
+  },
+  {
+   "title": "Provenance and license of bundled PSF model weights not documented",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "SPECTRecon/Logic/AdvancedPSF.py",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Provenance and license of bundled PSF model weights not documented",
+     "file": "SPECTRecon/Logic/AdvancedPSF.py",
+     "line_start": 9,
+     "line_end": 12,
+     "evidence": "psf_operator_dict = {\n    'GI-HEGP @ 440 keV': 'params_440keV_GIHEGP_256shift_sparse_DW_pyrex66_1DR',\n    'SY-HE @ 440 keV': 'params_440keV_SYHE_256shift_sparse_DW_pyrex66_1DR'\n}",
+     "explanation": "The extension ships 14 .pt parameter files for two collimator models but neither README nor the manual states how they were generated, on what data, or under which license. For an AI/parameter-fitting component used in quantitative imaging this is a documentation gap rather than a distribution blocker, since the extension itself is MIT.",
+     "suggestion": "Document the origin, fitting data and license of the PSF parameter files in the README or User_Manual.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Logic/AdvancedPSF.py",
+      "line": 9
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Bundled PSF model files are not installed by CMake, so Advanced PSF fails in the installed extension",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SPECTRecon/CMakeLists.txt",
+   "line": 21,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Bundled PSF model files are not installed by CMake, so Advanced PSF fails in the installed extension",
+     "file": "SPECTRecon/CMakeLists.txt",
+     "line_start": 21,
+     "line_end": 27,
+     "evidence": "set(MODULE_PYTHON_RESOURCES\n  Resources/Icons/${MODULE_NAME}.png\n  Resources/UI/${MODULE_NAME}.ui\n  Resources/algorithmTestSettings.json",
+     "explanation": "MODULE_PYTHON_RESOURCES lists only the icon, the .ui and three JSON files. The 14 files in SPECTRecon/Resources/Data/PSF_models/*.pt are never installed, yet AdvancedPSF.get_psf_operator builds a path under Resources/Data/PSF_models and calls torch.load on it (AdvancedPSF.py:26-35). In an extension-manager installation, checking 'Advanced PSF' therefore raises FileNotFoundError instead of reconstructing.",
+     "suggestion": "Add the PSF model files (e.g. Resources/Data/PSF_models/*.pt) to MODULE_PYTHON_RESOURCES, or download them on demand with user consent.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/CMakeLists.txt",
+      "line": 21
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Catalog entry build_dependencies is empty while the extension declares EXTENSION_DEPENDS \"PyTorch\"",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 13,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Catalog entry build_dependencies is empty while the extension declares EXTENSION_DEPENDS \"PyTorch\"",
+     "file": "CMakeLists.txt",
+     "line_start": 13,
+     "line_end": 13,
+     "evidence": "set(EXTENSION_DEPENDS \"PyTorch\") # Specified as a list or \"NA\" if no dependencies",
+     "explanation": "The extension imports PyTorchUtils and raises InstallError if the PyTorch extension is absent (SPECTRecon.py:22-25), and the catalog entry supplied for review has \"build_dependencies\": []. The index therefore does not declare the PyTorch extension as a dependency of this entry, so the packaged dependency metadata and the index metadata disagree and the extension manager cannot be relied on to install PyTorch first; users who install only SPECTRecon hit the InstallError path.",
+     "suggestion": "Set \"build_dependencies\": [\"PyTorch\"] in the catalog entry (or remove EXTENSION_DEPENDS if it is genuinely not needed) so both declarations agree.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 13
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Catalog build_dependencies does not match EXTENSION_DEPENDS=PyTorch",
+     "file": "CMakeLists.txt",
+     "line_start": 13,
+     "line_end": 13,
+     "evidence": "set(EXTENSION_DEPENDS \"PyTorch\") # Specified as a list or \"NA\" if no dependencies",
+     "explanation": "The module requires the PyTorch extension (SPECTRecon.py lines 22-25 import PyTorchUtils and raise if missing), and CMakeLists declares it as EXTENSION_DEPENDS. The catalog entry declares an empty build_dependencies, so the index will not build or install PyTorch as a dependency. Users may load the module without PyTorch and then hit an error on first open.",
+     "suggestion": "Set build_dependencies in the catalog entry to [\"PyTorch\"] to match EXTENSION_DEPENDS.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 13
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Exactly pinned pip packages installed on module open, plus a silent multi-GB PyTorch download",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SPECTRecon/SPECTRecon.py",
+   "line": 29,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Exactly pinned pip packages installed on module open, plus a silent multi-GB PyTorch download",
+     "file": "SPECTRecon/SPECTRecon.py",
+     "line_start": 29,
+     "line_end": 38,
+     "evidence": "    if not torchLogic.torchInstalled():\n        torch = torchLogic.installTorch(askConfirmation=False, torchVersionRequirement = f\">={minimumTorchVersion}\", torchvisionVersionRequirement=f\">={minimumTorchvisionVersion}\")\n    installed_packages = {f'{pkg.key}=={pkg.version}'for pkg in pkg_resources.working_set}\n    required_packages = {\n        \"dill==0.3.9\",",
+     "explanation": "ensure_packages_installed() is called from setup() (SPECTRecon.py:152), i.e. as soon as the user opens the module, and runs slicer.util.pip_install for dill==0.3.9, torchquad==0.4.1, pytomography==3.3.2, spectpsftoolbox==0.1.0 and beautifulsoup4==4.13.3 with no confirmation dialog and no cancel button. PyTorch is installed through PyTorchUtils (correct path) but with askConfirmation=False, so a multi-gigabyte download starts without consent. The exact pins and pytomography's transitive requirements (numpy/scipy/pydicom are Slicer-bundled) can change the shared Slicer Python environment for every user of that Slicer installation.",
+     "suggestion": "Ask the user before installing (or at least before the torch download), avoid exact pins where possible, and verify/constrain pytomography's transitive requirements so Slicer-bundled numpy/scipy/pydicom are not upgraded or downgraded.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/SPECTRecon.py",
+      "line": 29
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Pinned pip packages installed into Slicer's Python environment without confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SPECTRecon/SPECTRecon.py",
+   "line": 40,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Pinned pip packages installed into Slicer's Python environment without confirmation",
+     "file": "SPECTRecon/SPECTRecon.py",
+     "line_start": 40,
+     "line_end": 44,
+     "evidence": "missing_all = required_packages - installed_packages\n    num_packages = len(missing_all)\n    logging.info('ensure_packages_installed called')\n    for i, missing in enumerate(missing_all):\n        slicer.util.pip_install(missing)",
+     "explanation": "On first opening the module, setup() calls ensure_packages_installed(), which pip-installs pytomography==3.3.2, torchquad, spectpsftoolbox, dill and beautifulsoup4 into the shared Slicer Python. No user confirmation is requested and the packages are not isolated. Transitive requirements can change packages Slicer relies on or other extensions use. The rubric treats installs without user confirmation as a concern.",
+     "suggestion": "Ask the user for confirmation before installing, show the package list and approximate size, and check resolved dependencies (numpy, scipy, pydicom, torch) against Slicer's bundled versions. Use the PyTorch extension's install logic for torch and avoid pulling torch from PyPI through pytomography.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/SPECTRecon.py",
+      "line": 40
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Registered test script name does not match the actual file (simind_To_dicom.py vs simind_to_dicom.py)",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "SPECTRecon/Logic/CMakeLists.txt",
+   "line": 2,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Registered test script name does not match the actual file (simind_To_dicom.py vs simind_to_dicom.py)",
+     "file": "SPECTRecon/Logic/CMakeLists.txt",
+     "line_start": 2,
+     "line_end": 2,
+     "evidence": "slicer_add_python_unittest(SCRIPT ./../Testing/Python/simind_To_dicom.py SLICER_ARGS --no-main-window)",
+     "explanation": "The repository contains SPECTRecon/Testing/Python/simind_to_dicom.py (lower-case 'to'), which is also what SPECTRecon.py:118 imports. On case-sensitive filesystems the registered ctest points at a non-existent path, so the SIMIND converter test can never run and the extension's CI test coverage silently disappears.",
+     "suggestion": "Change the path to ./../Testing/Python/simind_to_dicom.py.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Logic/CMakeLists.txt",
+      "line": 2
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Logic/CMakeLists.txt references a test file with the wrong case",
+     "file": "SPECTRecon/Logic/CMakeLists.txt",
+     "line_start": 2,
+     "line_end": 2,
+     "evidence": "slicer_add_python_unittest(SCRIPT ./../Testing/Python/simind_To_dicom.py SLICER_ARGS --no-main-window)",
+     "explanation": "The CMake test entry names simind_To_dicom.py, but the file is Testing/Python/simind_to_dicom.py. The test registration fails on case-sensitive filesystems when BUILD_TESTING is on.",
+     "suggestion": "Correct the filename to simind_to_dicom.py.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Logic/CMakeLists.txt",
+      "line": 2
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "store_recons path uses volume_node before assignment, so 'store iterations' and uncertainty estimation always fail",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+   "line": 171,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "store_recons path uses volume_node before assignment, so 'store iterations' and uncertainty estimation always fail",
+     "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+     "line_start": 171,
+     "line_end": 176,
+     "evidence": "        if store_recons:  # Store information for accessing later\n            \n            self.stored_recon_iters[volume_node.GetID()] = [recon_algorithm_all_beds, callbacks]\n        volume_node = self.create_volume_node_from_recon(reconstructed_image_multibed, files_NM, test_mode)\n        progressDialog.close()",
+     "explanation": "volume_node is only created on line 174, after it is dereferenced on line 173. Whenever the user ticks 'store iterations' (SPECTRecon.py:563 store_recons=self.ui.storeItersCheckBox.checked), reconstruct() raises UnboundLocalError after the whole reconstruction has already run, so the result is lost and the progress dialog is never closed. compute_uncertainty() depends on self.stored_recon_iters, so the uncertainty feature can never work either.",
+     "suggestion": "Create the volume node first, then store self.stored_recon_iters[volume_node.GetID()] = [recon_algorithm_all_beds, callbacks].",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+      "line": 171
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "store_recons path raises UnboundLocalError on volume_node",
+     "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+     "line_start": 171,
+     "line_end": 174,
+     "evidence": "if store_recons:  # Store information for accessing later\n\n             self.stored_recon_iters[volume_node.GetID()] = [recon_algorithm_all_beds, callbacks]\n        volume_node = self.create_volume_node_from_recon(reconstructed_image_multibed, files_NM, test_mode)",
+     "explanation": "When the 'store intermediate iterations' option is checked, reconstruct() reads volume_node before it is assigned, since volume_node is only created later by create_volume_node_from_recon. Any reconstruction with store_recons=True therefore fails at the end, after the full computation has run, and the result is lost.",
+     "suggestion": "Move the storage after create_volume_node_from_recon and key it on the returned node's ID. Add a test covering store_recons=True.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+      "line": 171
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of packaging",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D8",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D9",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8",
+  "D9"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 9,
+  "single": 14,
+  "unverified": 0,
+  "total": 18
+ }
+}

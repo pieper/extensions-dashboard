@@ -1,0 +1,764 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Intervertebral disc center/height uses the wrong axis index",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "CLI/IntervertebralAnalysis/IntervertebralAnalysis.py",
+   "line": 58,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Intervertebral analysis indexes the segmentation name list and mask axes unsafely",
+     "file": "CLI/IntervertebralAnalysis/IntervertebralAnalysis.py",
+     "line_start": 56,
+     "line_end": 60,
+     "evidence": "    xcent = int(np.rint(np.mean(np.nonzero(maskData)[0])))\n    ycent = int(np.rint(np.mean(np.nonzero(maskData[1]))))\n    center = np.nonzero(maskData[xcent,ycent,:])",
+     "explanation": "`maskData[1]` indexes the volume instead of `np.nonzero(maskData)[1]`, so the y-center is the mean of a single 2D slice's coordinates, and if the chosen column contains no mask voxels np.max/np.min raise on an empty sequence. The disc-height result is therefore arbitrary rather than a center height. Errors surface to the user via tryWithErrorDisplay, hence minor.",
+     "suggestion": "Use `np.nonzero(maskData)[1]` for the y center and guard the empty case.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CLI/IntervertebralAnalysis/IntervertebralAnalysis.py",
+      "line": 57
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Intervertebral disc center/height uses the wrong axis index",
+     "file": "CLI/IntervertebralAnalysis/IntervertebralAnalysis.py",
+     "line_start": 57,
+     "line_end": 59,
+     "evidence": "ycent = int(np.rint(np.mean(np.nonzero(maskData[1]))))\n    center = np.nonzero(maskData[xcent,ycent,:])",
+     "explanation": "ycent is computed from np.nonzero(maskData[1]), which takes the nonzero indices of the second x-slab, not the y-center of the mask. The height column is then read from an arbitrary column of the mask, so 'Disc Height' and 'Disc Height Ratio' can be wrong or zero-length, and the reported value is silently wrong.",
+     "suggestion": "Compute the y-center from the nonzero coordinates of the mask in the x-slice, e.g. np.nonzero(maskData)[1], and add a regression test with a known disc phantom.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CLI/IntervertebralAnalysis/IntervertebralAnalysis.py",
+      "line": 58
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Rotating-calipers width uses wrong coordinates (distance and diameter bugs)",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "CLI/MusculoskeletalAnalysisCLITools/width.py",
+   "line": 39,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Rotating-calipers width uses wrong coordinates (distance and diameter bugs)",
+     "file": "CLI/MusculoskeletalAnalysisCLITools/width.py",
+     "line_start": 38,
+     "line_end": 52,
+     "evidence": "return math.sqrt((hull[0][0]-hull[1][0])**2+(hull[1][0]-hull[1][1])**2)\n...\nres = max(res, math.sqrt((hull[i][0]-hull[j][0])**2+(hull[i][0]-hull[j][1])**2))",
+     "explanation": "In the n==2 branch, the distance uses hull[1][1] where it should use hull[1][1]-hull[0][1], so the y term is wrong. In the main loop, the y term uses hull[i][0]-hull[j][1] instead of hull[i][1]-hull[j][1]. Annulus and nucleus widths reported by IntervertebralAnalysis are therefore incorrect, not merely approximate.",
+     "suggestion": "Fix the coordinate differences (y terms use index 1 on both points) and add unit tests against known polygons.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "CLI/MusculoskeletalAnalysisCLITools/width.py",
+      "line": 39
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "crop() never applies the one-voxel margin on the low side (no-op comparison)",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "CLI/MusculoskeletalAnalysisCLITools/crop.py",
+   "line": 14,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "crop() has a no-op statement `low==low-1`, so the advertised 1-voxel margin is never added",
+     "file": "CLI/MusculoskeletalAnalysisCLITools/crop.py",
+     "line_start": 13,
+     "line_end": 18,
+     "evidence": "        # Leave 1 space between shape and new edge unless the shape was already on the edge\n        if low > 0:\n            low==low-1",
+     "explanation": "`low==low-1` compares instead of assigning, so the low bound is never lowered. The crop still works (it just does not include the intended 1-voxel border); any measurement computed from the cropped volume is slightly tighter than documented. Not a safety issue, but the intended behavior is not implemented.",
+     "suggestion": "Use `low = low - 1` (and add a unit test for crop).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CLI/MusculoskeletalAnalysisCLITools/crop.py",
+      "line": 13
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "crop() never applies the one-voxel margin on the low side (no-op comparison)",
+     "file": "CLI/MusculoskeletalAnalysisCLITools/crop.py",
+     "line_start": 14,
+     "line_end": 15,
+     "evidence": "if low > 0:\n    low==low-1",
+     "explanation": "The intent is to leave one voxel of padding before the lowest nonzero index, but '==' is a comparison, so 'low' is never decremented. The cropped array then starts exactly at the mask edge. This affects fill() boundary handling (padding-based hole filling) and the edge-sensitive thickness/width computations for all analyses that call crop, potentially changing reported values.",
+     "suggestion": "Use 'low = low - 1' and add a test that asserts the cropped shape includes the margin.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CLI/MusculoskeletalAnalysisCLITools/crop.py",
+      "line": 14
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Apply-button enablement checks a parameter (`UseDICOM`) that is never written",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+   "line": 468,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Apply-button enablement checks a parameter (`UseDICOM`) that is never written",
+     "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+     "line_start": 465,
+     "line_end": 473,
+     "evidence": "        elif self._parameterNode.GetNodeReference(\"InputVolume\") and self._parameterNode.GetParameter(\"SegmentID\") and (self._parameterNode.GetParameter(\"UseDICOM\")==\"False\" or self._parameterNode.GetNodeReferenceID(\"DICOMNode\")):",
+     "explanation": "`UseDICOM` is set nowhere in the module (only `UseAlt`/`UseMan` are managed), so the condition always relies on the DICOMNode reference being present. Because initializeParameterNode() always fills DICOMNode from the first scalar volume, the Apply button is enabled even when the user has selected \"Use another node for DICOM tags\" with no meaningful node, and conversely a scene without any volume reference keeps Apply disabled. The stated gating (require a DICOM source when alternate tags are chosen) is not actually enforced in the GUI.",
+     "suggestion": "Gate on `UseAlt`/`UseMan` (as process() does) and drop the stale `UseDICOM` check.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+      "line": 468
+     }
+    }
+   ]
+  },
+  {
+   "title": "Catalog pins to a moving branch and metadata has placeholders",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "CLI/CorticalAnalysis/CorticalAnalysis.xml",
+   "line": 8,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "CLI XML metadata points at placeholder documentation URL and has an empty license element",
+     "file": "CLI/CorticalAnalysis/CorticalAnalysis.xml",
+     "line_start": 8,
+     "line_end": 9,
+     "evidence": "    <documentation-url>https://github.com/username/project</documentation-url>\n    <license/>",
+     "explanation": "All four CLI XMLs point at `https://github.com/username/project` and have an empty `<license/>`. The extension license itself is MIT (LICENSE.txt), so this is a documentation/metadata defect only; the Help link in the module GUI goes to the correct README.",
+     "suggestion": "Point documentation-url at the README and fill the license element with MIT.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CLI/CorticalAnalysis/CorticalAnalysis.xml",
+      "line": 8
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Catalog pins to a moving branch and metadata has placeholders",
+     "file": "CLI/CorticalAnalysis/CorticalAnalysis.xml",
+     "line_start": 8,
+     "line_end": 9,
+     "evidence": "<documentation-url>https://github.com/username/project</documentation-url>\n    <license/>",
+     "explanation": "scm_revision is 'main', so the built extension can change without a catalog update and cannot be tied to the reviewed source commit. The CLI XML files set <documentation-url> to https://github.com/username/project, a placeholder, and have an empty <license/>.",
+     "suggestion": "Pin scm_revision to a tag or commit, replace the placeholder documentation URL with the README, and set the license to MIT.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CLI/CorticalAnalysis/CorticalAnalysis.xml",
+      "line": 8
+     }
+    }
+   ]
+  },
+  {
+   "title": "Cortical/cancellous/intervertebral metrics assume isotropic voxels and fixed SPL orientation",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CLI/MusculoskeletalAnalysisCLITools/reader.py",
+   "line": 11,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Cortical/cancellous/intervertebral metrics assume isotropic voxels and fixed SPL orientation",
+     "file": "CLI/MusculoskeletalAnalysisCLITools/reader.py",
+     "line_start": 8,
+     "line_end": 13,
+     "evidence": "    image = sitk.DICOMOrient(image, 'SPL')",
+     "explanation": "readImg() forces SPL orientation and everything downstream uses a single scalar `voxSize`, so slice-wise areas, PMOI, and disc height computed along the third axis are wrong for anisotropic (typical clinical thick-slice) DICOM series. The GUI's manual voxel-size field is one value only, with no warning. Users could obtain silently incorrect morphometry for such scans.",
+     "suggestion": "Read the spacing vector from the image header and use per-axis spacing, or validate that the series is isotropic and warn/refuse otherwise.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CLI/MusculoskeletalAnalysisCLITools/reader.py",
+      "line": 11
+     }
+    }
+   ]
+  },
+  {
+   "title": "Per-voxel Python loop in findSpheres makes cancellous/cortical analysis extremely slow and unresponsive",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CLI/MusculoskeletalAnalysisCLITools/thickness.py",
+   "line": 11,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Per-voxel Python loop in findSpheres makes cancellous/cortical analysis extremely slow and unresponsive",
+     "file": "CLI/MusculoskeletalAnalysisCLITools/thickness.py",
+     "line_start": 10,
+     "line_end": 35,
+     "evidence": "    order = np.argsort(dist[a,b,c])\n    for n in order:",
+     "explanation": "For every bone voxel the code builds an mgrid sphere mask and does an elementwise maximum; on a typical 512x512xN micro-CT mask this is millions of Python iterations inside the CLI process. The CLI runs without wait_for_completion (MusculoskeletalAnalysis.py:734) so Slicer stays alive, but progress only advances at fixed 20/40/60/80% steps and users see an apparently frozen analysis for a long time, with no way to cancel it.",
+     "suggestion": "Vectorize with a max-filter / distance-transform-based local thickness implementation, and/or register the CLI node so the user can cancel it.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CLI/MusculoskeletalAnalysisCLITools/thickness.py",
+      "line": 11
+     }
+    }
+   ]
+  },
+  {
+   "title": "Sample-data registration references thumbnail icons that are not in Resources/Icons",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+   "line": 204,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Sample-data registration references thumbnail icons that are not in Resources/Icons",
+     "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+     "line_start": 204,
+     "line_end": 220,
+     "evidence": "        thumbnailFileName=os.path.join(iconsPath, 'Intervertebral1.png'),",
+     "explanation": "Resources/Icons contains Cancellous1/2, CancellousMask1/2, Cortical1/2, CorticalMask1/2, MusculoskeletalAnalysis.png and Screenshot.png, but no Intervertebral1.png or IntervertebralMask1.png (referenced at lines 204 and 220). Also `IntervertebralMaskSample1.seg.nrrd` is registered with `fileNames='IntervertebralMaskSample1.seg.nrrd'` while nodeNames is IntervertebralMask1, which is fine, but the missing thumbnails mean the tutorial's sample nodes appear without images. Cosmetic, not blocking.",
+     "suggestion": "Add the two Intervertebral thumbnails to Resources/Icons or remove the thumbnailFileName arguments.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+      "line": 204
+     }
+    }
+   ]
+  },
+  {
+   "title": "Test hardcodes a Windows output path and the generic test is disabled",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+   "line": 825,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Test hardcodes a Windows output path and the generic test is disabled",
+     "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+     "line_start": 825,
+     "line_end": 825,
+     "evidence": "outputDirectory = os.path.expanduser(\"~\\\\Documents\\\\MusculoskeletalAnalysisTest\")",
+     "explanation": "The only scripted test writes to os.path.expanduser(\"~\\\\Documents\\\\MusculoskeletalAnalysisTest\"), which on Linux/macOS produces a literal backslash filename in the home directory and fails. The CTest registration in Testing/Python is commented out, so the CLI-level behaviour is not covered by build-time tests.",
+     "suggestion": "Use tempfile.mkdtemp() or a path under slicer.app.temporaryPath, and enable the Python test in Testing/Python.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+      "line": 825
+     }
+    }
+   ]
+  },
+  {
+   "title": "pip_install of unpinned packages into Slicer's interpreter on first Apply",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+   "line": 762,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "pip_install of unpinned packages into Slicer's interpreter on first Apply",
+     "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+     "line_start": 755,
+     "line_end": 767,
+     "evidence": "            if slicer.util.confirmOkCancelDisplay(\"The following python modules are required: \" + \", \".join(names) + \". Do you want to install them?\"):\n                for p in pips:\n                    slicer.util.pip_install(p)",
+     "explanation": "The install happens only after an explicit user confirmation and only when the user runs an analysis, and it never pins or downgrades numpy/scipy/etc. But `skimage` and `pynrrd`/`trimesh` are installed unpinned from PyPI, so their transitive requirements could upgrade/downgrade packages Slicer bundles; and because `scipy` is often present in Slicer, the check can silently skip a version check. This is the standard pattern but worth noting for a shared environment.",
+     "suggestion": "Prefer declaring these in the extension's packaging or use version compatibility checks; at minimum mention the installed packages/versions in the log after install.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+      "line": 762
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Runtime pip installs of Slicer-bundled packages without version constraints",
+     "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+     "line_start": 762,
+     "line_end": 764,
+     "evidence": "if slicer.util.confirmOkCancelDisplay(\"The following python modules are required: \" + \", \".join(names) + \". Do you want to install them?\"):\n                for p in pips:\n                    slicer.util.pip_install(p)",
+     "explanation": "importRequest installs scipy, scikit-image, pynrrd and trimesh into Slicer's Python when missing. Installing scipy with no constraint could upgrade a bundled version, and the install runs synchronously on the GUI thread. The user is asked first, so this is a minor environment risk.",
+     "suggestion": "Pip-install only the missing packages with compatible version bounds, and run the installs with progress or in a worker, not on the GUI thread.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+      "line": 762
+     }
+    }
+   ]
+  },
+  {
+   "title": "writeReport appends to existing files without telling the user which file is reused",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CLI/MusculoskeletalAnalysisCLITools/writeReport.py",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "writeReport appends to existing files without telling the user which file is reused",
+     "file": "CLI/MusculoskeletalAnalysisCLITools/writeReport.py",
+     "line_start": 8,
+     "line_end": 18,
+     "evidence": "    if os.path.exists(filepath):\n        # If the file exist open and append to it\n        fOut = open(filepath, \"a\")",
+     "explanation": "Reports are appended to fixed names (cortical.txt, cancellous.txt, density.txt, intervertebral.txt) in the user-chosen directory. Repeated analyses accumulate rows, and if a directory already holds a template file with different columns the data rows are appended under an unrelated header. This is documented in the README but can mix unrelated patients' results in one file; no identifier is written per row except the volume name and date.",
+     "suggestion": "Offer unique filenames or write a per-run timestamp/patient column and verify the header matches before appending.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CLI/MusculoskeletalAnalysisCLITools/writeReport.py",
+      "line": 9
+     }
+    }
+   ]
+  },
+  {
+   "title": "Category and metadata mismatches",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 8,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Category and metadata mismatches",
+     "file": "CMakeLists.txt",
+     "line_start": 8,
+     "line_end": 8,
+     "evidence": "set(EXTENSION_CATEGORY \"Analysis\")",
+     "explanation": "CMakeLists sets EXTENSION_CATEGORY to 'Analysis', the catalog uses 'Quantification', and the module's parent.categories is 'Quantification'. The module description and helpText contain TODO-style text. These are descriptive, not admission issues.",
+     "suggestion": "Align the category and clean up the TODO text in helpText and acknowledgements.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 8
+     }
+    }
+   ]
+  },
+  {
+   "title": "No clinical/research-use disclaimer and no published validation of the derived metrics",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "README.md",
+   "line": 193,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "No clinical/research-use disclaimer and no published validation of the derived metrics",
+     "file": "README.md",
+     "line_start": 191,
+     "line_end": 200,
+     "evidence": "The following additional python packages are required and will be installed the corresponding analysis functions are run:",
+     "explanation": "The README documents usage and tutorials but gives no statement that the measurements are research tools and not validated for clinical decisions. For metrics such as SMI, connectivity density and polar moment of inertia this matters for interpretation; this is advisory only per the policy.",
+     "suggestion": "Add a short disclaimer and a citation for the underlying algorithms (e.g. Bouxsein et al. guidelines for micro-CT morphometry).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 193
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Intervertebral disc center/height uses the wrong axis index",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "CLI/IntervertebralAnalysis/IntervertebralAnalysis.py",
+   "line": 58,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Intervertebral analysis indexes the segmentation name list and mask axes unsafely",
+     "file": "CLI/IntervertebralAnalysis/IntervertebralAnalysis.py",
+     "line_start": 56,
+     "line_end": 60,
+     "evidence": "    xcent = int(np.rint(np.mean(np.nonzero(maskData)[0])))\n    ycent = int(np.rint(np.mean(np.nonzero(maskData[1]))))\n    center = np.nonzero(maskData[xcent,ycent,:])",
+     "explanation": "`maskData[1]` indexes the volume instead of `np.nonzero(maskData)[1]`, so the y-center is the mean of a single 2D slice's coordinates, and if the chosen column contains no mask voxels np.max/np.min raise on an empty sequence. The disc-height result is therefore arbitrary rather than a center height. Errors surface to the user via tryWithErrorDisplay, hence minor.",
+     "suggestion": "Use `np.nonzero(maskData)[1]` for the y center and guard the empty case.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CLI/IntervertebralAnalysis/IntervertebralAnalysis.py",
+      "line": 57
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Intervertebral disc center/height uses the wrong axis index",
+     "file": "CLI/IntervertebralAnalysis/IntervertebralAnalysis.py",
+     "line_start": 57,
+     "line_end": 59,
+     "evidence": "ycent = int(np.rint(np.mean(np.nonzero(maskData[1]))))\n    center = np.nonzero(maskData[xcent,ycent,:])",
+     "explanation": "ycent is computed from np.nonzero(maskData[1]), which takes the nonzero indices of the second x-slab, not the y-center of the mask. The height column is then read from an arbitrary column of the mask, so 'Disc Height' and 'Disc Height Ratio' can be wrong or zero-length, and the reported value is silently wrong.",
+     "suggestion": "Compute the y-center from the nonzero coordinates of the mask in the x-slice, e.g. np.nonzero(maskData)[1], and add a regression test with a known disc phantom.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CLI/IntervertebralAnalysis/IntervertebralAnalysis.py",
+      "line": 58
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Rotating-calipers width uses wrong coordinates (distance and diameter bugs)",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "CLI/MusculoskeletalAnalysisCLITools/width.py",
+   "line": 39,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Rotating-calipers width uses wrong coordinates (distance and diameter bugs)",
+     "file": "CLI/MusculoskeletalAnalysisCLITools/width.py",
+     "line_start": 38,
+     "line_end": 52,
+     "evidence": "return math.sqrt((hull[0][0]-hull[1][0])**2+(hull[1][0]-hull[1][1])**2)\n...\nres = max(res, math.sqrt((hull[i][0]-hull[j][0])**2+(hull[i][0]-hull[j][1])**2))",
+     "explanation": "In the n==2 branch, the distance uses hull[1][1] where it should use hull[1][1]-hull[0][1], so the y term is wrong. In the main loop, the y term uses hull[i][0]-hull[j][1] instead of hull[i][1]-hull[j][1]. Annulus and nucleus widths reported by IntervertebralAnalysis are therefore incorrect, not merely approximate.",
+     "suggestion": "Fix the coordinate differences (y terms use index 1 on both points) and add unit tests against known polygons.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "CLI/MusculoskeletalAnalysisCLITools/width.py",
+      "line": 39
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "crop() never applies the one-voxel margin on the low side (no-op comparison)",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "CLI/MusculoskeletalAnalysisCLITools/crop.py",
+   "line": 14,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "crop() has a no-op statement `low==low-1`, so the advertised 1-voxel margin is never added",
+     "file": "CLI/MusculoskeletalAnalysisCLITools/crop.py",
+     "line_start": 13,
+     "line_end": 18,
+     "evidence": "        # Leave 1 space between shape and new edge unless the shape was already on the edge\n        if low > 0:\n            low==low-1",
+     "explanation": "`low==low-1` compares instead of assigning, so the low bound is never lowered. The crop still works (it just does not include the intended 1-voxel border); any measurement computed from the cropped volume is slightly tighter than documented. Not a safety issue, but the intended behavior is not implemented.",
+     "suggestion": "Use `low = low - 1` (and add a unit test for crop).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CLI/MusculoskeletalAnalysisCLITools/crop.py",
+      "line": 13
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "crop() never applies the one-voxel margin on the low side (no-op comparison)",
+     "file": "CLI/MusculoskeletalAnalysisCLITools/crop.py",
+     "line_start": 14,
+     "line_end": 15,
+     "evidence": "if low > 0:\n    low==low-1",
+     "explanation": "The intent is to leave one voxel of padding before the lowest nonzero index, but '==' is a comparison, so 'low' is never decremented. The cropped array then starts exactly at the mask edge. This affects fill() boundary handling (padding-based hole filling) and the edge-sensitive thickness/width computations for all analyses that call crop, potentially changing reported values.",
+     "suggestion": "Use 'low = low - 1' and add a test that asserts the cropped shape includes the margin.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CLI/MusculoskeletalAnalysisCLITools/crop.py",
+      "line": 14
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "environment": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "packaging": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "minor issues",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 4,
+  "single": 9,
+  "unverified": 0,
+  "total": 13
+ }
+}

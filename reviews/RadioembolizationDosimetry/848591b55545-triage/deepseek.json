@@ -1,0 +1,146 @@
+{
+ "purpose": "Taranis is a radioembolization (Y-90 TARE/SIRT) dosimetry suite for nuclear-medicine physicians: a hub module drives a 7-step case workflow (data roles, registration, segmentation, CBCT territory planning, lung shunt fraction, patient-relative/absolute voxel dosimetry, report) with supporting modules (easy_reg, LSFcalc, CBCTPlanning, two dosimetry modules) and optional AI segmentation models.",
+ "summary": "Large, well-documented research suite (MIT, explicit \"not a medical device\" disclaimer, sample data, unit tests). No data exfiltration, telemetry or credential access found; model downloads are SHA256-pinned and PyTorch is delegated to PyTorchUtils. Two environment problems should be fixed: the extension monkey-patches Slicer's SegmentEditorEffects class at startupCompleted for every user, and CBCTPlanning installs scikit-image with full dependency resolution into Slicer's Python (risk of upgrading bundled numpy/scipy). Packaging is otherwise complete (all Python files installed), though the 9 Taranis test files are not registered in CMake and ~10 MB of screenshots/banners are committed. Model-weight licensing is not stated.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Searched for network/exec/pickle/pip patterns: no upload of images or identifiers, no telemetry, no eval/exec/pickle; ast.literal_eval is used for descriptors (ai.py:106). Model files are downloaded from a fixed GitHub release with SHA256 checks (ai.py:172-174) and loaded with torch.load (ai.py:437); the LSFcalc copy of the same download path was not verified."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "TaranisLib/__init__.py:29-33 calls guardAutoCompleteEffect() at startupCompleted, which replaces SegmentEditorEffects.AbstractScriptedSegmentEditorAutoCompleteEffect.onSegmentationModified globally (segtools.py:92) for users who never open the module; CBCTPlanning.py:822 runs slicer.util.pip_install(\"scikit-image\") with full dependency resolution into Slicer's Python. MONAI/einops are installed only after a confirmation dialog and with --no-deps (LSFcalc.py:1293, Taranis.py:2166), and PyTorch is delegated to PyTorchUtils, which is correct."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt installs every module and Taranis/CMakeLists.txt lists all 22 TaranisLib files and all 7 resources; EXTENSION_DEPENDS \"NA\" matches build_dependencies []. However Taranis/Testing/Python (9 files) is never added via add_subdirectory, and ~10 MB of screenshots/banners are committed."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE is MIT (lines 1-3) and permits distribution. The AI model weights are downloaded from a separate repository (SlicerAether release, ai.py:28) and their license/terms are not stated anywhere I read; TotalSegmentator liver-lesion tasks are correctly flagged as needing a (non-commercial) licence (ai.py:556-558)."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "ScriptedLoadableModule structure is followed, heavy imports (torch, monai, pydicom) are inside functions, errors are surfaced with errorDisplay, and state lives in a parameter node (case.py). Minor issues: torch.load without weights_only, an unbounded module-level _dicomCache (case.py:224), and long AI/CBCT work appears to run on the GUI thread with processEvents pumping."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md is extensive (66 KB), two sample data sets are registered (Taranis.py:49-50), unit tests exist under Taranis/Testing/Python, and the disclaimer 'THIS SOFTWARE IS NOT A CERTIFIED MEDICAL DEVICE. IT IS INTENDED FOR RESEARCH PURPOSES ONLY.' (Taranis.py:104) is shown; tier 1 is appropriate."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Global monkey-patch of Slicer's SegmentEditorEffects class at startup",
+   "file": "Taranis/TaranisLib/segtools.py",
+   "line_start": 85,
+   "line_end": 92,
+   "evidence": "    def onSegmentationModified(self, caller, event):\n        if getattr(self, \"selectedSegmentIds\", None) is None:\n            return   # not initialised yet: nothing to update\n        return original(self, caller, event)\n\n    onSegmentationModified._taranisGuard = True\n    onSegmentationModified.__doc__ = original.__doc__\n    effectClass.onSegmentationModified = onSegmentationModified",
+   "explanation": "TaranisLib/__init__.py:29-33 calls guardAutoCompleteEffect() from startupCompleted (Taranis.py:136), so the class method of Slicer's AbstractScriptedSegmentEditorAutoCompleteEffect is replaced for every Slicer user, including those who never open Taranis. Any change in Slicer's effect implementation or in other extensions that also patch this method can silently break Fill between slices / Grow from seeds, and the patch is never removed on shutdown.",
+   "suggestion": "Do not patch Slicer classes at startup. Report the upstream bug instead, or apply the guard only while a Taranis widget is active and restore the original method on cleanup.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "scikit-image installed into Slicer's Python with full dependency resolution",
+   "file": "CBCTPlanning/CBCTPlanning.py",
+   "line_start": 816,
+   "line_end": 822,
+   "evidence": "    if not slicer.util.confirmOkCancelDisplay(\n            \"The centerlines need the Python package scikit-image (3D thinning), which is not installed.\\n\\n\"\n            \"Install it now (download from the Python package index)?\", windowTitle=\"CBCT planning\"):\n        return False\n    slicer.app.setOverrideCursor(qt.Qt.WaitCursor)\n    try:\n        slicer.util.pip_install(\"scikit-image\")",
+   "explanation": "Unlike the MONAI/einops installs, this call has no --no-deps, so pip resolves scikit-image's requirements (numpy, scipy, networkx, imageio, tifffile, pillow, lazy_loader) and may upgrade or downgrade numpy/scipy that Slicer bundles, breaking Slicer or other extensions for the user. The user consents to installing scikit-image, not to changing numpy/scipy.",
+   "suggestion": "Install with --no-deps after checking that the dependencies are already present, or ship the thinning step without scikit-image; at minimum warn explicitly that bundled numpy/scipy may be changed.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "torch.load of downloaded model weights without weights_only",
+   "file": "Taranis/TaranisLib/ai.py",
+   "line_start": 436,
+   "line_end": 437,
+   "evidence": "        model = buildModel(descriptor, device)\n        model.load_state_dict(torch.load(modelPath, map_location=device))",
+   "explanation": "The .pth files come from a GitHub release and are unpickled by torch.load. In ai.py the download is SHA256-pinned (ai.py:172-174), which mitigates tampering, but the same pattern appears in LSFcalc/LSFcalc.py:1710 whose download path I could not verify, and on PyTorch < 2.6 the default is weights_only=False, so a replaced release asset would execute code. A user-supplied models folder (SETTING_MODELS_FOLDER) is also searched, so arbitrary local .pth files are loaded.",
+   "suggestion": "Pass weights_only=True to torch.load (state_dicts load fine) and verify the SHA256 in the LSFcalc download path as well.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Taranis test suite is not registered with CTest",
+   "file": "Taranis/CMakeLists.txt",
+   "line_start": 49,
+   "line_end": 54,
+   "evidence": "if(BUILD_TESTING)\n  # Register the unittest subclass in the main script as a ctest.\n  # Note that the test will also be available at runtime.\n  slicer_add_python_unittest(SCRIPT ${MODULE_NAME}.py)\nendif()",
+   "explanation": "Taranis/Testing/Python contains 9 test files (e.g. test_rules.py) but Taranis/CMakeLists.txt never does add_subdirectory(Testing), so those tests are neither built nor run by the extension's CI, unlike the other modules which have a Testing/CMakeLists.txt.",
+   "suggestion": "Add add_subdirectory(Testing) under BUILD_TESTING and register the test files, or remove the unused directory.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "~10 MB of screenshots and banners committed to the repository",
+   "file": "CMakeLists.txt",
+   "line_start": 11,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_ICONURL \"https://raw.githubusercontent.com/4burakfe/SlicerRadioembolizationDosimetry/refs/heads/main/taranis_logo.png\")\nset(EXTENSION_SCREENSHOTURLS \"https://raw.githubusercontent.com/4burakfe/SlicerRadioembolizationDosimetry/refs/heads/main/ss_relative.jpg https://raw.githubusercontent.com/4burakfe/SlicerRadioembolizationDosimetry/refs/heads/main/ss_absolut.jpg https://raw.githubusercontent.com/4burakfe/SlicerRadioembolizationDosimetry/refs/heads/main/ss_segment.jpg https://raw.githubusercontent.com/4burakfe/SlicerRadioembolizationDosimetry/refs/heads/main/ss_lsf.jpg\"",
+   "explanation": "Four screenshots (~1.5 MB each), taranis_logo.png (620 KB) and four copies of banner.png (1.7 MB each) are committed, so every extension build and checkout downloads ~10 MB of images that are only used for documentation and the module panel. The automated scan also reported much larger PNG/JFIF files (7-11 MB) that I could not read.",
+   "suggestion": "Downscale the screenshots and banners (a few hundred KB is enough) or host them outside the build tree.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Licence of the downloaded AI model weights is not stated",
+   "file": "Taranis/TaranisLib/ai.py",
+   "line_start": 27,
+   "line_end": 28,
+   "evidence": "# Release that holds the model files (upload the .pth and .txt files as release assets with these names)\nMODEL_RELEASE_URL = \"https://github.com/4burakfe/SlicerAether/releases/download/Trained_Models/\"",
+   "explanation": "The extension is MIT, but the SwinUNETR weights it downloads come from a different repository (SlicerAether) and no licence or terms for those weights are given in the code or (as far as I read) the README. Users and redistributors cannot tell whether the weights may be used clinically or commercially.",
+   "suggestion": "State the licence/provenance of the model weights (training data, terms) in the README and next to the download.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Unbounded module-level DICOM header cache",
+   "file": "Taranis/TaranisLib/case.py",
+   "line_start": 224,
+   "line_end": 249,
+   "evidence": "_dicomCache = {}\n...\n    key = (volumeNode.GetID(), volumeNode.GetAttribute(\"DICOM.instanceUIDs\") or \"\")\n    if key in _dicomCache:\n        return _dicomCache[key]",
+   "explanation": "The cache is keyed by node ID and instance UIDs and is never cleared, so loading many series in a long session keeps growing it (and keeps stale entries for deleted nodes). Small leak, but it also means a volume whose DICOM header changed is never re-read.",
+   "suggestion": "Clear the cache on scene close or cap its size.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "info",
+   "title": "Optional runtime dependencies (PyTorch, TotalSegmentator) not declared in EXTENSION_DEPENDS",
+   "file": "CMakeLists.txt",
+   "line_start": 13,
+   "line_end": 13,
+   "evidence": "set(EXTENSION_DEPENDS \"NA\") # Specified as a list or \"NA\" if no dependencies",
+   "explanation": "AI segmentation needs the PyTorch extension (PyTorchUtils) and liver-on-MRI segmentation needs TotalSegmentator; both are optional and handled with clear messages, so this is not a defect, but declaring them would let the Extensions Manager install them.",
+   "suggestion": "Consider listing PyTorch and TotalSegmentator in EXTENSION_DEPENDS if they are meant to be installed with the extension.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "LSFcalc/LSFcalc.py download path and whether it verifies SHA256 before torch.load (line 1710)",
+  "Taranis/TaranisLib/dicomexport.py: whether shutil.rmtree(work) only removes a temporary directory it created",
+  "Whether long AI inference / CBCT planning runs off the GUI thread (only processEvents pumping seen in CBCTPlanning._progress)",
+  "Correctness of the dosimetry math (dosimetry.py, dosekernel.py, vascular.py, cbct.py) - not read",
+  "README.md content in detail (66 KB) and the sample-data hosting for RadioembolizationDosimetry1/2",
+  "The large binary files reported by the scan (SlicerRadioembolizationDosimetry.png 7 MB, SlicerRadioembolizationDosimetrynoisy.png 11 MB, art.jfif 3 MB, banner.png 8 MB) - not readable and not in the file listing",
+  "Actual build/CI results and whether the extension loads in a Slicer build",
+  "Licence/terms of the SlicerAether model release assets",
+  "easy_reg/EasyRegLib/sitkreg.py and RadioembolizationDosimetryAbsolute/Relative module code beyond the CMakeLists"
+ ],
+ "questions_for_author": [
+  "Why does Taranis patch Slicer's AbstractScriptedSegmentEditorAutoCompleteEffect at startup instead of reporting the upstream bug or guarding only while its own widget is active?",
+  "Can the scikit-image install use --no-deps (or be avoided) so that Slicer's bundled numpy/scipy are never changed?",
+  "What licence and training-data provenance apply to the SwinUNETR model weights downloaded from the SlicerAether release?",
+  "Does the LSFcalc model download verify the SHA256 checksums before torch.load, as TaranisLib/ai.py does?"
+ ]
+}

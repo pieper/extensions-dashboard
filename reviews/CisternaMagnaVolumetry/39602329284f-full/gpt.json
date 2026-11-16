@@ -1,0 +1,100 @@
+{
+ "purpose": "This extension estimates five basal cistern volumes from VolBrain or SynthSeg segmentations and displays the resulting masks and measurements in 3D Slicer. It is intended for researchers studying brain MRI and cerebrospinal fluid anatomy.",
+ "summary": "Calculation can silently erase an existing segmentation named “Cisterna volumes,” including unsaved edits; this needs fixing before distribution. Non-blocking correctness issues affect differently oriented or misaligned inputs, and validation is limited. The supplied source snapshot and build files were inspected, but the catalog's moving branch and exact commit could not be independently resolved. 🔴 Do not merge yet: prevent unintended segmentation destruction and verify the selected catalog revision.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected calculation and segmentation creation, dependency installation, and searched repository text for network and execution APIs. A fixed-name lookup followed by RemoveAllSegments can destroy existing unsaved scene data without confirmation."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Dependencies are installed only after user confirmation during calculation, with no exact version pins. The logic prepends its module directory to the process-wide Python search path."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "Both CMake files list the module and its library, and declared extension dependencies match the supplied empty catalog dependencies. The tools cannot resolve the repository's main branch or verify the claimed commit, nor build the package."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "The repository LICENSE grants MIT distribution permission, and the core is included under that repository license. No model weights or datasets are included in the supplied file inventory."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected geometry handling, reorientation, cistern analysis, and output creation. Same-shape inputs are treated as aligned and axis-permutation spacing is incorrect for some orientations; computation also runs synchronously."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README provides usage and method details, discloses limited validation and a research-only interpretation, and explains upstream segmentation choices. The automated test only checks an import, and SynthSeg lacks a manual-mask comparison."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Calculation silently clears an existing named segmentation",
+   "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+   "line_start": 393,
+   "line_end": 398,
+   "evidence": "    def _createSegmentation(self, referenceVolumeNode, cistern_masks, colors):\n        segmentationNode = slicer.mrmlScene.GetFirstNodeByName(\"Cisterna volumes\")\n        if segmentationNode is None:\n            segmentationNode = slicer.mrmlScene.AddNewNodeByClass(\"vtkMRMLSegmentationNode\", \"Cisterna volumes\")\n        else:\n            segmentationNode.GetSegmentation().RemoveAllSegments()",
+   "explanation": "Calculating again, including on another patient, removes all segments from the first scene node with this name without warning. A user may have edited the previous result or have an unrelated segmentation with that name, so unsaved work is lost. A same-named node of another type also causes an exception.",
+   "suggestion": "Create a uniquely named output by default, or let the user explicitly select an output and confirm replacement before modifying it.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Matching array dimensions are mistaken for matching physical geometry",
+   "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetry.py",
+   "line_start": 356,
+   "line_end": 364,
+   "evidence": "        t1 = slicer.util.arrayFromVolume(t1Node)\n        resampled = None\n        if t1.shape != seg.shape:\n            resampled = slicer.modules.volumes.logic().ResampleVolumeToReferenceVolume(t1Node, refNode)\n            t1 = slicer.util.arrayFromVolume(resampled)\n        affine = self._arrayAffineFromVolumeNode(refNode)\n        spacing = refNode.GetSpacing()\n        voxel_sizes = (spacing[2], spacing[1], spacing[0])\n        masks, external_csf, volumes, extra = run_cistern_analysis_synthseg(seg, affine, voxel_sizes, t1)",
+   "explanation": "Same-sized T1 and SynthSeg volumes with different origins, spacing, orientations, or transforms skip resampling, so T1 intensities are sampled at wrong anatomical positions during CSF refinement. The VolBrain path similarly checks only array shape before combining the label arrays with T1 geometry.",
+   "suggestion": "Compare complete image-to-world geometries including parent transforms; resample to a common reference or reject inputs that are not aligned.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Canonical voxel spacing uses the forward permutation rather than its inverse",
+   "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py",
+   "line_start": 440,
+   "line_end": 445,
+   "evidence": "        self.to_canonical = ornt_transform(orig_ornt, target_ornt)\n        self.from_canonical = ornt_transform(target_ornt, orig_ornt)\n        self._source_axis_for_canonical = [int(self.to_canonical[i, 0]) for i in range(3)]\n\n    def canonical_voxel_sizes(self, voxel_sizes: Tuple[float, float, float]) -> Tuple[float, float, float]:\n        return tuple(float(voxel_sizes[i]) for i in self._source_axis_for_canonical)",
+   "explanation": "Nibabel's orientation rows map input axes to output axes, whereas spacing in canonical order needs the inverse mapping. For a three-axis cyclic permutation with anisotropic voxels, distances and millimeter cutoffs are assigned to the wrong axes, producing incorrect masks and volumes despite correct reorientation of the array.",
+   "suggestion": "Invert the orientation permutation, for example using its argsort, and test all axis permutations with unequal spacings.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Fallback junction may refer to a missing brainstem slice",
+   "file": "CisternaMagnaVolumetry/CisternaMagnaVolumetryLib/cisterna_core.py",
+   "line_start": 311,
+   "line_end": 315,
+   "evidence": "    Ss = np.where(bs.any(axis=(0, 2)))[0]; top = Ss.max()\n    ant = {S: np.argwhere(bs[:, S, :])[:, 0].min() for S in Ss}\n    a_mid = np.median([ant[S] for S in Ss if S > top - round(10 / v1)])\n    pons = [S for S in Ss if ant[S] <= a_mid - 6 / v0]\n    pmj = max(pons) if pons else top - round(18 / v1)",
+   "explanation": "When no pons jump is found, the fallback slice need not contain any brainstem voxels; the later ant[pmj] lookup then raises a KeyError and calculation fails. Slice ranges can also extend beyond image bounds for cropped inputs.",
+   "suggestion": "Clamp the analysis slab to the image and choose an existing brainstem slice for the fallback, or report a clear landmark error.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Current method has limited independent validation",
+   "file": "README.md",
+   "line_start": 91,
+   "line_end": 97,
+   "evidence": "the reachable part. The ambiens and quadrigeminalis limits were set on the same case they are\nscored on, so these two Dice values are optimistic (so is the interpeduncular value: the\npeduncle limit was added after looking at this case). The SynthSeg route has no\nmanual-mask comparison yet; on 20 T1 scans (10 controls, 10 Parkinson's disease) the\ninterpeduncular cistern ranged 0.13–1.25 cm³ and every mask was checked visually. Two cases are not a validation\nstudy: treat the volumes as research measurements and check every result\nvisually.",
+   "explanation": "The documented tuning and evaluation overlap and lack of SynthSeg manual-mask comparisons limit confidence in measurements across subjects and scanners. The README appropriately warns users; this is non-blocking research-maturity feedback.",
+   "suggestion": "Add independent multi-case validation for both input paths and automated regression tests on shareable data.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No shell, Slicer instance, runtime execution, or build/test results were available.",
+  "Network access and Git metadata were unavailable; could not independently resolve main to the supplied commit 39602329284f0769a109119faeb6a1d7df13878b or assess repository accessibility.",
+  "External CLI repository, VolBrain, SynthSeg, dependency metadata, and validation datasets were not inspected.",
+  "No prior catalog entry, submission checklist, or CI reports were available for comparison."
+ ],
+ "questions_for_author": []
+}

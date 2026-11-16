@@ -1,0 +1,166 @@
+{
+ "purpose": "A 3D Slicer module that runs the PKDIA Swin-UNet model to segment left and right polycystic kidneys from T2 MRI or CT volumes, for researchers and clinicians working with autosomal-dominant polycystic kidney disease imaging.",
+ "summary": "The extension is a straightforward ScriptedLoadableModule wrapper around a SwinV2-UNet; I found no data exfiltration, secrets, obfuscation, or reviewer-directed text, and the catalog entry, CMake file lists and Apache-2.0 LICENSE are consistent. The main problems are environmental and behavioural: `pip_install(\"timm\")` will pull torchvision from PyPI outside PyTorchUtils, `pip_install(\"numpy\")`/`scikit-image` can touch Slicer-bundled packages without confirmation, and inference calls `timm.create_model(..., pretrained=True)`, silently downloading ImageNet weights at Apply time (and failing offline) even though the checkpoint is loaded immediately afterwards. Weights are downloaded without checksum verification, and multi-minute inference runs on the GUI thread.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "No exfiltration, telemetry, secrets, eval/exec, or obfuscation found in the files I read (Widget.py, InstallLogic.py, PKDIA.py, SegmentationLogic.py). Network use is limited to GitHub release downloads and a timm pretrained-encoder fetch; the weight download in Widget.py:84 has no checksum verification, though torch.load uses weights_only=True (PKDIA.py:40)."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "InstallLogic.setupPythonRequirements pip-installs numpy, scikit-image, nibabel and timm into Slicer's Python without confirmation (only PyTorch is confirmed); timm hard-depends on torchvision, so pip will install torchvision from PyPI outside PyTorchUtils, and `pip_install(\"numpy\")` can overwrite Slicer's bundled numpy. PyTorch itself is correctly delegated to PyTorchUtils and declared in EXTENSION_DEPENDS/build_dependencies."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Every Python file listed in PolycysticKidneySeg/CMakeLists.txt (lines 5-28) and every resource (lines 30-35) exists in the repository; root CMakeLists sets EXTENSION_DEPENDS \"PyTorch\" matching the catalog build_dependencies, and the entry's scm_url/scm_revision are usable."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE is the full Apache-2.0 text, permitting distribution of the extension code. The downloaded model weights (PKDIAv1/v2-weights.pth) and the Genkyst-derived training data have no stated license or terms in README.md, and there is no research/clinical-use disclaimer."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inference runs synchronously on the GUI thread (Widget.onApply -> SegmentationLogic.applySegmentation) with no progress or cancel, so Slicer freezes for minutes; only RuntimeError is caught, leaving buttons disabled on other exceptions; and PKDIA.py:26 requests pretrained=True, causing an unnecessary network download at Apply time. Heavy torch/timm imports are correctly deferred inside applySegmentation."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md gives a step-by-step tutorial, two screenshots, registered sample data with SHA256 checksums, a paper reference and an integration test. Missing: a clinical/research-use disclaimer, and the test depends on the undeclared SlicerPythonTestRunner extension and uses MRHead rather than kidney data."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "pip_install(\"timm\") pulls torchvision from PyPI outside PyTorchUtils",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/InstallLogic.py",
+   "line_start": 89,
+   "line_end": 92,
+   "evidence": "    try:\n        import timm  # noqa\n    except ImportError:\n        self.pip_install(\"timm\")",
+   "explanation": "timm declares torchvision (and torch) as hard requirements. When the user presses \"Install dependencies\", `slicer.util.pip_install(\"timm\")` resolves torchvision from PyPI, which is not the build installed by the PyTorch extension/PyTorchUtils. A CPU-only or CUDA-mismatched torchvision can break the torch install that PyTorchUtils just set up, affecting every other extension using PyTorch in the same Slicer installation. The policy explicitly requires PyTorch-family packages to come through PyTorchUtils.",
+   "suggestion": "Install timm with `--no-deps` after ensuring torch/torchvision are provided by PyTorchUtils (e.g. `torchLogic.installTorch(...)` plus a torchvision install through PyTorchUtils), or vendor the small amount of timm functionality used (create_model for swinv2_cr_tiny_ns_224) so no extra dependency is needed.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Unconfirmed pip installs of Slicer-bundled packages (numpy, scikit-image)",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/InstallLogic.py",
+   "line_start": 60,
+   "line_end": 71,
+   "evidence": "    try:\n        import numpy  # noqa\n    except ImportError:\n        self.pip_install(\"numpy\")\n    try:\n        import skimage  # noqa\n    except ImportError:\n        self.pip_install(\"scikit-image\")",
+   "explanation": "`pip_install(\"numpy\")` installs a Slicer-bundled package directly, and `pip_install(\"scikit-image\")` resolves numpy/scipy/pillow requirements that pip may upgrade in place. Slicer's own modules and other extensions are compiled against the bundled numpy/scipy, so an upgrade can break them for the whole installation. No confirmation dialog is shown for these installs (doAskConfirmation is only used for PyTorch), and pip_install swallows CalledProcessError and still returns True (lines 169-177), so a failed install is reported as success.",
+   "suggestion": "Do not install numpy at all (Slicer always ships it); install scikit-image/nibabel with version constraints compatible with Slicer's bundled numpy/scipy, ask the user for confirmation before modifying the environment, and propagate pip failures so the UI reports them.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "pretrained=True triggers a silent HuggingFace download during every Apply",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/pkdia/PKDIA.py",
+   "line_start": 24,
+   "line_end": 31,
+   "evidence": "    net = swinv2Unet.SwinV2TwoDecoder(\n        model_name=\"swinv2_cr_tiny_ns_224\",\n        pretrained=True,",
+   "explanation": "timm.create_model(..., pretrained=True) downloads ImageNet encoder weights from the HuggingFace hub the first time (and re-checks the hub on later runs). This happens inside the segmentation call, with no user opt-in and no mention in the README, and it makes Apply fail on offline/air-gapped machines even though the local PKDIA checkpoint is loaded immediately afterwards at line 40 and overwrites those weights. It also adds an unannounced third-party network destination to the module's behaviour.",
+   "suggestion": "Pass pretrained=False (the state dict is loaded right after) or, if the pretrained encoder is genuinely needed, download it explicitly through the existing \"Download weights\" flow with a checksum and document it.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Model weights downloaded without integrity verification",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/Widget.py",
+   "line_start": 82,
+   "line_end": 86,
+   "evidence": "            try:\n                weightPath.parent.mkdir(parents=True, exist_ok=True)\n                urllib.request.urlretrieve(weightURL, weightPath)\n            except (urllib.error.HTTPError, urllib.error.URLError):",
+   "explanation": "The .pth checkpoints are fetched from GitHub releases and loaded with torch.load (PKDIA.py:40). weights_only=True limits pickle-based code execution, but a corrupted or substituted download is still loaded without any SHA256 check, unlike the sample data in PolycysticKidneySeg.py:57/68 which do declare checksums. A truncated download also produces a confusing load error rather than a clear message.",
+   "suggestion": "Add SHA256 checksums for PKDIAv1-weights.pth and PKDIAv2-weights.pth and verify after download, as already done for the sample volumes.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Multi-minute inference runs on the GUI thread without progress or cancel",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/Widget.py",
+   "line_start": 147,
+   "line_end": 158,
+   "evidence": "            try:\n                with tempfile.TemporaryDirectory() as tempDirPath:\n                    inputFileName = \"volume.nii.gz\"\n                    inputFilePath = Path(tempDirPath) / inputFileName\n                    slicer.util.saveNode(inputVolume, str(inputFilePath))",
+   "explanation": "onApply calls applySegmentation synchronously from the button slot; the slice loop in PKDIA.py:53-85 never calls processEvents, so Slicer's UI is frozen for the whole run (README says \"several minutes\"). Users cannot cancel, and the window may be reported as unresponsive. Additionally only RuntimeError is caught (line 156), so an OSError from nibabel or a torch error propagates and leaves all buttons disabled because _setButtonsEnabled(True) at line 158 is never reached.",
+   "suggestion": "Run the inference in a worker thread (slicer.util.createProgressDialog / qSlicerCoreApplication or a QThread with progress callbacks), and use try/finally to re-enable the UI for any exception.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Validation errors overwrite each other; only the last is shown",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/Widget.py",
+   "line_start": 136,
+   "line_end": 145,
+   "evidence": "        if inputVolume is None:\n            errorMessage = \"Invalid input volume\"\n        if modality not in ModalityEnum:\n            errorMessage = \"Invalid modality\"",
+   "explanation": "Each failed check replaces errorMessage, so a user with no volume selected and missing weights only sees the weights message and may not understand why Apply does nothing useful. Also areWeightsFound() (SegmentationLogic.py:19-23) requires both T2 and CT checkpoints, so a user who only downloaded one modality is blocked from using it.",
+   "suggestion": "Collect all failures into a list and display them together; check only the weights file for the selected modality.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Weights are written inside the extension installation directory",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/SegmentationLogic.py",
+   "line_start": 10,
+   "line_end": 15,
+   "evidence": "        fileDir = Path(__file__).parent\n        self.weightsDir = fileDir.parent / \"weights\"",
+   "explanation": "Downloaded checkpoints land in <extension>/weights, i.e. inside the Slicer installation tree. On read-only or system-wide installs the mkdir/urlretrieve fails, and the files are not removed on uninstall. Slicer convention is to store such data in the user's settings/temporary directory.",
+   "suggestion": "Store weights under slicer.util.settingsValue / a user-writable cache directory (e.g. slicer.mrmlScene temp dir or QStandardPaths AppDataLocation).",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Segmentation geometry may not match the input volume orientation",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/Widget.py",
+   "line_start": 153,
+   "line_end": 154,
+   "evidence": "                    segmentationNode = self.logic.applySegmentation(str(inputFilePath), tempDirPath, modality)\n                    segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(inputVolume)",
+   "explanation": "The pipeline reorients the volume with nibabel.as_closest_canonical (exam_genkyst_prod.py:23) and writes predictions in that canonical space, while the segmentation node is then given the original volume's geometry. If the loaded volume is not already in closest-canonical orientation, the resulting segments can be displayed misaligned with the image. SetReferenceImageGeometryParameterFromVolumeNode only sets the reference-geometry parameter, not the segment geometry.",
+   "suggestion": "Either skip as_closest_canonical and work in the volume's own orientation, or resample the prediction back to the input volume geometry before creating the segmentation node.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "No stated license or terms for the downloaded model weights; no clinical disclaimer",
+   "file": "README.md",
+   "line_start": 35,
+   "line_end": 39,
+   "evidence": "Models were developed and trained by Pierre-Henri Conze (IMT Atlantique) using imaging data from the Genkyst cohort.",
+   "explanation": "The repository LICENSE is Apache-2.0 for the code, but the PKDIAv1/v2 checkpoints distributed via GitHub releases and the Genkyst cohort data behind them have no explicit license or usage terms, and neither README.md nor the module helpText states that the output is for research use and not for clinical decision making. Users cannot tell what they may do with the weights.",
+   "suggestion": "State the license/terms of the model weights explicitly (e.g. in README and next to the release assets) and add a research-use-only disclaimer to README and helpText.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Integration test uses MRHead and an undeclared test-runner extension",
+   "file": "PolycysticKidneySeg/Testing/IntegrationTestCase.py",
+   "line_start": 26,
+   "line_end": 29,
+   "evidence": "        SampleData.SampleDataLogic().downloadMRHead()\n        widget.ui.modalityComboBox.setCurrentIndex(0)  # T2\n\n        widget.ui.applyButton.click()",
+   "explanation": "The only integration test feeds a head MR into a kidney model, so it can only assert that two segments were created, not that the pipeline is correct; it is also marked slow and excluded by the module's own `-m not slow` filter. PolycysticKidneySeg.py:93-100 additionally requires the SlicerPythonTestRunner extension, which is not declared anywhere.",
+   "suggestion": "Use the registered T2/CT sample data in the test and declare SlicerPythonTestRunner as a test dependency in the documentation.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not verify the actual content of the downloaded checkpoints PKDIAv1-weights.pth / PKDIAv2-weights.pth (binary, hosted on GitHub releases) or their license terms.",
+  "Could not verify the timm model 'swinv2_cr_tiny_ns_224' pretrained weight source/license or confirm the exact dependency resolution pip performs for timm in Slicer's Python.",
+  "Could not run the extension, its tests, or the CMake build; packaging was assessed by comparing CMakeLists file lists against the repository tree only.",
+  "Could not confirm the catalog entry's scm_revision 'main' resolves to the stated commit 3d9623a88225d8fcebe92922b09dcbe6bf91951e (no network access).",
+  "Did not inspect the binary PNG resources (icons, screenshots) beyond their presence and size."
+ ],
+ "questions_for_author": [
+  "Why is pretrained=True used in PKDIA.applyPKDIA when the PKDIA checkpoint is loaded immediately afterwards? Can it be set to False to avoid the HuggingFace download?",
+  "How is torchvision provided? timm requires it, and pip installing timm outside PyTorchUtils can install a torchvision build that does not match the PyTorch extension's torch.",
+  "What are the license/usage terms for the PKDIAv1/v2 weights and the Genkyst training data, and can SHA256 checksums be published for the weight downloads?",
+  "Can inference be moved off the GUI thread with a progress bar and cancel button?"
+ ]
+}

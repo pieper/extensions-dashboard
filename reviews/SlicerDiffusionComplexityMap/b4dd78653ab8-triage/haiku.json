@@ -1,0 +1,137 @@
+{
+ "purpose": "Provides a Slicer CLI module (Diffusion > Quantify) that computes a Diffusion Complexity map (LMC-based, with Euclidean/Wootters/Kullback-Leibler/Jensen disequilibrium options and a Tsallis-style q parameter) from a DWI NRRD sequence and a brain mask. It is aimed at diffusion MRI researchers who want a complexity-based alternative to FA/ADC maps.",
+ "summary": "Small, self-contained C++ ITK CLI with no network access, no Python environment changes, no downloads at runtime, and an MIT LICENSE. Main concerns are soundness: the XML declares the brain mask as optional and the docs say a blank mask uses the whole image, but the CLI always reads the mask and would throw on an empty name; the CTest entry passes arguments the program does not accept (--sigma, no mask); and the filter has unguarded divisions (zero reference images, zero automatic bin count). The filter sources carry Apache-2.0 headers that conflict with the MIT LICENSE and need clarification. Not verified by building or running.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read CMakeLists.txt, the CLI source, XML, filter header and .hxx. No network calls, no subprocess or eval, no data transmission, and file I/O is limited to user-selected input and output paths. Nothing suspicious found."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Only C++ ITK/SlicerExecutionModel build; no Python packages installed, no sys.path or global side effects. The filter calls DebugModeOn() which prints to stdout, which is minor and local to the CLI."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMake lists the .h/.hxx files and the CLI; EXTENSION_DEPENDS 'NA' matches build_dependencies []. The filter uses itkDiffusionTensor3DReconstructionImageFilter.h and itkNrrdImageIO.h, but only ITKIOImageBase and ITKSmoothing are declared as ITK components, so the build may depend on ITK modules that are not requested. Not verified by building."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "Top-level LICENSE is MIT, but itkDiffusionComplexityMappingImageFilter.h lines 2-4 and .hxx lines 2-4 state 'Licensed under the Apache License, Version 2.0' with a different copyright holder. Distribution is permitted under either, but the conflicting notices should be reconciled."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Mask handling contradicts the XML and docs (see findings). Unguarded divisions in createDiffusionSpace and histogram binning. Testing/Cxx/CMakeLists.txt passes args that the CLI does not define. Nothing run."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "docs/index.md and README describe usage and cite the paper. The CTest is apparently a leftover template: it uses a CT head image, not DWI, and the arguments do not match. No working test coverage evident; tier 3 is reasonable."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Brain mask documented as optional but always read, so blank mask fails",
+   "file": "DiffusionComplexityMap/DiffusionComplexityMap.cxx",
+   "line_start": 36,
+   "line_end": 40,
+   "evidence": "ReaderMaskType::Pointer readerMask = ReaderMaskType::New();\n  reader->SetFileName(inputVolume.c_str());\n  readerMask->SetFileName(maskVolume.c_str());\n  reader->Update();\n  readerMask->Update();",
+   "explanation": "The XML description says 'If left blank, the entire input image will be used as input', but the parameter is declared as a plain <image type=\"label\"> with no optional flag, and main() always calls readerMask->SetFileName(maskVolume) and Update() before filter->SetDiffusionSpace(readerMask->GetOutput()). With an empty mask name, ITK throws, the exception is caught in main, and the module returns EXIT_FAILURE. The documented fallback path (GenerateData's GetNumberOfIndexedInputs()==1 branch) is therefore unreachable from the CLI.",
+   "suggestion": "Only call SetDiffusionSpace when maskVolume is non-empty, or make the mask optional in the XML and document the behavior accordingly.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "major",
+   "title": "CTest case is a leftover template and passes arguments the module does not accept",
+   "file": "DiffusionComplexityMap/Testing/Cxx/CMakeLists.txt",
+   "line_start": 21,
+   "line_end": 26,
+   "evidence": "ExternalData_add_test(${SEM_DATA_MANAGEMENT_TARGET} NAME ${testname} COMMAND ${SEM_LAUNCH_COMMAND} $<TARGET_FILE:${CLP}Test>\n    --compare DATA{${BASELINE}/${CLP}Test.nrrd}\n    ${TEMP}/${CLP}Test.nrrd\n    ModuleEntryPoint\n    --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nrrd",
+   "explanation": "The test runs DiffusionComplexityMapTest with '--sigma 2.5' and a CT head image (CTHeadAxial). The module has no --sigma parameter, and the command omits the required brain-mask argument, so the test would fail or pass only by accident. It also compares against a baseline that is not described. The test provides no real validation of the DC algorithm.",
+   "suggestion": "Replace with a DWI test case that supplies inputVolume, maskVolume and outputVolume with the real parameter names, and document the expected baseline generation.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Divisions by zero and unbounded bin count",
+   "file": "DiffusionComplexityMap/itkDiffusionComplexityMappingImageFilter.hxx",
+   "line_start": 299,
+   "line_end": 299,
+   "evidence": "meanNonDiff/=numberOfReferenceImages;\n    weights[0]=meanNonDiff;",
+   "explanation": "createDiffusionSpace divides by numberOfReferenceImages, which is zero when the header has no b=0 volumes, producing NaN for every voxel. histogramBinByDiffusionVarianceRegression can return 0 bins for a small range, and calculatesEntropyMapping/calculatesDisequilibriumMapping then compute 1.0/m_HistogramBins (division by zero). The automatic bin count is also not clamped, unlike the manual range 4-500 in the XML. The missing b0 case only prints to cerr and continues, so the user gets a silently wrong map instead of an error.",
+   "suggestion": "Validate numberOfReferenceImages > 0 and b0 > 0 and throw itk::ExceptionObject otherwise; clamp the automatic bin count to a sane minimum (e.g. >= 4) before use.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Missing b-value leads to silent division by zero",
+   "file": "DiffusionComplexityMap/itkDiffusionComplexityMappingImageFilter.hxx",
+   "line_start": 200,
+   "line_end": 203,
+   "evidence": "if(!readb0)\n    {\n        std::cerr << \"BValue not specified in header file\" << std::endl;\n    }",
+   "explanation": "If the DWMRI_b-value key is absent, b0 stays 0 and createDiffusionWeightedValues divides by it, yielding inf/NaN gradient values. The code prints only 'BValue not specified in header file' to cerr and proceeds, so the module reports success with a corrupt output.",
+   "suggestion": "Raise an exception instead of continuing when the b-value is missing.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Conflicting license notices: Apache-2.0 headers vs MIT LICENSE",
+   "file": "DiffusionComplexityMap/itkDiffusionComplexityMappingImageFilter.h",
+   "line_start": 1,
+   "line_end": 15,
+   "evidence": "Copyright 2017 Antonio Carlos da Silva Senra Filho and Fabricio Henrique Simozo\n\n   Licensed under the Apache License, Version 2.0 (the \"License\");",
+   "explanation": "The filter sources state Apache-2.0 with a different copyright holder, while the repository LICENSE and README say MIT. Both permit distribution, so this is not blocking, but users and packagers cannot tell which terms apply to the filter code.",
+   "suggestion": "Clarify in LICENSE or the headers which license covers the ITK filter files, and make the copyright holders consistent.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "ITK components may not cover all headers used",
+   "file": "DiffusionComplexityMap/CMakeLists.txt",
+   "line_start": 16,
+   "line_end": 19,
+   "evidence": "set(${PROJECT_NAME}_ITK_COMPONENTS\n    ITKIOImageBase\n    ITKSmoothing\n    )",
+   "explanation": "The code includes itkDiffusionTensor3DReconstructionImageFilter.h and itkNrrdImageIO.h, but only ITKIOImageBase and ITKSmoothing are requested in find_package. Depending on the ITK build, the link or include could fail. Not verified by building.",
+   "suggestion": "Add the ITK modules that provide the DTI reconstruction and NRRD IO headers (for example ITKDiffusionTensorImage / ITKIONRRD) and confirm a clean build.",
+   "confidence": "low"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Uninitialized values when gradient string has fewer than three numbers",
+   "file": "DiffusionComplexityMap/itkDiffusionComplexityMappingImageFilter.hxx",
+   "line_start": 161,
+   "line_end": 169,
+   "evidence": "double x,y,z;\n         itk::ExposeMetaData<std::string> (imgMetaDictionary, *itKey, metaString);\n         if (itKey->find(\"DWMRI_gradient\") != std::string::npos)",
+   "explanation": "x, y, z are declared without initialization and passed to sscanf. If a DWMRI_gradient metadata value is malformed, the vector gets indeterminate values, and the gradient is then used in the reference-vs-gradient decision.",
+   "suggestion": "Initialize x, y, z to zero and check that sscanf returns 3.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Malformed XML text and misspelled enum element names",
+   "file": "DiffusionComplexityMap/DiffusionComplexityMap.xml",
+   "line_start": 21,
+   "line_end": 21,
+   "evidence": "<image type=\"label\">>",
+   "explanation": "The image element for the mask has a stray '>' character in its content, and the disequilibrium enum uses the misspelled labels 'desiquilibriumFunction' and 'Kullback-Leiber'. These are cosmetic but affect the user-facing UI and the parameter name.",
+   "suggestion": "Remove the stray '>' and correct the spelling of the labels and parameter name (keeping compatibility if the parameter name is already used by saved scenes).",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Did not build or run the CLI or the CTest; did not access the ITK/SlicerExecutionModel build environment.",
+  "Did not resolve scm_revision 'main' to a specific commit, nor inspect the git history of the upstream repository.",
+  "Did not verify the ExternalData test data (only md5/sha256 files were listed).",
+  "Did not verify the referenced paper, the algorithm's scientific validity, or the documentation website.",
+  "Did not check the Slicer extension description/icon/screenshot URLs."
+ ],
+ "questions_for_author": []
+}

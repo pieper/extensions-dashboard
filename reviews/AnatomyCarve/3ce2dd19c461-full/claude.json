@@ -1,0 +1,104 @@
+{
+ "purpose": "AnatomyCarve is a Rendering module that lets users clip a CT volume rendering with movable spheres. Each sphere hides segments the user chooses, using OpenGL compute shaders that write into a vector volume's GPU texture. A bundled C++ helper module, VolumeTextureIDHelper, reads the OpenGL texture handle out of VTK's internal volume mapper.",
+ "summary": "I read the catalog entry, the CMake files, all Python modules and the C++ helper. I found no malicious behaviour, network calls other than the sample-data download (which has a checksum), or data exfiltration. The main concerns are:\n- PyOpenGL is pip-installed at module import time, without asking the user, so it runs at Slicer startup for anyone who has the extension.\n- The C++ helper depends on VTK-internal members and headers and has no declared dependency on the Volume Rendering module. It may not compile, and I could not verify that.\n- Shaders are compiled on the GUI thread with no known-current GL context.\n- There is a leftover template zip, and the C++ metadata is placeholder text.\n- Platform and OpenGL 4.3 limits are documented only in the README and description, not enforced.\nThe Apache-2.0 license is present.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "I searched for subprocess, urllib, requests and os.system and found none. The only network access is the SampleData download with a SHA256 checksum, and the only pip install is PyOpenGL. There is no deserialization, eval, or file deletion."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "AnatomyCarve.py runs slicer.util.pip_install('PyOpenGL') at module import (line 25) on ImportError, with no confirmation. Scripted modules are imported at Slicer startup, so this affects users who never open the module. PyOpenGL does not bundle Qt or VTK, and I saw no pins of Slicer-bundled packages."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "The catalog entry has build_dependencies [] and EXTENSION_DEPENDS NA. The C++ helper includes vtkSlicerVolumeRenderingLogic.h and the VTK-internal vtkVolumeInputHelper.h and vtkVolumeTexture.h, and uses mapper->AssembledInputs. Its CMake adds no Volume Rendering include dirs or libraries, so it may fail to compile or link. I could not build it to confirm. A stray VolumeTextureIDHelper.zip is committed, and the Python unit-test CMake line is commented out."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE.txt is Apache-2.0 and the sample segmentation is hosted in the same repository. The Panoramix source data comes from a Slicer sample, and I saw no conflicting terms. The Apache boilerplate placeholders are unfilled, which does not affect permission."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The logic constructor creates and compiles compute shaders without making a GL context current, and the render-start-event observer is never removed. Texture handles are borrowed from VTK internals, GL calls are made on the GUI thread, and there is no check for OpenGL 4.3 or for macOS. The module also leaves much commented-out code and template text."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README has a tutorial, sample data, a screenshot and a paper reference, and the idea is useful and novel for anatomical visualization. Tests are essentially empty, and the module only works on Windows and Linux with OpenGL 4.3. Helper module metadata is template placeholder text."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "PyOpenGL pip-installed at module import without user consent",
+   "file": "AnatomyCarve/AnatomyCarve.py",
+   "line_start": 22,
+   "line_end": 25,
+   "evidence": "try:\n    from OpenGL.GL import *\nexcept ImportError:\n    slicer.util.pip_install('PyOpenGL')",
+   "explanation": "When 'OpenGL' cannot be imported, the module file calls slicer.util.pip_install at import. Slicer imports scripted modules at startup, so this changes the shared Python environment and downloads from the network for anyone who installed the extension. It happens without confirmation, and a failure will leave later wildcard imports broken.",
+   "suggestion": "Defer the OpenGL import to the widget or logic. Ask the user before installing PyOpenGL, ideally from a button in the module UI. Show an error if installation fails.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "C++ helper uses VTK-internal API and undeclared Volume Rendering dependency",
+   "file": "VolumeTextureIDHelper/Logic/vtkSlicerVolumeTextureIDHelperLogic.cxx",
+   "line_start": 77,
+   "line_end": 80,
+   "evidence": "auto it = mapper->AssembledInputs.find(portIndex);",
+   "explanation": "The helper includes vtkSlicerVolumeRenderingLogic.h and the private VTK headers vtkVolumeInputHelper.h and vtkVolumeTexture.h. It accesses mapper->AssembledInputs, which may not be public or exported. Its CMake does not add Volume Rendering include directories or link the Volume Rendering logic, and the extension declares no dependencies. The build may therefore fail on the factory build machines. I could not verify this by building.",
+   "suggestion": "Confirm that the extension builds on all three platforms against the target Slicer. Add the Volume Rendering include directories and libraries to the helper's CMake. Document the dependency on the VTK version. Consider a public-API alternative.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "GL shaders compiled in logic constructor without a current GL context",
+   "file": "AnatomyCarve/AnatomyCarveLogic/AnatomyCarveLogic.py",
+   "line_start": 46,
+   "line_end": 50,
+   "evidence": "self.shaderFillColorVolume = ComputeShader(\"FillColorVolume.comp\")\n        self.shaderCarveVoxels = ComputeShader(\"CarveVoxelsAA.comp\")",
+   "explanation": "AnatomyCarveLogic.__init__ calls glCreateShader and glCompileShader via ComputeShader before any 3D view's context is made current. That happens when the widget is created. The calls may fail or act on the wrong context. Later GL work runs from a render StartEvent observer that is never removed, and errors there are only cleared with glGetError.",
+   "suggestion": "Create shaders lazily in startRender after calling renderWindow.MakeCurrent(). Remove the StartEvent observer on cleanup. Check the GL version and report a clear error if OpenGL 4.3 is not available.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Leftover template/binary artifacts and placeholder metadata",
+   "file": "VolumeTextureIDHelper/qSlicerVolumeTextureIDHelperModule.cxx",
+   "line_start": 71,
+   "line_end": 71,
+   "evidence": "moduleContributors << QString(\"John Doe (AnyWare Corp.)\");",
+   "explanation": "A VolumeTextureIDHelper.zip is committed, and the helper's module metadata still holds placeholder help, contributor and funding text (John Doe, NIH grant NXNN...). The C++ module also carries an unused FooBar widget. The module's category is 'Examples', and it is hidden.",
+   "suggestion": "Remove the zip and the unused FooBar widget. Fill in real module metadata.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Platform limitation and the tracking branch",
+   "file": "AnatomyCarve/Testing/Python/CMakeLists.txt",
+   "line_start": 2,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The extension only works on Windows and Linux with OpenGL 4.3, but the catalog entry does not restrict platforms. The entry's scm_revision is 'main' rather than a fixed commit. Tests are stubbed out and AnatomyCarveTest only downloads sample data. The module is also not a clinical tool, and there is no disclaimer.",
+   "suggestion": "Add a real test, and consider pinning a commit.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Shader files (.comp) and the .ui file were not read.",
+  "I did not build the C++ module or run Slicer, so I could not confirm compile success or runtime behaviour.",
+  "Binary files (PNG, zip, the seg.nrrd sample) were not inspected.",
+  "I did not check the VolumeTextureIDHelper UI and qrc resource files."
+ ],
+ "questions_for_author": [
+  "Does the VolumeTextureIDHelper module compile on Windows, Linux and macOS factory builds against the current Slicer VTK (which headers expose AssembledInputs)?",
+  "Can PyOpenGL installation be moved out of import time and made opt-in?",
+  "What happens when the module is opened on a system without OpenGL 4.3, or on macOS?"
+ ]
+}

@@ -1,0 +1,126 @@
+{
+ "purpose": "A Slicer scripted module that runs the MOOSE multi-organ CT segmentation tool (via the `moosez` pip package) on a selected volume and loads the result as a segmentation. It is aimed at researchers in the Segmentation category who want to run MOOSE models inside Slicer.",
+ "summary": "The module is small and readable, and its UI, CMake install list and icon path are consistent. The main problems are environment-related: on Linux it runs a bare `pip_install(\"torch\")` instead of using the PyTorch extension, and on macOS it pins torch 2.2.2 and downgrades NumPy below 2, which affects Slicer's shared Python environment. Installs run on a button click with no size confirmation. Test coverage is effectively absent. I did not inspect the moosez package or the model download source, so the model-weight provenance and network behaviour of the segmentation run are unverified.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Read MOOSE/MOOSE.py fully. Packages are installed only after the user clicks 'Install Dependencies' (line 153-163), and the sample-data test downloads from a hardcoded S3 URL (line 446). No obfuscation or data exfiltration was seen, but moosez itself and its model downloads were not inspected."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Lines 93 and 101 install torch directly with pip_install, bypassing the PyTorch extension on Linux and pinning torch==2.2.2 on macOS. Lines 67 and 101 add numpy<2, which downgrades a Slicer-bundled package. Both changes affect Slicer's shared Python environment."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMakeLists.txt lists MOOSE.py, Resources/Icons/MOOSE.png and Resources/UI/MOOSE.ui, and MOOSE/CMakeLists.txt matches those files. EXTENSION_DEPENDS 'PyTorch' matches build_dependencies in the catalog entry. The revision is 'main', which is a moving branch, not a pinned commit."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE.txt is Apache 2.0, and MODEL_LICENSE.txt gives the models CC BY 4.0, which permits redistribution with attribution. Upstream MOOSE and moosez licence terms were not checked."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "The segmentation run uses glob over the temp folder and checks paths. Line 381 passes proc.stdout as CalledProcessError output, and line 463 can fail if USERPROFILE is unset. In run_segmentation, shutil.which('PythonSlicer') can return None, which would break the command. The sample-data test is not run in CI."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md documents usage, model list and CPU/GPU notes. The README says PyTorch is not required on Linux, but the catalog lists PyTorch as a build dependency. The only test (MOOSE/Testing/Python/CMakeLists.txt) is commented out, and the in-module test downloads data and installs dependencies. There is no clinical-use disclaimer."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Linux installs torch with bare pip_install instead of the PyTorch extension",
+   "file": "MOOSE/MOOSE.py",
+   "line_start": 92,
+   "line_end": 93,
+   "evidence": "elif sys.platform.startswith(\"linux\"):\n    slicer.util.pip_install(\"torch\")",
+   "explanation": "On Linux, install_pytorch calls slicer.util.pip_install(\"torch\") (line 93). This pulls torch from PyPI into Slicer's shared Python environment without using PyTorchUtils, which the index policy requires. It can replace or conflict with a torch build the user already has, and it affects other extensions even for users who never open this module. The README (line 11) also says the PyTorch extension is not required on Linux, which contradicts the catalog's build_dependencies.",
+   "suggestion": "Use the PyTorch extension on all platforms (PyTorchUtilsLogic.installTorch with a version requirement), as the Windows branch already does, and update README lines 10-11 to match.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "macOS path pins torch==2.2.2 and downgrades NumPy to <2 in the shared environment",
+   "file": "MOOSE/MOOSE.py",
+   "line_start": 101,
+   "line_end": 101,
+   "evidence": "slicer.util.pip_install('torch==2.2.2 \"numpy<2\"')",
+   "explanation": "The macOS branch installs torch==2.2.2 together with \"numpy<2\" (line 101). An exact torch pin plus a NumPy downgrade is the kind of change the policy prohibits. Slicer's bundled NumPy is replaced for all Slicer users, and the same constraint is added to the moosez install (line 67). Other extensions relying on NumPy 2.x may break.",
+   "suggestion": "Route torch through the PyTorch extension with a version range, and find a way to run moosez without downgrading Slicer's NumPy (for example an isolated environment or a subprocess with its own site-packages), or document and gate the change behind explicit user consent.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "moosez is pip-installed without informing the user of the size of the download",
+   "file": "MOOSE/MOOSE.py",
+   "line_start": 60,
+   "line_end": 68,
+   "evidence": "requirements = \"moosez>=3.1.1\"\n            if sys.platform.startswith(\"darwin\"):",
+   "explanation": "install_moosez calls pip_install(requirements) (line 68), which pulls moosez and its large dependency tree into Slicer's Python without a confirmation step. The button click is an explicit action, so this is not a hidden install, but the policy asks for confirmation before large downloads.",
+   "suggestion": "Ask for confirmation before installing, and list the packages and approximate download size.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Error path in forward_process_status passes stdout object as CalledProcessError output",
+   "file": "MOOSE/MOOSE.py",
+   "line_start": 378,
+   "line_end": 381,
+   "evidence": "raise CalledProcessError(retcode, proc.args, output=proc.stdout, stderr=proc.stderr)",
+   "explanation": "On a non-zero return code, the code raises CalledProcessError with output=proc.stdout, which is the stream object, not captured output, and stderr=proc.stderr is not set by launchConsoleProcess. The user sees a confusing message rather than the moosez error text, which makes failures harder to diagnose.",
+   "suggestion": "Pass the collected output (returnOutput=True) and report it to the user.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Missing PythonSlicer lookup and USERPROFILE assumptions can crash the run",
+   "file": "MOOSE/MOOSE.py",
+   "line_start": 276,
+   "line_end": 276,
+   "evidence": "self.python_slicer = shutil.which(\"PythonSlicer\")",
+   "explanation": "self.python_slicer = shutil.which(\"PythonSlicer\") (line 276) can be None, so cmd begins with None and launchConsoleProcess fails with an unclear error. get_default_download_folder (line 463) uses os.getenv('USERPROFILE') without a fallback, and that returns None on unusual Windows setups.",
+   "suggestion": "Use slicer.app.applicationDirPath or sys.executable, and check for None before running a process.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No active automated tests; the only test is commented out",
+   "file": "MOOSE/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "MOOSE/Testing/Python/CMakeLists.txt has its only test line commented out, and the in-module test (MOOSEIntegration) downloads a sample CT from an external S3 bucket and installs dependencies. Regressions in the install or segmentation path would not be caught by CI.",
+   "suggestion": "Enable a test that checks the module loads and the pure-Python logic (label mapping, JSON parsing), and keep the heavy segmentation test opt-in.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "README and catalog disagree on PyTorch requirement, and no clinical-use disclaimer",
+   "file": "README.md",
+   "line_start": 10,
+   "line_end": 11,
+   "evidence": "* For Windows users: Please make sure that the PyTorch extension is also installed. \n    * For Linux/Unix users: The PyTorch extension is not required, as native `torch` works in most cases.",
+   "explanation": "README lines 10-11 say the PyTorch extension is needed only on Windows, while the catalog and CMake list PyTorch as a dependency. The README also does not say the output is research-only and not for clinical decisions.",
+   "suggestion": "Align the README with the dependency declaration and add a research-use disclaimer.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "The moosez package (PyPI) and its code, including what it downloads at run time and from where, were not inspected.",
+  "Model weight source, integrity checks and licence of the MOOSE models (only the CC BY 4.0 MODEL_LICENSE.txt text was read).",
+  "Upstream MOOSE and nnU-Net licence terms.",
+  "The GitHub source at the 'main' revision was not fetched, so the revision reviewed is unknown beyond the catalog text.",
+  "Binary images (SlicerMOOSE.png, MOOSE.gif, Enhance.gif) were not viewed. Their size is noted but they do not appear to be needed by the build.",
+  "Whether CI builds on any platform; no CI report was provided."
+ ],
+ "questions_for_author": []
+}

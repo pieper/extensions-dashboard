@@ -1,0 +1,166 @@
+{
+ "purpose": "A 3D Slicer extension for musculoskeletal image quantification: it runs cortical, cancellous, bone-density and intervertebral-disc analyses on a segmented CT/micro-CT volume and appends results to tab-separated report files in a user-chosen directory. It is aimed at musculoskeletal researchers (e.g. bone morphometry, tissue mineral density, trabecular architecture).",
+ "summary": "MIT-licensed, small, readable extension with sample data, tutorials and a self-test. No concealed behavior, no telemetry, no network transmission of user data (sample data is downloaded only on explicit Sample Data request, with SHA256 checksums). PyPI packages (pynrrd, scikit-image, scipy, trimesh) are installed into Slicer's Python only after an explicit confirmation dialog; none pins or downgrades Slicer-bundled packages or pulls torch, and scipy is usually already present. There are real correctness bugs (crop's `low==low-1` no-op, per-pixel O(n) thickness loop blocking the GUI thread, wrong title sent to the CLI widget-free naming, `useDICOM` parameter never set) and some thick-slice/orientation assumptions, but no safety path to harm — non-blocking per the admission policy. One packaging detail (Intervertebral thumbnails) is cosmetic.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Searched the whole tree for pip/network/subprocess/eval/exec/pickle/torch: the only hits are `slicer.util.pip_install(p)` behind a confirmation dialog (MusculoskeletalAnalysis.py:755-767) and checksummed SampleData downloads (lines 65-230). No telemetry, no sockets, no file deletion, no obfuscation, no reviewer-directed text found."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "`slicer.util.pip_install(p)` (MusculoskeletalAnalysis.py:764) installs pynrrd/scikit-image/scipy/trimesh into Slicer's interpreter, but only on Apply, only after `confirmOkCancelDisplay` (line 762), and the packages are unpinned so no Slicer-bundled package is downgraded and no torch is pulled. No install at import or startup; module-level imports are only logging/os/time/vtk/slicer."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMake installs all Python files (CLI/CMakeLists.txt:2-13 lists the ten MusculoskeletalAnalysisCLITools files with ctkMacroCompilePythonScript; Scripted/MusculoskeletalAnalysis/CMakeLists.txt:5-19 registers the module script and its UI/icon). EXTENSION_DEPENDS is \"NA\" and build_dependencies [] — consistent. However two thumbnail files referenced in code are not in Resources/Icons (Intervertebral1.png, IntervertebralMask1.png)."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE.txt is an unmodified MIT license (\"Permission is hereby granted, free of charge, ...\") and README.md:210 states the software is MIT. Bundled samples/weights: no binaries committed; sample data is hosted in the project's own GitHub release and downloaded by Slicer only with user action."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read all CLI tools and the module logic: `crop.py:15` has `low==low-1` (a no-op comparison instead of assignment), `thickness.py:12-35` runs a per-voxel Python loop that can block the GUI for large volumes (cli is run non-blocking, so the GUI stays alive but is unusable during CPU-bound Python), and `updateGUIFromParameterNode` proves Apply via `UseDICOM` (line 468) which is never set. Errors are surfaced via tryWithErrorDisplay and reports go to the user-chosen directory, so these are ordinary bugs."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md documents each analysis and gives step-by-step tutorials with sample data, ten checksummed sample datasets are registered in Sample Data (MusculoskeletalAnalysis.py:65-230), and a full self-test exists (lines 787-881). No clinical-use disclaimer beyond the standard acknowledgement, and no PUBLISHED validation of the metrics."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "crop() has a no-op statement `low==low-1`, so the advertised 1-voxel margin is never added",
+   "file": "CLI/MusculoskeletalAnalysisCLITools/crop.py",
+   "line_start": 13,
+   "line_end": 18,
+   "evidence": "        # Leave 1 space between shape and new edge unless the shape was already on the edge\n        if low > 0:\n            low==low-1",
+   "explanation": "`low==low-1` compares instead of assigning, so the low bound is never lowered. The crop still works (it just does not include the intended 1-voxel border); any measurement computed from the cropped volume is slightly tighter than documented. Not a safety issue, but the intended behavior is not implemented.",
+   "suggestion": "Use `low = low - 1` (and add a unit test for crop).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Per-voxel Python loop in findSpheres makes cancellous/cortical analysis extremely slow and unresponsive",
+   "file": "CLI/MusculoskeletalAnalysisCLITools/thickness.py",
+   "line_start": 10,
+   "line_end": 35,
+   "evidence": "    order = np.argsort(dist[a,b,c])\n    for n in order:",
+   "explanation": "For every bone voxel the code builds an mgrid sphere mask and does an elementwise maximum; on a typical 512x512xN micro-CT mask this is millions of Python iterations inside the CLI process. The CLI runs without wait_for_completion (MusculoskeletalAnalysis.py:734) so Slicer stays alive, but progress only advances at fixed 20/40/60/80% steps and users see an apparently frozen analysis for a long time, with no way to cancel it.",
+   "suggestion": "Vectorize with a max-filter / distance-transform-based local thickness implementation, and/or register the CLI node so the user can cancel it.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Apply-button enablement checks a parameter (`UseDICOM`) that is never written",
+   "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+   "line_start": 465,
+   "line_end": 473,
+   "evidence": "        elif self._parameterNode.GetNodeReference(\"InputVolume\") and self._parameterNode.GetParameter(\"SegmentID\") and (self._parameterNode.GetParameter(\"UseDICOM\")==\"False\" or self._parameterNode.GetNodeReferenceID(\"DICOMNode\")):",
+   "explanation": "`UseDICOM` is set nowhere in the module (only `UseAlt`/`UseMan` are managed), so the condition always relies on the DICOMNode reference being present. Because initializeParameterNode() always fills DICOMNode from the first scalar volume, the Apply button is enabled even when the user has selected \"Use another node for DICOM tags\" with no meaningful node, and conversely a scene without any volume reference keeps Apply disabled. The stated gating (require a DICOM source when alternate tags are chosen) is not actually enforced in the GUI.",
+   "suggestion": "Gate on `UseAlt`/`UseMan` (as process() does) and drop the stale `UseDICOM` check.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Cortical/cancellous/intervertebral metrics assume isotropic voxels and fixed SPL orientation",
+   "file": "CLI/MusculoskeletalAnalysisCLITools/reader.py",
+   "line_start": 8,
+   "line_end": 13,
+   "evidence": "    image = sitk.DICOMOrient(image, 'SPL')",
+   "explanation": "readImg() forces SPL orientation and everything downstream uses a single scalar `voxSize`, so slice-wise areas, PMOI, and disc height computed along the third axis are wrong for anisotropic (typical clinical thick-slice) DICOM series. The GUI's manual voxel-size field is one value only, with no warning. Users could obtain silently incorrect morphometry for such scans.",
+   "suggestion": "Read the spacing vector from the image header and use per-axis spacing, or validate that the series is isotropic and warn/refuse otherwise.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Intervertebral analysis indexes the segmentation name list and mask axes unsafely",
+   "file": "CLI/IntervertebralAnalysis/IntervertebralAnalysis.py",
+   "line_start": 56,
+   "line_end": 60,
+   "evidence": "    xcent = int(np.rint(np.mean(np.nonzero(maskData)[0])))\n    ycent = int(np.rint(np.mean(np.nonzero(maskData[1]))))\n    center = np.nonzero(maskData[xcent,ycent,:])",
+   "explanation": "`maskData[1]` indexes the volume instead of `np.nonzero(maskData)[1]`, so the y-center is the mean of a single 2D slice's coordinates, and if the chosen column contains no mask voxels np.max/np.min raise on an empty sequence. The disc-height result is therefore arbitrary rather than a center height. Errors surface to the user via tryWithErrorDisplay, hence minor.",
+   "suggestion": "Use `np.nonzero(maskData)[1]` for the y center and guard the empty case.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "writeReport appends to existing files without telling the user which file is reused",
+   "file": "CLI/MusculoskeletalAnalysisCLITools/writeReport.py",
+   "line_start": 8,
+   "line_end": 18,
+   "evidence": "    if os.path.exists(filepath):\n        # If the file exist open and append to it\n        fOut = open(filepath, \"a\")",
+   "explanation": "Reports are appended to fixed names (cortical.txt, cancellous.txt, density.txt, intervertebral.txt) in the user-chosen directory. Repeated analyses accumulate rows, and if a directory already holds a template file with different columns the data rows are appended under an unrelated header. This is documented in the README but can mix unrelated patients' results in one file; no identifier is written per row except the volume name and date.",
+   "suggestion": "Offer unique filenames or write a per-run timestamp/patient column and verify the header matches before appending.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Sample-data registration references thumbnail icons that are not in Resources/Icons",
+   "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+   "line_start": 204,
+   "line_end": 220,
+   "evidence": "        thumbnailFileName=os.path.join(iconsPath, 'Intervertebral1.png'),",
+   "explanation": "Resources/Icons contains Cancellous1/2, CancellousMask1/2, Cortical1/2, CorticalMask1/2, MusculoskeletalAnalysis.png and Screenshot.png, but no Intervertebral1.png or IntervertebralMask1.png (referenced at lines 204 and 220). Also `IntervertebralMaskSample1.seg.nrrd` is registered with `fileNames='IntervertebralMaskSample1.seg.nrrd'` while nodeNames is IntervertebralMask1, which is fine, but the missing thumbnails mean the tutorial's sample nodes appear without images. Cosmetic, not blocking.",
+   "suggestion": "Add the two Intervertebral thumbnails to Resources/Icons or remove the thumbnailFileName arguments.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "CLI XML metadata points at placeholder documentation URL and has an empty license element",
+   "file": "CLI/CorticalAnalysis/CorticalAnalysis.xml",
+   "line_start": 8,
+   "line_end": 9,
+   "evidence": "    <documentation-url>https://github.com/username/project</documentation-url>\n    <license/>",
+   "explanation": "All four CLI XMLs point at `https://github.com/username/project` and have an empty `<license/>`. The extension license itself is MIT (LICENSE.txt), so this is a documentation/metadata defect only; the Help link in the module GUI goes to the correct README.",
+   "suggestion": "Point documentation-url at the README and fill the license element with MIT.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "pip_install of unpinned packages into Slicer's interpreter on first Apply",
+   "file": "Scripted/MusculoskeletalAnalysis/MusculoskeletalAnalysis.py",
+   "line_start": 755,
+   "line_end": 767,
+   "evidence": "            if slicer.util.confirmOkCancelDisplay(\"The following python modules are required: \" + \", \".join(names) + \". Do you want to install them?\"):\n                for p in pips:\n                    slicer.util.pip_install(p)",
+   "explanation": "The install happens only after an explicit user confirmation and only when the user runs an analysis, and it never pins or downgrades numpy/scipy/etc. But `skimage` and `pynrrd`/`trimesh` are installed unpinned from PyPI, so their transitive requirements could upgrade/downgrade packages Slicer bundles; and because `scipy` is often present in Slicer, the check can silently skip a version check. This is the standard pattern but worth noting for a shared environment.",
+   "suggestion": "Prefer declaring these in the extension's packaging or use version compatibility checks; at minimum mention the installed packages/versions in the log after install.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No clinical/research-use disclaimer and no published validation of the derived metrics",
+   "file": "README.md",
+   "line_start": 191,
+   "line_end": 200,
+   "evidence": "The following additional python packages are required and will be installed the corresponding analysis functions are run:",
+   "explanation": "The README documents usage and tutorials but gives no statement that the measurements are research tools and not validated for clinical decisions. For metrics such as SMI, connectivity density and polar moment of inertia this matters for interpretation; this is advisory only per the policy.",
+   "suggestion": "Add a short disclaimer and a citation for the underlying algorithms (e.g. Bouxsein et al. guidelines for micro-CT morphometry).",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not verify the source repository revision: the catalog entry pins scm_revision \"main\" (a moving branch), so the exact commit cda70c23cdc9563aa09bd6148c10d0b3c65b8aeb was not independently resolvable with the available tools; review is of the file snapshot provided.",
+  "Could not verify that the Sample Data release assets (v1.1-assets, e.g. CorticalSample1.nrrd) exist, are correctly checksummed, or that their content is de-identified; only the registration code and SHA256 strings were inspected.",
+  "Did not build the extension or run the CMake/Slicer build or the module self-test; build/loading correctness is inferred from CMake files only.",
+  "Did not inspect the upstream dependencies (pynrrd, scikit-image, trimesh, scipy) or their transitive requirement sets for Slicer-bundled package pins.",
+  "Did not check the contents of the committed PNG icons for embedded metadata."
+ ],
+ "questions_for_author": [
+  "The catalog entry uses scm_revision \"main\"; do you intend to keep a moving branch target, or could a release tag be pinned for index stability?",
+  "Should the Intervertebral1.png / IntervertebralMask1.png thumbnails be committed, or can the thumbnailFileName arguments be removed?",
+  "Are the report files intended to be per-patient? If multiple patients share an output directory, cortical.txt etc. will interleave rows without any patient identifier.",
+  "Is the single manual voxel-size field a deliberate restriction to isotropic data? Anisotropic clinical series would yield incorrect areas, PMOI and disc height."
+ ]
+}

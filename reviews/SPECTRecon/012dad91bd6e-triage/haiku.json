@@ -1,0 +1,138 @@
+{
+ "purpose": "SPECTRecon is a 3D Slicer scripted extension that provides GPU-accelerated SPECT reconstruction (via the PyTomography library) for projection data loaded from DICOM, plus a SIMIND-to-DICOM converter. It is aimed at academic researchers and nuclear-medicine physicists.",
+ "summary": "No malicious or concealed behavior found in the files read; the medical-use disclaimer is present and the MIT license is included. The main problems are admission and quality issues: the catalog entry has build_dependencies [] while CMakeLists sets EXTENSION_DEPENDS \"PyTorch\", the module pip-installs pinned packages into Slicer's Python environment on first open without confirmation, and the store_recons path in SPECTReconLogic.py references volume_node before it is assigned. These need fixes before the extension is offered to users. I could not run anything or fetch the source revision, so the review rests on the provided files.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Read SPECTRecon.py, Logic/*.py and Testing/Python/utils.py. No data is transmitted to remote services at runtime; network access is limited to test-only zenodo downloads and pip installs of pinned packages. The torch.load calls read bundled PSF .pt files from the repo, not user input. No obfuscation or eval/exec found."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "SPECTRecon.py lines 30-44 install torch via PyTorchUtils and pip-install pytomography, torchquad, spectpsftoolbox, dill, beautifulsoup4 into the shared Slicer environment on first module open, without a confirmation prompt. pytomography's transitive requirements are not checked against Slicer-bundled packages (numpy, scipy, pydicom). Both are unverified and need review."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "CMakeLists.txt line 13 sets EXTENSION_DEPENDS to \"PyTorch\", but the catalog entry given has \"build_dependencies\": []. Logic/CMakeLists.txt line 2 references simind_To_dicom.py while the file is simind_to_dicom.py, which breaks the test build on case-sensitive systems. The rest of the CMake file list matches files present in the listing."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE.txt is a full MIT license and README.md states MIT. The copyright line has bracketed placeholders ('[2024] [Obed Dzikunu]'). Bundled PSF model data in Resources/Data/PSF_models has no separate license terms that I could inspect."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "SPECTReconLogic.py lines 171-174 use volume_node before it is assigned when store_recons is True, which raises UnboundLocalError. SPECTRecon.py line 513 tests 'if not self.ui.scatter_toggle' on a widget object, which is always truthy. Reconstruction runs on the GUI thread with processEvents, and temporary DICOM folders are never removed."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Has a user manual, README, tutorial images, a sample-data list, and unit-style tests that download zenodo data. Tests are only partly runnable offline. The module disclaims clinical use in helpText and User_Manual.md line 1."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Catalog build_dependencies does not match EXTENSION_DEPENDS=PyTorch",
+   "file": "CMakeLists.txt",
+   "line_start": 13,
+   "line_end": 13,
+   "evidence": "set(EXTENSION_DEPENDS \"PyTorch\") # Specified as a list or \"NA\" if no dependencies",
+   "explanation": "The module requires the PyTorch extension (SPECTRecon.py lines 22-25 import PyTorchUtils and raise if missing), and CMakeLists declares it as EXTENSION_DEPENDS. The catalog entry declares an empty build_dependencies, so the index will not build or install PyTorch as a dependency. Users may load the module without PyTorch and then hit an error on first open.",
+   "suggestion": "Set build_dependencies in the catalog entry to [\"PyTorch\"] to match EXTENSION_DEPENDS.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Pinned pip packages installed into Slicer's Python environment without confirmation",
+   "file": "SPECTRecon/SPECTRecon.py",
+   "line_start": 40,
+   "line_end": 44,
+   "evidence": "missing_all = required_packages - installed_packages\n    num_packages = len(missing_all)\n    logging.info('ensure_packages_installed called')\n    for i, missing in enumerate(missing_all):\n        slicer.util.pip_install(missing)",
+   "explanation": "On first opening the module, setup() calls ensure_packages_installed(), which pip-installs pytomography==3.3.2, torchquad, spectpsftoolbox, dill and beautifulsoup4 into the shared Slicer Python. No user confirmation is requested and the packages are not isolated. Transitive requirements can change packages Slicer relies on or other extensions use. The rubric treats installs without user confirmation as a concern.",
+   "suggestion": "Ask the user for confirmation before installing, show the package list and approximate size, and check resolved dependencies (numpy, scipy, pydicom, torch) against Slicer's bundled versions. Use the PyTorch extension's install logic for torch and avoid pulling torch from PyPI through pytomography.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "store_recons path raises UnboundLocalError on volume_node",
+   "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+   "line_start": 171,
+   "line_end": 174,
+   "evidence": "if store_recons:  # Store information for accessing later\n\n             self.stored_recon_iters[volume_node.GetID()] = [recon_algorithm_all_beds, callbacks]\n        volume_node = self.create_volume_node_from_recon(reconstructed_image_multibed, files_NM, test_mode)",
+   "explanation": "When the 'store intermediate iterations' option is checked, reconstruct() reads volume_node before it is assigned, since volume_node is only created later by create_volume_node_from_recon. Any reconstruction with store_recons=True therefore fails at the end, after the full computation has run, and the result is lost.",
+   "suggestion": "Move the storage after create_volume_node_from_recon and key it on the returned node's ID. Add a test covering store_recons=True.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Scatter-window guard is always false because it tests a widget object",
+   "file": "SPECTRecon/SPECTRecon.py",
+   "line_start": 513,
+   "line_end": 514,
+   "evidence": "if not self.ui.scatter_toggle: # enforce none if not checked\n                 upperwindow_idx = lowerwindow_idx = [None] * num_peaks",
+   "explanation": "The guard tests the widget object rather than its checked state. The widget is always truthy, so the 'enforce none' branch never runs. In multi-photopeak mode, scatter windows are kept even when scatter correction is unchecked.",
+   "suggestion": "Use self.ui.scatter_toggle.checked.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Logic/CMakeLists.txt references a test file with the wrong case",
+   "file": "SPECTRecon/Logic/CMakeLists.txt",
+   "line_start": 2,
+   "line_end": 2,
+   "evidence": "slicer_add_python_unittest(SCRIPT ./../Testing/Python/simind_To_dicom.py SLICER_ARGS --no-main-window)",
+   "explanation": "The CMake test entry names simind_To_dicom.py, but the file is Testing/Python/simind_to_dicom.py. The test registration fails on case-sensitive filesystems when BUILD_TESTING is on.",
+   "suggestion": "Correct the filename to simind_to_dicom.py.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Deprecated pkg_resources import at module load",
+   "file": "SPECTRecon/SPECTRecon.py",
+   "line_start": 3,
+   "line_end": 3,
+   "evidence": "import slicer\nimport importlib\nimport pkg_resources",
+   "explanation": "pkg_resources is imported at module top level and is deprecated, and newer setuptools releases may remove it. That would break the module at import time on newer Slicer Python builds.",
+   "suggestion": "Use importlib.metadata to list installed packages, or import pkg_resources lazily with a fallback.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Temporary DICOM folders with patient data are never removed",
+   "file": "SPECTRecon/Logic/SPECTReconLogic.py",
+   "line_start": 216,
+   "line_end": 221,
+   "evidence": "temp_dir = createTempDir()\n        for i, dataset in enumerate(recon_ds):\n            temp_file_path = os.path.join(temp_dir, f\"temp_{i}.dcm\")\n            dataset.save_as(temp_file_path)",
+   "explanation": "Reconstructed DICOM slices are written to a fresh temp directory and loaded into the database, but the directory is never deleted. Patient-identifying DICOM files remain in the system temp location after use. removeNode with its dir-cleanup option exists but is unused.",
+   "suggestion": "Remove the temp directory after the DICOM import completes (try/finally with shutil.rmtree), or write directly to the Slicer DICOM database path.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "License copyright line still contains template brackets",
+   "file": "LICENSE.txt",
+   "line_start": 3,
+   "line_end": 3,
+   "evidence": "Copyright (c) [2024] [Obed Dzikunu]",
+   "explanation": "The copyright line uses bracketed placeholders, which is a cosmetic defect in the license file. The grant itself is intact.",
+   "suggestion": "Replace with the full copyright holder name and year.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The source at scm_revision 'main' was not fetched, so the revision reviewed is unknown; only the provided files were read.",
+  "PSF model .pt files (torch.load) were not inspected for content; they are read with torch.load on bundled files.",
+  "Remaining files such as SPECTRecon.ui, the icon, and the rest of reconstruction.py test logic were not read in full.",
+  "The PyTorchUtils, pytomography and spectpsftoolbox behavior and licenses were not verified against upstream packages.",
+  "No build, install, or test was run, and no CI reports were available.",
+  "Licensing terms of the bundled PSF model data and the zenodo test datasets were not verified."
+ ],
+ "questions_for_author": []
+}

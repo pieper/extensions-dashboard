@@ -1,0 +1,167 @@
+{
+ "purpose": "SegmentHumanBody is a 3D Slicer scripted module that wraps several Mazurowski Lab deep-learning segmentation models (SegmentAnyBone/SAM-based bone segmentation, SegmentAnyMuscle, a breast VNet, a CT nnU-Net body-composition pipeline, and an SAM2 annotation tool) for MRI/CT segmentation. It is intended for researchers using Slicer's Segmentation workflow and depends on the PyTorch extension.",
+ "summary": "The module's widget constructor, which runs on first open, installs a long list of pip packages (including nnunetv2, opencv-python, totalsegmentator, and a segment-anything zip from GitHub) after confirmation dialogs, clones the GitHub repo with git, and downloads several model checkpoints from Google Drive with gdown. It also uses pickle.load on feature files, runs os.system with a hardcoded developer path (C:/Users/zafry/...), and ships a 46 MB .pth and an 18 MB Miniconda installer in the tree. The CC BY-NC license forbids commercial use but is clearly stated. Overall: needs fixes before listing. I could not inspect the large binaries, the full module, or the CMake/Slicer build.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Module init runs git clone from GitHub, gdown downloads from Google Drive without checksums, and os.system runs a hardcoded user path. Consent dialogs are present for most downloads. No telemetry or credential access was seen in the parts I read. pickle.load of feature files is a deserialization risk if these files are tampered with."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Widget constructor installs nnunetv2, opencv-python, totalsegmentator, timm, einops, and others into Slicer's shared Python environment, and installs torch-dependent packages without the PyTorch extension's install logic. opencv-python bundles Qt and conflicts with Slicer's own OpenCV build. Also runs 'git config --global core.longpaths true', which changes the user's global git config."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "The CMake install list includes models/bone_sam.pth (46 MB), a Miniconda installer under models/sam2_annotation_tool, and the models/sam tree. The big binary should be downloaded on demand, not committed. The SegmentHumanBody/CMakeLists.txt includes only a subset of the Python files, and the models/breast_model and ct_segmentation packages are copied at runtime from a git clone rather than installed by CMake."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "LICENSE.md is CC BY-NC 4.0 and the description states it. This is a non-commercial term that restricts commercial use of the extension and its model weights. It does not prohibit the distribution itself, but the bundled third-party models (SAM, nnU-Net, SegmentAnyMuscle, SLM-SAM2) have their own terms that I did not verify."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Several issues: a hardcoded C:/Users/zafry path in os.system (SegmentHumanBody.py:1197) breaks on every other machine. Broken relative paths like the 'shutil.move' from a git clone. Dead code and debugging artifacts. Missing 'import os' check in SAM_LST. Long processing runs in the GUI thread with no progress. These are ordinary bugs, not safety issues."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README gives install and usage steps and the module shows a research-use disclaimer. There is no test beyond a commented-out unittest. Tier 1 is declared. Overlap with existing SegmentAnyBone and TotalSegmentator tooling is possible."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Model and code downloads from Google Drive and GitHub at widget init without integrity checks",
+   "file": "SegmentHumanBody/SegmentHumanBody.py",
+   "line_start": 302,
+   "line_end": 344,
+   "evidence": "git.Repo.clone_from(\"https://github.com/mazurowski-lab/SlicerSegmentHumanBody\", copyFolder)\n url = 'https://drive.google.com/uc?id=1IQu_8hYnvAR1_GSKpzkf5l7mqlcQpq3j'\n gdown.download(url, output, quiet=False)",
+   "explanation": "On first open the module clones the repo over the network and downloads several checkpoints (breast VNet, CT nnU-Net, SLM-SAM2) from Google Drive with no hash or signature check. The checkpoints are loaded with torch.load and pickle in-process. A tampered or swapped Drive file would run in the user's Slicer. Each download is behind a confirm dialog, which limits the exposure. Consider pinning revisions and checking SHA-256 for every artifact.",
+   "suggestion": "Pin the clone to a commit SHA, verify checksums for each downloaded weight, and prefer safetensors or weights_only=True loading.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Hardcoded developer-machine path in os.system call",
+   "file": "SegmentHumanBody/SegmentHumanBody.py",
+   "line_start": 1197,
+   "line_end": 1197,
+   "evidence": "os.system(\"python C:/Users/zafry/SlicerSegmentHumanBody/SegmentHumanBody/models/ct_segmentation/predict_muscle_fat.py\")",
+   "explanation": "The CT Segmentation path shells out to the system 'python' on a hardcoded path from the author's Windows account. On any other machine the script does not run, and the next line loads a result file that does not exist. On a machine where that path happens to exist, it runs whatever Python is first on PATH outside Slicer's interpreter. This is a broken path and a shell call that bypasses Slicer's environment.",
+   "suggestion": "Call the script in-process via the module path, use the Slicer Python executable (sys.executable) with an argument list via subprocess, and drop the hardcoded user path.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Widget init installs many packages into Slicer's shared environment, including opencv-python and nnunetv2",
+   "file": "SegmentHumanBody/SegmentHumanBody.py",
+   "line_start": 166,
+   "line_end": 172,
+   "evidence": "import nnunetv2\n except ModuleNotFoundError:\n if slicer.util.confirmOkCancelDisplay(\n \"nnunetv2 package is missing. Click OK to install it now!\"\n ):\n slicer.util.pip_install(\"nnunetv2\")",
+   "explanation": "nnunetv2 pulls torch from PyPI as a dependency, which violates the policy requirement that PyTorch be installed only through the PyTorch extension. opencv-python (line 371) bundles its own Qt, which the policy flags explicitly; opencv-python-headless is the expected package. Other packages (pandas, blosc2, totalsegmentator, hydra-core, tensorboard) can downgrade or conflict with packages Slicer bundles. The installs are confirmation-gated but still change the shared environment for all Slicer users.",
+   "suggestion": "Use the NNUNet extension's install logic for nnunetv2 with torch pins handled by PyTorchUtils, use opencv-python-headless, and check each package against Slicer's bundled versions before installing.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Global git config changed on widget init",
+   "file": "SegmentHumanBody/SegmentHumanBody.py",
+   "line_start": 294,
+   "line_end": 294,
+   "evidence": "os.system(\"git config --global core.longpaths true\")",
+   "explanation": "The module changes the user's global git configuration, outside the extension's own scope, as a side effect of opening the module.",
+   "suggestion": "Remove the global git config change, or pass the setting per repository.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "pickle.load used on cached feature files",
+   "file": "SegmentHumanBody/SegmentHumanBody.py",
+   "line_start": 1095,
+   "line_end": 1096,
+   "evidence": "with open(self.featuresFolder + \"/slice_\" + str(currentSliceIndex) + \"_features.pkl\" , 'rb') as f:\n                      self.sam.features = pickle.load(f)",
+   "explanation": "Feature files are written by the module itself (line 846) into the module resource folder, so exploitation needs write access to that folder. The unpickle is still unsafe in principle if the folder is shared or the files are copied from elsewhere. Note the same pattern at line 1461.",
+   "suggestion": "Store features as .npy or safetensors and load with allow_pickle=False.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Large binary model and an installer are committed to the repository",
+   "file": "SegmentHumanBody/CMakeLists.txt",
+   "line_start": 30,
+   "line_end": 30,
+   "evidence": "    models/bone_sam.pth\n    )",
+   "explanation": "models/bone_sam.pth (46 MB) is listed as a module resource and committed to git. The tree also contains a 18 MB Miniconda-latest-MacOSX-arm64.sh installer under models/sam2_annotation_tool and a segment_any_muscle .pth of 56 MB. Big binaries inflate every clone and the extension package, and the installer is an unneeded executable. The policy says large binaries should be downloaded on demand. Unverified: I could not read these binaries, so I did not check their contents or hashes.",
+   "suggestion": "Remove the installer and fetch model weights on demand with checksums, as the module already does for other models.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Non-commercial license restricts use of extension and weights",
+   "file": "LICENSE.md",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "# Attribution-NonCommercial 4.0 International",
+   "explanation": "CC BY-NC 4.0 permits distribution but prohibits commercial use. The extension description and the module's warningDisplay state this, so users are informed. Bundled third-party model weights (SAM, SegmentAnyMuscle, SLM-SAM2, nnU-Net) may carry their own terms that I did not verify. The grant itself is not missing and does not prohibit distribution.",
+   "suggestion": "Confirm that the upstream model licenses allow redistribution under CC BY-NC, and list them in the README.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Model-specific subprocess call uses a hardcoded Windows path and os.system",
+   "file": "SegmentHumanBody/models/ct_segmentation/predict_muscle_fat.py",
+   "line_start": 28,
+   "line_end": 31,
+   "evidence": "command = (f\"TotalSegmentator -i {input_path} -o {output_path} \"\n                f\"--roi_subset vertebrae_T12 vertebrae_L3 vertebrae_L4\")\n      print(f\"Running command: {command}\")\n      os.system(command)",
+   "explanation": "The command is built by string interpolation and run through the shell. Paths containing spaces or shell metacharacters break or inject commands. The input path comes from the user's volume filename, so this is a command injection path on the user's own machine. Severity is minor because the user already controls the input.",
+   "suggestion": "Use subprocess.run with an argument list and no shell.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Model imports may fail: SAM_LST uses undefined names",
+   "file": "SegmentHumanBody/models/sam_LST.py",
+   "line_start": 1,
+   "line_end": 14,
+   "evidence": "from sam import sam_model_registry\nimport torch\nimport torch.nn as nn\nfrom torchvision.models.resnet import resnet18",
+   "explanation": "The file imports 'sam' as a top-level module and uses 'os' without importing it, so it cannot load inside the extension. It is not in the CMake list, so it is dead code, but it shows that not all bundled modules were tested. Also, the module-level 'args = cfg.parse_args()' at SegmentHumanBody.py:24 runs argparse on import.",
+   "suggestion": "Remove unused model files, or fix the imports and add tests.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No test coverage; testing is commented out",
+   "file": "SegmentHumanBody/Testing/Python/CMakeLists.txt",
+   "line_start": 2,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The only test registration is commented out, so there is no automated check that the module loads or that the models run. This is non-blocking, but it makes the install-and-download behavior above hard to validate.",
+   "suggestion": "Add a minimal load test that does not download weights, and a smoke test on sample data.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The full SegmentHumanBody.py (lines 400-690, 715-1085, 1101-1185, 1205-1548) was not read, so the segmentation logic and any other network or file behavior there are unverified.",
+  "Binary files (bone_sam.pth, segmentanymuscle.pth, the Miniconda installer, checkpoints) were not inspected for contents, provenance, or hashes.",
+  "The sam2_annotation_tool, segment_any_muscle, and ct_segmentation subtrees were only searched by pattern, not read in full. The subprocess and torch.load call sites in those trees were not traced.",
+  "The live GitHub revision 'main' was not resolved, and the CMake build, Slicer loading, and the Google Drive file contents were not verified.",
+  "No commands were run and no network access was used, so the install and download behavior was assessed from source only."
+ ],
+ "questions_for_author": [
+  "Why does the module clone the GitHub repo and copy subfolders at runtime instead of packaging them through CMake?",
+  "Can nnunetv2 and opencv-python be installed through the NNUNet extension and opencv-python-headless instead, to avoid PyTorch and Qt conflicts?",
+  "Is the CT Segmentation path (SegmentHumanBody.py:1197) meant to run the script in-process? The hardcoded C:/Users/zafry path must be removed.",
+  "Should models/sam2_annotation_tool/Miniconda3-latest-MacOSX-arm64.sh and the large .pth binaries be removed from the repo and fetched on demand with checksums?",
+  "Do the upstream model licenses (SAM, SegmentAnyBone, SLM-SAM2, nnU-Net, SegmentAnyMuscle) permit redistribution under CC BY-NC 4.0?"
+ ]
+}

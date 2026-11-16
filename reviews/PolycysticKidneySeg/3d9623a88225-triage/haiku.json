@@ -1,0 +1,141 @@
+{
+ "purpose": "Provides a Slicer module that runs the PKDIA transformer-based network to segment polycystic kidneys (left and right) from T2 MRI or CT volumes, with weights downloaded from the author's GitHub releases. It is aimed at researchers and clinicians working with ADPKD imaging in 3D Slicer.",
+ "summary": "The extension is a reasonably structured ScriptedLoadableModule with no obvious malicious behavior. torch.load uses weights_only=True, sample-data checksums are present, the PyTorch dependency is declared and installed through the PyTorch extension, and the code is Apache-2.0. However, the widget has a defect in the scroll-to-end helper (Widget.py line 122) that is called on every log message, so Apply and Install likely fail before inference. The integration test imports modules where it expects classes. Model-weight licensing is undocumented, and there is no clinical-use disclaimer. I recommend fixes before the extension is offered to users.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read all Python modules, the CMake files, and the entry. No concealed network transmission, no eval/exec, and torch.load uses weights_only=True (PKDIA.py line 40). Downloads are user-triggered (weightsButton) with fixed GitHub URLs and no checksum on weights (Widget.py lines 74-84), which is a minor integrity gap."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "InstallLogic.setupPythonRequirements pip-installs numpy, scikit-image, nibabel and timm without confirmation (InstallLogic.py lines 60-92), and the test calls it too. Unpinned scikit-image/timm installs could alter bundled numpy/scipy in the shared Slicer environment. Torch goes through PyTorchUtils, which is correct."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "PolycysticKidneySeg/CMakeLists.txt lists all Python scripts including the pkdia subpackages and the referenced icon/UI resources; EXTENSION_DEPENDS 'PyTorch' matches build_dependencies. Large binary Screenshot_01.png (969 KB) is committed. I did not verify that the listed icon files exist beyond the directory listing."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "The repository LICENSE is Apache-2.0 and covers the code. No license or terms are stated for the PKDIA model weights downloaded from GitHub releases, nor for the Genkyst-derived training data, so distribution and use rights for the weights are unclear."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Widget.py line 122 calls setValue with a method object (no parentheses), and onProgressInfo calls it on every message, so Apply and Install likely raise before work starts. Only RuntimeError is caught in onApply (Widget.py line 156), so other exceptions leave the buttons disabled. urlretrieve can leave partial .pth files that areWeightsFound would accept. Inference runs on the GUI thread."
+  },
+  "utility": {
+   "rating": "concern",
+   "rationale": "There is a README tutorial, sample data and a paper reference. However, the integration test (Testing/IntegrationTestCase.py line 6) imports submodules as if they were classes, so it cannot pass. There is no clinical-use disclaimer or model validation statement, and the author lists are inconsistent between CMakeLists and the .py file."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Log helper passes a method object instead of the scrollbar maximum, breaking log output and Apply/Install",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/Widget.py",
+   "line_start": 121,
+   "line_end": 122,
+   "evidence": "textEdit.verticalScrollBar().setValue(textEdit.verticalScrollBar().maximum)",
+   "explanation": "moveTextEditToEnd uses `.maximum` without calling it. onProgressInfo calls this helper on every message, and onApply and onInstall call onProgressInfo before any inference. In PythonQt the `maximum` attribute is a callable, so setValue receives a non-integer and raises. The user would see the Apply or Install action fail before segmentation starts. I could not run this, so confidence is medium.",
+   "suggestion": "Use `textEdit.verticalScrollBar().maximum()` (call the method), and verify on a Slicer build that Apply reaches inference.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Integration test imports submodules as classes and will fail",
+   "file": "PolycysticKidneySeg/Testing/IntegrationTestCase.py",
+   "line_start": 6,
+   "line_end": 24,
+   "evidence": "from SlicerPKDIALib import InstallLogic, SegmentationLogic, Widget",
+   "explanation": "SlicerPKDIALib/__init__.py is empty, so `from SlicerPKDIALib import InstallLogic, SegmentationLogic, Widget` yields module objects. Calling `InstallLogic()` or `SegmentationLogic()` then raises TypeError. The test therefore cannot validate the pipeline, and the only test is also marked slow.",
+   "suggestion": "Import the classes from their modules, e.g. `from SlicerPKDIALib.InstallLogic import InstallLogic`, and check the test runs in CI.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Only RuntimeError is handled in onApply; other failures leave the UI disabled",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/Widget.py",
+   "line_start": 147,
+   "line_end": 158,
+   "evidence": "except RuntimeError as e:\n                self._reportError(f\"Inference ended in error:\\n{e}\")\n        self._setButtonsEnabled(True)",
+   "explanation": "onApply disables the buttons, then catches only RuntimeError. A nibabel, timm or shape error inside applySegmentation propagates and the buttons are never re-enabled, so the user must restart the module. Errors are not reported in the log either.",
+   "suggestion": "Use try/finally to re-enable buttons and report any Exception to the user.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Partial weight downloads are accepted as valid and there is no checksum",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/Widget.py",
+   "line_start": 82,
+   "line_end": 86,
+   "evidence": "weightPath.parent.mkdir(parents=True, exist_ok=True)\n                urllib.request.urlretrieve(weightURL, weightPath)\n            except (urllib.error.HTTPError, urllib.error.URLError):",
+   "explanation": "urlretrieve writes directly to the final weights path. A failed or interrupted download can leave a truncated .pth file. areWeightsFound only checks existence, so later torch.load fails with a confusing error. The downloads also have no SHA256 check, unlike the sample data.",
+   "suggestion": "Download to a temporary file, verify a SHA256 checksum, then rename. Remove partial files on failure.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Unpinned pip installs of core packages into the shared Slicer environment",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/InstallLogic.py",
+   "line_start": 60,
+   "line_end": 92,
+   "evidence": "self.pip_install(\"scikit-image\")\n        try:\n            import nibabel  # noqa",
+   "explanation": "numpy, scikit-image, nibabel and timm are installed with plain pip install (no constraints), and this happens on a button press or during the self-test. Installing scikit-image can pull or upgrade numpy/scipy that Slicer and other extensions depend on. Users are not asked to confirm these installs, unlike PyTorch.",
+   "suggestion": "Ask for confirmation before installing packages, pin compatible versions, or use constraints that protect Slicer's bundled numpy and scipy.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "No license or redistribution terms for the downloaded model weights",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/Widget.py",
+   "line_start": 74,
+   "line_end": 77,
+   "evidence": "ModalityEnum.T2: \"https://github.com/conze/SlicerPolycysticKidneySeg/releases/download/v.1.1.0/PKDIAv1-weights.pth\"",
+   "explanation": "The extension downloads PKDIAv1/v2 weights from GitHub releases and provides no license for them. Its acknowledgements say the models were trained on Genkyst cohort data, which may carry its own data-use terms. Users and redistributors cannot tell what they may do with the weights.",
+   "suggestion": "Add a license or terms-of-use statement for the weights (and any data restrictions) in the repository and release notes.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No clinical-use disclaimer or validation statement for a medical segmentation tool",
+   "file": "PolycysticKidneySeg/PolycysticKidneySeg.py",
+   "line_start": 28,
+   "line_end": 35,
+   "evidence": "This extension allows the use of PKDIA neural networks in 3DSlicer.<br><br>",
+   "explanation": "The module produces kidney segmentations used for ADPKD assessment, yet the help text and README have no statement that results are not for clinical decisions, and no validation or intended-use limits are given beyond a citation.",
+   "suggestion": "Add a research-use-only disclaimer and the validation scope to the help text and README.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Pretrained ImageNet encoder is fetched at inference time",
+   "file": "PolycysticKidneySeg/SlicerPKDIALib/pkdia/PKDIA.py",
+   "line_start": 24,
+   "line_end": 31,
+   "evidence": "pretrained=True,\n        img_size=(img_size, img_size),",
+   "explanation": "applyPKDIA builds the network with pretrained=True, so timm may download encoder weights on first use. This is an undisclosed network access, though the trained weights are then loaded over them. It is not clearly documented to users.",
+   "suggestion": "Use pretrained=False because the trained state dict is loaded anyway, which avoids an extra download.",
+   "confidence": "low"
+  }
+ ],
+ "not_checked": [
+  "Whether the source at commit 3d9623a88225d8fcebe92922b09dcbe6bf91951e matches the catalog (scm_revision is 'main', a moving branch).",
+  "Whether the listed icon and UI resources exist (only directory listings were shown).",
+  "Runtime behavior: no Slicer run, no CI logs, no model download or inference.",
+  "Contents of the pkdia network and utility modules beyond the files shown, and the released weights files themselves.",
+  "Whether the PythonQt maximum attribute behavior in Widget.py line 122 raises in practice."
+ ],
+ "questions_for_author": [
+  "What is the license or terms of use for PKDIAv1-weights.pth and PKDIAv2-weights.pth, and does Genkyst data impose restrictions?",
+  "Has Apply been verified end-to-end on a Slicer build since Widget.py line 122 was written?",
+  "Should weight downloads be checksum-verified as the sample data is?"
+ ]
+}
