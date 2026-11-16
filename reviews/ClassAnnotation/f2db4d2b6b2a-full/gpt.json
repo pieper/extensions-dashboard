@@ -1,0 +1,136 @@
+{
+ "purpose": "ClassAnnotation lets Slicer users browse medical image datasets and assign case-level class labels. It saves annotations in CSV files and organizes copied cases by class, with manual and random review modes.",
+ "summary": "Several operations can destroy unrelated user data: renaming a feature to `..` can recursively delete the output directory, cleanup deletes matching pre-existing folders, and routine actions clear the whole Slicer scene. Flat datasets can also be grouped and copied under the wrong patient. These are concrete safety issues that require fixes. 🔴 Do not merge yet: fix the destructive file and scene operations before admission.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected feature renaming, output cleanup, dataset copying, and scene-clearing code in ClassAnnotation.py and the helper utilities. Multiple ordinary user actions can remove unrelated files or unsaved scene data."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Inspected module imports and searched for dependency installation and network operations. Import inserts the extension's library directory at the front of the shared sys.path, but no package installation was found."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Compared module imports and resources with both CMake files and the available file list; dependencies are consistent with the catalog entry. The pencil icon referenced by the UI is not included in the resource list, and the referenced revision could not be independently resolved."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE.txt grants MIT distribution permission; no downloaded models or bundled third-party code were identified in the inspected files."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected patient ID extraction, copy and hash helpers, save paths, and image loading. Flat-case matching can associate files from different patients, and saving repeatedly rebuilds outputs synchronously."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md describes supported datasets and links to a video tutorial. The CMake configuration registers a test, but no corresponding test class was found in the source."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Feature name `..` can delete the entire output directory",
+   "file": "ClassAnnotation/ClassAnnotation.py",
+   "line_start": 3618,
+   "line_end": 3623,
+   "evidence": "        outDir = self._baseOutputDir(datasetPath, outputPath)\n        base = os.path.join(outDir, \"multi_label\")\n        featureDir = os.path.join(base, feature_name.replace(\" \", \"_\").replace(\"/\", \"_\"))\n\n        if os.path.isdir(featureDir):\n            shutil.rmtree(featureDir, ignore_errors=True)",
+   "explanation": "Feature names are editable and generation calls migrateRenamedFeaturesBeforeGenerate, which invokes this function for the new name. Renaming a feature to `..` makes featureDir resolve to the parent output directory; rmtree can recursively remove its CSVs, class folders, and any unrelated user files there, even if the final directory removal fails.",
+   "suggestion": "Reject dot components and path separators, resolve and verify containment under a dedicated managed directory, and avoid recursively deleting paths based on user-provided names.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Saving can delete pre-existing unrelated class-named folders",
+   "file": "ClassAnnotation/ClassAnnotation.py",
+   "line_start": 3718,
+   "line_end": 3723,
+   "evidence": "            looks_like_class = bool(re.match(r\"^class\\d+.*$\", d, re.IGNORECASE)) or (d in set(self._safe_folder(v) for v in (classIdToName or {}).values() if v))\n            if not looks_like_class:\n                continue\n\n            if d not in allowed:\n                shutil.rmtree(full, ignore_errors=True)",
+   "explanation": "Every single-label save invokes this cleanup on the selected base's existing output folder. An unrelated directory such as output/class123_backup that is not an active class matches the regex and is silently removed recursively, without checking ownership or asking the user.",
+   "suggestion": "Use a dedicated newly created managed output directory or an explicit ownership manifest; never recursively delete unverified existing folders.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Routine classification clears unrelated unsaved Slicer scene nodes",
+   "file": "ClassAnnotation/ClassAnnotation.py",
+   "line_start": 2389,
+   "line_end": 2397,
+   "evidence": "        self.updateTable()\n        self.populatePatientDropdown()\n\n        self.updateButtonStates()\n\n        slicer.mrmlScene.Clear(0)\n        slicer.app.processEvents()\n\n        self.loadNextPatient()",
+   "explanation": "After assigning a single-label class, the module clears the entire MRML scene, not just its own loaded patient nodes. Users who added or edited unrelated unsaved nodes after the initial dataset-load confirmation lose that work without a new warning; similar clears occur during mode changes and review.",
+   "suggestion": "Remove only nodes created by this module, or explicitly confirm and save before any whole-scene clear.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Flat dataset file matching mixes patients with shared ID prefixes",
+   "file": "ClassAnnotation/ClassAnnotationLib/ClassAnnotationUtils.py",
+   "line_start": 42,
+   "line_end": 44,
+   "evidence": "                else:\n                    if baseName.startswith(patientID):\n                        originalFiles.append(os.path.join(root, file))",
+   "explanation": "For flat cases named patient1.nrrd and patient10.nrrd, the original-file lookup for patient1 includes both. The save and hash paths use this lookup, so patient10's image is copied into patient1's class folder and duplicate detection hashes the wrong group; users can distribute or interpret a mislabeled case.",
+   "suggestion": "Match the exact extracted patient ID consistently with getPatientFilesForReview, and test IDs that share prefixes.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Datasets under paths containing `output` are excluded from file lookup",
+   "file": "ClassAnnotation/ClassAnnotationLib/ClassAnnotationUtils.py",
+   "line_start": 31,
+   "line_end": 33,
+   "evidence": "        for root, _, files in os.walk(datasetPath):\n            if \"output\" in root:\n                continue",
+   "explanation": "If a user selects a dataset under a parent such as /data/output-study, every walked root contains `output`, so no originals are found for copying or hashing even though the images can be displayed and labeled.",
+   "suggestion": "Prune only the actual output directory by comparing normalized paths, rather than matching a substring in the full path.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Import modifies the shared Python module search path",
+   "file": "ClassAnnotation/ClassAnnotation.py",
+   "line_start": 15,
+   "line_end": 21,
+   "evidence": "MODULE_DIR = os.path.dirname(os.path.abspath(__file__))\nLIB_DIR = os.path.join(MODULE_DIR, \"ClassAnnotationLib\")\n\n\n\nif LIB_DIR not in sys.path:\n    sys.path.insert(0, LIB_DIR)",
+   "explanation": "Loading the extension prepends its library directory to Slicer's process-wide import path, making its generic helper module names available before other packages for all extensions, including users who never open this module.",
+   "suggestion": "Use the ClassAnnotationLib package imports without modifying sys.path.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Rename icon is not included in packaged resources",
+   "file": "ClassAnnotation/ClassAnnotation.py",
+   "line_start": 418,
+   "line_end": 420,
+   "evidence": "            # --- Pencil button (fixed right column) ---\n            pencil = qt.QToolButton()\n            pencil.setIcon(qt.QIcon(self.resourcePath(\"Icons/pensil.png\")))",
+   "explanation": "The source contains this icon, but ClassAnnotation/CMakeLists.txt lists only ClassAnnotation.png and the UI file as resources. The installed extension can therefore show an empty rename button.",
+   "suggestion": "Add Resources/Icons/pensil.png to MODULE_PYTHON_RESOURCES.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Registered Python test has no test implementation",
+   "file": "ClassAnnotation/CMakeLists.txt",
+   "line_start": 27,
+   "line_end": 29,
+   "evidence": "  # Register the unittest subclass in the main script as a ctest.\n  # Note that the test will also be available at runtime.\n  slicer_add_python_unittest(SCRIPT ${MODULE_NAME}.py)",
+   "explanation": "The main script has no ClassAnnotationTest class or test methods, and the additional test registration is commented out. The configured test cannot exercise the annotation or file management workflows.",
+   "suggestion": "Add a Slicer test class and regression tests for safe output handling and patient matching.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not run Slicer, configure or build the extension, or execute the tests; only static file inspection was available.",
+  "Could not independently resolve the catalog's moving main reference to the supplied commit or compare against a previous revision.",
+  "The complete 3,850-line module was searched and relevant sections inspected, but not every line was read; the linked video tutorial and external resources were not accessed.",
+  "No catalog submission checklist or CI results were available."
+ ],
+ "questions_for_author": []
+}

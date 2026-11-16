@@ -1,0 +1,173 @@
+{
+ "purpose": "Provides a Slicer browser for the lapdMouse lung-anatomy and aerosol-deposition data archive (NIEHS CEBS). It downloads selected dataset files over HTTPS, caches them locally, and loads them into Slicer with preset color tables, plus a visualizer that turns *.meta airway trees and *.csv measurement tables into models. Intended for researchers using the lapdMouse archive.",
+ "summary": "I read the catalog entry, CMake files, both scripted modules, README and License. I found no malicious, telemetry, or unsafe-execution behavior: no pickle/eval/subprocess, no uploads, no package installs, and downloads go only to the NIH archive after a user confirmation dialog. The main concern is soundness: a download interrupted mid-stream leaves a partial file that is later treated as downloaded, with no integrity check even though an MD5SUMS file is available. Smaller issues include a broken unused access-check call, a global RNG reseed, module-load scene side effects, and almost no active tests. The catalog uses the branch \"master\" rather than a pinned revision. The data's own license terms are not stated.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read all Python in lapdMouseDBBrowser.py and lapdMouseVisualizer.py. No eval/exec/pickle/subprocess, no data upload or telemetry; the only network access is HTTPS GETs to cebs-ext.niehs.nih.gov after a confirmation prompt (lines 379-464). File names come from the bundled allfiles.json, so path traversal risk is low. Minor SSL option weakening noted."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Module __init__ calls loadColorTables() (lapdMouseDBBrowser.py line 746), which adds large color-table nodes to the scene at module instantiation, and random.seed(3) (lines 790, 810) reseeds Python's global RNG. Neither installs packages or pins Slicer-bundled packages."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMake lists match the files shown: DBBrowser lists Resources/Icons/lapdMouseDBBrowser.png, allfiles.json, download.png and stored.png; Visualizer lists its icon. EXTENSION_DEPENDS is \"NA\" and build_dependencies is [], which are consistent. scm_revision is the branch 'master', not a commit, so the reviewed revision could change."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "License.txt is 3-clause BSD and is referenced in README.md line 180, which is sufficient for the code. The redistribution terms of the downloaded lapdMouse archive data are not stated in the repository, so distribution of data is unverified."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Partial downloads are treated as success (lines 67-76 and 451), no checksum is verified, and some helper code is broken or fragile (see findings). Ordinary bugs, not safety issues."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README gives usage instructions and a tutorial link. Tests are effectively absent: Testing/Python/CMakeLists.txt line 2 is commented out, and the visualizer test depends on a developer's ~/Documents path (lapdMouseVisualizer.py lines 513-514)."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Interrupted downloads are left on disk and later treated as complete",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 67,
+   "line_end": 76,
+   "evidence": "def _downloadURLStreaming(self,response,destination):\n    if response.getcode() == 200:\n      destinationFile = open(destination, \"wb\")\n      bufferSize = 1024*1024\n      while True:",
+   "explanation": "_downloadURLStreaming opens the destination file and streams into it with no try/finally and no size or checksum verification (lines 68-76). downloadFiles then decides success only with os.path.exists(localName) (line 451). If the connection drops mid-stream, a truncated file remains and is counted as 'downloaded' in the status column and skipped on later downloads (line 446). The user then loads a corrupt .mha/.vtk/.nrrd, and an exception from the read at line 449 is not caught there and aborts the whole loop. The archive provides MD5SUMS (line 26), but it is never used.",
+   "suggestion": "Write to a temporary name and rename on success; wrap the transfer in try/except that deletes the partial file; compare size (Content-Length) or MD5 from MD5SUMS before marking the file as downloaded.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "testDBAccess calls an instance method on the class, so it always fails",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 193,
+   "line_end": 196,
+   "evidence": "def testDBAccess(db):\n  serverStatus = 'unknown'\n  if lapdMouseDBUtil._canAccess():",
+   "explanation": "_canAccess is an instance method (line 20) but is called on the class with no self (line 195). This raises TypeError. The function is currently unused, but if it is wired up it would crash rather than report server status.",
+   "suggestion": "Call db._canAccess() on the passed instance, or remove the dead function.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "SSL context enables legacy server connect option",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 22,
+   "line_end": 26,
+   "evidence": "ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)\n      ctx.options |= 0x4  # OP_LEGACY_SERVER_CONNECT\n\n      try:\n        httpCode = urllib.request.urlopen(self.gdriveURL+'m01/MD5SUMS',context=ctx).getcode()",
+   "explanation": "The access check sets OP_LEGACY_SERVER_CONNECT, which allows connections to servers without secure renegotiation. The context is also only passed to the access check (line 26), not to the actual data downloads (line 56), so the setting is inconsistent and gives no protection where it is used. This is a weakening, not a direct exploit, and the default context is used for downloads.",
+   "suggestion": "Remove the legacy-connect flag; rely on default secure SSL options and use one consistent context.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Global RNG reseeded and color tables created at module instantiation",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 746,
+   "line_end": 746,
+   "evidence": "    lapdMouseDBBrowser.loadColorTables()\n      \n  @staticmethod\n  def loadColorTables():",
+   "explanation": "random.seed(3) reseeds Python's global random module, which can affect other code in the same Slicer process. loadColorTables() runs in the DBBrowser __init__ (line 746), so it creates two 5000-entry color tables and one 6-entry table in the scene whenever the module is instantiated, even if the user never opens the browser.",
+   "suggestion": "Use a local random.Random(3) instance instead of seeding the global RNG, and create color tables lazily when a file is loaded.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Prefix matching in remote listing can return wrong entries",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 88,
+   "line_end": 93,
+   "evidence": "if (dirname == '.' or os.path.commonprefix([dirname,oneFile['name']]) == dirname):\n          remainingPath = oneFile['name'][len(dirname)+1:]",
+   "explanation": "_listFolderRemote uses os.path.commonprefix on strings, so dirname 'm01' also matches 'm010/...' and the 'remainingPath' slicing assumes a separator after dirname. Current dataset names are fixed, so the impact is limited, but the logic is fragile.",
+   "suggestion": "Compare path components, e.g. name.startswith(dirname + '/').",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Metadata file opened read-write",
+   "file": "lapdMouseVisualizer/lapdMouseVisualizer.py",
+   "line_start": 213,
+   "line_end": 213,
+   "evidence": "    for line in open(filename,'r+'):",
+   "explanation": "readMetaTree opens the user's input file with 'r+', which requires write permission and could modify the file if the code were extended. It only reads, so 'r' is correct. Read-only files will fail to load.",
+   "suggestion": "Use open(filename, 'r') with a context manager.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Delete action has no confirmation and removes user files",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 466,
+   "line_end": 472,
+   "evidence": "def deleteFiles(self, datasetname, files):\n      for f in files:\n        remoteName = os.path.join(datasetname,f.replace('/',os.sep))\n        localName = os.path.join(self.localCacheFolder,remoteName)\n        if os.path.exists(localName):\n          print(\"deleting file \"+localName)\n          os.remove(localName)",
+   "explanation": "deleteFiles removes the selected files from the cache folder with os.remove, and onDeleteSelectedDataset calls it with no confirmation prompt. This is user-initiated and limited to the cache folder, so the risk is accidental data loss only.",
+   "suggestion": "Ask for confirmation before deleting multiple files.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No runnable tests; visualizer test depends on a developer's home directory",
+   "file": "lapdMouseVisualizer/lapdMouseVisualizer.py",
+   "line_start": 512,
+   "line_end": 515,
+   "evidence": "measurementsFile =  os.path.join(os.path.expanduser(\"~\"),\\\n                                       'Documents/data/lapdMouseTest/test/test_LobesDeposition.csv')",
+   "explanation": "The CMake test registration is commented out (Testing/Python/CMakeLists.txt line 2). The visualizer test reads ~/Documents/data/lapdMouseTest files that a user will not have, so the test fails outside the author's machine. The DBBrowser test only calls delayDisplay.",
+   "suggestion": "Add small sample fixtures inside the repository and register real unit tests.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Catalog pins a moving branch rather than a commit",
+   "file": "lapdMouseBrowser.json",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "\"scm_revision\": \"master\",",
+   "explanation": "scm_revision is 'master', so the source built and installed can change without a catalog update. This is allowed by policy, but it means the reviewed code may differ from what users receive.",
+   "suggestion": "Consider pinning a reviewed commit hash for reproducibility.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Terms for the downloaded archive data are not stated",
+   "file": "README.md",
+   "line_start": 178,
+   "line_end": 180,
+   "evidence": "## License\n\n**lapdMouseBrowser** is distributed under [3-clause BSD license](License.txt).",
+   "explanation": "The BSD license covers the code. The lapdMouse data files that the extension downloads and redistributes into users' caches have no stated license or usage terms in the repository. The user should check the archive's terms.",
+   "suggestion": "State the terms under which the archive data may be used, or link to the archive's data-use policy.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "README references a non-existent module name",
+   "file": "README.md",
+   "line_start": 56,
+   "line_end": 57,
+   "evidence": "make sure both `lapdMouseDBBrowser` and\n   `lapdMouseDBVisualizer` are checked and click Yes.",
+   "explanation": "The README says the visualizer is 'lapdMouseDBVisualizer', but the module is lapdMouseVisualizer. This could confuse users following the install steps.",
+   "suggestion": "Correct the module name to lapdMouseVisualizer.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Did not inspect the live source repository at 'master' or verify that the revision exists; relied on the provided file contents.",
+  "Did not inspect Resources/allfiles.json (256 KB) contents, icon binaries, or the Testing CMake setup beyond the listed files.",
+  "Did not check the remote archive contents, MD5SUMS, or whether the server responds.",
+  "Did not run the code or build it against a Slicer version; Qt/PythonQt compatibility (e.g. setMargin, connect with string signatures) is unverified for newer Slicer releases.",
+  "Did not verify CI or check results for this extension."
+ ],
+ "questions_for_author": []
+}

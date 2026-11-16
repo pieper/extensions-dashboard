@@ -1,0 +1,138 @@
+{
+ "purpose": "Computes fractional myocardial mass (Voronoi split of an LV tetrahedral mesh between LCA/RCA centerline trees) and myocardial mass at risk for a stenosis point, for cardiac imaging researchers using 3D Slicer. It is a ScriptedLoadableModule with a Qt UI, logic class, and sample-data registration pointing to the author's GitHub releases.",
+ "summary": "I reviewed the catalog entry, CMake files, the full FMM/FMM.py module, README and LICENSE as provided. I found no network calls, telemetry, or obfuscation. The main concern is a sample-data helper that executes any setup.py found in a user-chosen folder. Packaging also declares SlicerVMTK as a module dependency and the README says SegmentMesher and SlicerVMTK are installed automatically, but neither is declared in EXTENSION_DEPENDS or build_dependencies. LICENSE is an unfilled MIT template. Overall the entry needs fixes before it is offered to users. I did not run anything and did not fetch the source repository or the sample-data release files.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "No network, telemetry or obfuscation in the inspected code. However FMM/FMM.py lines 51-56 import and execute any setup.py found in a user-selected folder after sample data download, which is arbitrary code execution outside the extension's advertised function."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected FMM/FMM.py and CMakeLists files: no pip installs, no sys.path or global logging changes, no Qt/VTK bundling. The vtk import is standard for Slicer."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "Catalog build_dependencies is [] and CMakeLists.txt line 16 sets EXTENSION_DEPENDS \"NA\", yet FMM.py line 24 declares dependency on SlicerVMTK and the README says SegmentMesher and SlicerVMTK are installed automatically. A __pycache__ .pyc is also committed. Source revision is 'main', a branch reference, so the reviewed commit is b8d05593 per the task, not verified here."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE is an MIT text (permission grant is present) but the copyright line is an unfilled template: 'Copyright (c) [year] [fullname]'. Distribution is permitted; the attribution is incomplete."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Several issues in FMM/FMM.py: importlib is used at line 53 without being imported, sample data has checksums=None, MMAR volumes are truncated to int at line 581, and the module-level sample-data helper bypasses Slicer's download logic. Blocking-level bugs were not established."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents inputs, outputs and citation. The unit test is the only test and it depends on network sample data. The acknowledgement text at lines 31-32 is copied from Slicer's template and misattributes authorship. No clinical-use disclaimer is present."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Sample-data helper executes any setup.py found in the chosen download folder",
+   "file": "FMM/FMM.py",
+   "line_start": 51,
+   "line_end": 56,
+   "evidence": "filepath=destFolderPath+\"/setup.py\"\n  if (os.path.exists(filepath)):\n    spec = importlib.util.spec_from_file_location(\"setup\",filepath)\n    setup = importlib.util.module_from_spec(spec)\n    spec.loader.exec_module(setup)",
+   "explanation": "downloadSampleDataInFolder lets the user pick a destination folder, downloads sample files into it, then if '<folder>/setup.py' exists it loads that file with importlib and calls exec_module and setup.setup(). The extension never downloads a setup.py, so any pre-existing setup.py in the chosen folder (for example from another project) runs with the user's privileges when a sample is downloaded. This is arbitrary code execution with no prompt or opt-in. Concrete case: user selects a folder containing an unrelated Python project's setup.py while fetching RCA or LCA sample data.",
+   "suggestion": "Remove the setup.py execution entirely. If a post-download hook is really needed, ship it inside the extension and never execute files from user-selected folders.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Runtime dependencies are declared inconsistently",
+   "file": "CMakeLists.txt",
+   "line_start": 16,
+   "line_end": 16,
+   "evidence": "set(EXTENSION_DEPENDS \"NA\") # Specified as a list or \"NA\" if no dependencies",
+   "explanation": "The module declares SlicerVMTK as a dependency and the README says SegmentMesher and SlicerVMTK are installed automatically. The catalog entry has empty build_dependencies and CMakeLists.txt sets EXTENSION_DEPENDS to \"NA\". Users may therefore get an extension whose test and documented workflow need ExtractCenterline (from SlicerVMTK) but which does not install or declare it. The test imports ExtractCenterline at line 614, so the test fails without it.",
+   "suggestion": "Set EXTENSION_DEPENDS to \"SlicerVMTK\" (and SegmentMesher if it is truly required) and mirror this in the catalog build_dependencies, or remove the claim from the README and the parent.dependencies line if the dependency is optional.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "LICENSE copyright line is an unfilled template",
+   "file": "LICENSE",
+   "line_start": 3,
+   "line_end": 3,
+   "evidence": "Copyright (c) [year] [fullname]",
+   "explanation": "The MIT text is present and grants distribution rights, but the copyright holder and year are still placeholders. This does not block distribution but leaves attribution undefined.",
+   "suggestion": "Fill in the year and copyright holder.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "MMAR volumes truncated to integers",
+   "file": "FMM/FMM.py",
+   "line_start": 581,
+   "line_end": 583,
+   "evidence": "volCol1 = vtk.vtkIntArray()\n            volCol1.InsertNextTuple([volMMAR[1] + volMMAR[0], ])\n            volCol1.InsertNextTuple([volMMAR[1], ])",
+   "explanation": "The MMAR table uses vtkIntArray for volumes in mm^3, so the fractional part of the computed volume is silently discarded. The table value for 'Myocardial volume at risk' and 'Total volume' is therefore inaccurate by up to 1 mm^3 per entry.",
+   "suggestion": "Use vtk.vtkDoubleArray, consistent with the per-segment volume column.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "importlib and qt used without import",
+   "file": "FMM/FMM.py",
+   "line_start": 1,
+   "line_end": 8,
+   "evidence": "import logging\nimport os\n\nimport vtk",
+   "explanation": "The sample-data helper uses importlib.util at line 53 but the module imports only logging, os and vtk at the top (lines 1-8). It works only if Slicer injects importlib into the module namespace via the star import, which is not guaranteed. The same applies to qt at line 40.",
+   "suggestion": "Add explicit 'import importlib.util' and 'import qt' (or use slicer.qt) at module top.",
+   "confidence": "low"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Sample data downloaded without integrity checks",
+   "file": "FMM/FMM.py",
+   "line_start": 74,
+   "line_end": 84,
+   "evidence": "checksums=None,\n          loadFiles=True,\n          loadFileType='MarkupsFile',",
+   "explanation": "All registered sample sources use checksums=None, so downloaded meshes and centerlines are not verified. A compromised or changed release asset would be loaded silently.",
+   "suggestion": "Provide SHA256 checksums for each release asset.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Acknowledgement text copied from the Slicer template",
+   "file": "FMM/FMM.py",
+   "line_start": 29,
+   "line_end": 33,
+   "evidence": "# TODO: replace with organization, grant and thanks\n        self.parent.acknowledgementText = \"\"\"\nThis file was originally developed by Jean-Christophe Fillion-Robin, Kitware Inc., Andras Lasso, PerkLab,",
+   "explanation": "The acknowledgement attributes the file to Kitware, PerkLab and Isomics developers and an NIH grant, which is template text and does not describe this extension's authors or funding. The TODO comment also remains.",
+   "suggestion": "Replace with the actual acknowledgements for this extension.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No clinical-use disclaimer and limited automated testing",
+   "file": "FMM/Testing/Python/CMakeLists.txt",
+   "line_start": 2,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The module computes mass-at-risk values used in cardiac analysis but has no research-use disclaimer. The only test downloads network data and is intended to run in CI, and the Testing/Python CMake registration is commented out.",
+   "suggestion": "Add a research-use-only disclaimer to the README and module help, and document how the network-dependent test is run.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Source repository at https://github.com/dmolony3/SlicerFractionalMyocardialMass.git and revision b8d05593 were not fetched; only the files shown in the prompt were read.",
+  "Sample-data release assets (RCA, LCA, surfaces, volumes) on GitHub were not downloaded or checksummed.",
+  "The module icon Resources/Icons/FMM.png and UI file Resources/UI/FMM.ui were listed but not inspected.",
+  "Media/Manual_centerline.gif (5 MB, referenced in README) was not available; committed large binaries could not be assessed.",
+  "The committed FMM/__pycache__/FMM.cpython-39.pyc was not inspected; it should not be in a source tree.",
+  "Whether the code runs on a current Slicer build, and whether SlicerVMTK's ExtractCenterline API still matches, was not tested."
+ ],
+ "questions_for_author": []
+}

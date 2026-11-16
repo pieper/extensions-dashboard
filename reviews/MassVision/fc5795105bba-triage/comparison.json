@@ -1,0 +1,980 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Broad exception handler swallows all errors and only prints them",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 6,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Broad exception handler swallows all errors and only prints them",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 110,
+     "line_end": 116,
+     "evidence": "try:\n\t\t\treturn func(*args, **kwargs)\n\t\texcept Exception as e:\n\t\t\tprint(\"Exception occurred:\", str(e))\n\t\tfinally:\n\t\t\tmessageBox.close()",
+     "explanation": "Any operation wrapped in show_wait_message that fails returns None silently; the user sees the wait dialog close and no result, with the traceback only in the Python console. Downstream code then operates on None, producing confusing secondary failures instead of a reported error.",
+     "suggestion": "Re-raise or call slicer.util.errorDisplay with the traceback, and let callers handle the failure.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 6
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Global matplotlib backend and warning filters changed at import",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 12,
+     "line_end": 13,
+     "evidence": "## fix Mac crash\nmpl.use('Agg')",
+     "explanation": "mpl.use('Agg') is called at import time, which switches the process-wide matplotlib backend for any other extension in the same Slicer process. warnings.filterwarnings('ignore') followed by 'default' (which resets all filters, not just the earlier one) also changes global warning state.",
+     "suggestion": "Avoid setting the backend globally at import. Use the warnings.catch_warnings() context manager around the LDA loop.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 12
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Model and PCA pipelines loaded with pickle.load from user-selected files",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 2972,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Model and PCA pipelines loaded with pickle.load from user-selected files",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 2972,
+     "line_end": 2972,
+     "evidence": "model_type, pipeline, class_order, reference_mz, model_report = pickle.load(f)",
+     "explanation": "The 'Import Model Pipeline' feature (MassVision.py:2977 file dialog, documented in docs/source/AI Model Deployment.rst) unpickles an arbitrary .pkl chosen by the user; the same happens for PCA projections at Logic.py:1087. A shared or downloaded pipeline file executes arbitrary Python in the Slicer process with the user's privileges. Users are likely to exchange trained models, so this is a realistic path to code execution.",
+     "suggestion": "Use a data-only serialization (e.g. joblib with a restricted unpickler, JSON + numpy arrays, or ONNX) for pipelines, or at minimum warn the user that only self-created pipeline files should be opened.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 2972
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Unsafe pickle deserialization of user-selected model and PCA files",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 2971,
+     "line_end": 2972,
+     "evidence": "with open(fileName,\"rb\") as f:\n\t\t\tmodel_type, pipeline, class_order, reference_mz, model_report = pickle.load(f)",
+     "explanation": "Model pipelines and PCA projections are loaded with pickle.load from files chosen through the GUI. A pickle file from a colleague, a shared model repository, or a downloaded example can run arbitrary code when opened in Slicer. This is a concrete code-execution path, not just a bug.",
+     "suggestion": "Document that pickle files must be trusted, or switch to a safe format (JSON for metadata, joblib/skops for sklearn models with a trusted-type check). Also apply to pca_import (Logic.py:1087) and MassVision.py file dialogs at 1260 and 2977.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 2971
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "TIC temp file next to user data is overwritten and deleted",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 3075,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "TIC temp file next to user data is overwritten and deleted",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 3074,
+     "line_end": 3087,
+     "evidence": "tic_filename = os.path.splitext(filePath)[0]+'.nrrd'\nsitk.WriteImage(tic_image, tic_filename)\n...\nos.remove(tic_filename)",
+     "explanation": "RawFileLoad derives tic_filename from the user's imzML path (.nrrd with the same base name), writes the TIC into it, and then calls os.remove on it. If the user already has a file with that name (e.g. a previously exported sample.nrrd beside sample.imzML), it is silently overwritten and then deleted, causing data loss. The cleanup also runs after loadVolume, so a failure in between leaves the file behind.",
+     "suggestion": "Write the TIC to a tempfile.mkstemp/ temporary directory, or check for existence and refuse to overwrite, and remove only files the code created (use try/finally).",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 3075
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Third-party packages installed with pip_install at module import, without asking the user",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 6,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Third-party packages installed with pip_install at module import, without asking the user",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 6,
+     "line_end": 92,
+     "evidence": "try:\n\timport matplotlib as mpl\nexcept ModuleNotFoundError:\n\tslicer.util.pip_install(\"matplotlib\")\n\timport matplotlib as mpl",
+     "explanation": "Logic.py is imported in MassVisionWidget.setup() (MassVision.py:124), so simply opening the MassVision module triggers pip installs of matplotlib, pillow, scikit-learn, pandas, tqdm, h5py and curl_cffi (lines 9, 21, 27, 44, 50, 64, 91) into Slicer's shared Python environment. Any of these can pull newer numpy/scipy/pandas wheels and break other extensions or Slicer itself, for a user who only clicked on the module. MassVision.py:16-20 does the same for pandas at module-file import.",
+     "suggestion": "Move dependency installation behind an explicit user prompt (e.g. a 'Install dependencies' button or a confirmation dialog listing packages and sizes), or declare them as extension dependencies, and never install at import time.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 6
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Multiple packages pip-installed at import time without confirmation",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 6,
+     "line_end": 92,
+     "evidence": "try:\n\timport matplotlib as mpl\nexcept ModuleNotFoundError:\n\tslicer.util.pip_install(\"matplotlib\")",
+     "explanation": "Importing the module (and therefore Slicer's startup load of the module) installs pandas, matplotlib, pillow, scikit-learn, tqdm, h5py, and curl_cffi when missing, with no user prompt. This modifies Slicer's shared Python environment for users who never use the module, and it can shadow or change versions of packages that other Slicer extensions use.",
+     "suggestion": "Move installs into the widget setup or the first action that needs them, and ask the user for confirmation. Use slicer.packaging.pip_ensure with a clear requester string, and list the packages in the documentation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 6
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "pip_ensure pins typing-extensions>=4.16.0 and pulls anndata/scanpy/scikit-misc into Slicer's environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 4731,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "pip_ensure pins typing-extensions>=4.16.0 and pulls anndata/scanpy/scikit-misc into Slicer's environment",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 4731,
+     "line_end": 4734,
+     "evidence": "slicer.packaging.pip_ensure(\n\t\t\t\"typing-extensions>=4.16.0 anndata scanpy scikit-misc\",\n\t\t\trequester=\"MassVision spatial transcriptomics\",\n\t\t)",
+     "explanation": "typing-extensions is bundled with Slicer's Python and used by many packages; requiring >=4.16.0 can upgrade it in place. anndata/scanpy/scikit-misc are unpinned and will resolve against whatever numpy/pandas/scipy versions pip finds, potentially upgrading or downgrading Slicer-bundled packages. This runs the first time a user inspects or imports an .h5ad file, with no size or consent prompt.",
+     "suggestion": "Ask the user before installing, avoid pinning packages Slicer bundles, and report the resolved versions so users can see what changed.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 4731
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Spatial dependency ensure step pins/bumps packages Slicer may bundle",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 4729,
+     "line_end": 4734,
+     "evidence": "slicer.packaging.pip_ensure(\n\t\t\"typing-extensions>=4.16.0 anndata scanpy scikit-misc\",",
+     "explanation": "The spatial-transcriptomics path installs 'typing-extensions>=4.16.0' and scanpy with its dependency tree. A minimum version bump of typing-extensions, and scanpy's own requirements, may change packages Slicer relies on, and the install only occurs on first use. The effect was not verified against the Slicer version in use.",
+     "suggestion": "Confirm the resolved versions against the target Slicer's bundled packages. Document the packages installed, or ask the user first.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 4731
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Global matplotlib backend and main-window UI side effects on module open",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 12,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Global matplotlib backend and main-window UI side effects on module open",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 12,
+     "line_end": 13,
+     "evidence": "## fix Mac crash\nmpl.use('Agg')",
+     "explanation": "mpl.use('Agg') changes the matplotlib backend process-wide for every other module and extension in the same Slicer session. MassVision.py:150-153 additionally connects to the global module selector and force-shows the Markups toolbar, altering the main window for users who merely open the module.",
+     "suggestion": "Use a non-interactive backend only for the specific figures (e.g. matplotlib.figure with Agg canvas) instead of a global mpl.use call, and restore toolbar visibility on cleanup.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 12
+     }
+    }
+   ]
+  },
+  {
+   "title": "Legacy .s4ext metadata has a typo and a nonexistent screenshot",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ExtensionIndex/MassVision.s4ext",
+   "line": 28,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Legacy .s4ext metadata has a typo and a nonexistent screenshot",
+     "file": "ExtensionIndex/MassVision.s4ext",
+     "line_start": 28,
+     "line_end": 41,
+     "evidence": "category Spectral Imagingy",
+     "explanation": "ExtensionIndex/MassVision.s4ext gives category 'Spectral Imagingy' (not matching the CMake category), and points to Screenshot.png, which is not in the repository (the repository has Screenshot1-4.png). This metadata may be shown incorrectly or produce broken images in the Extensions Manager if the legacy file is used.",
+     "suggestion": "Correct the category string and the screenshot URL, or remove the legacy file if the JSON catalog entry replaces it.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ExtensionIndex/MassVision.s4ext",
+      "line": 28
+     }
+    }
+   ]
+  },
+  {
+   "title": "Outbound queries to LIPID MAPS and KEGG use Chrome TLS impersonation",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 4128,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Outbound queries to LIPID MAPS and KEGG use Chrome TLS impersonation",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 4127,
+     "line_end": 4130,
+     "evidence": "# impersonate=\"chrome\" perfectly mimics the TLS fingerprint and HTTP/2 headers of Chrome\n\t\t\t\t\tresp = cffi_requests.get(full_url, impersonate=\"chrome\", timeout=args.request_timeout)",
+     "explanation": "Peak m/z values (derived from the user's data, not images or identifiers) are sent to www.lipidmaps.org and rest.kegg.jp when the user runs molecule matching. The curl_cffi 'impersonate=\"chrome\"' option deliberately disguises the client to defeat bot detection, which may conflict with those services' terms; the user is not told that data leaves the machine.",
+     "suggestion": "Use a plain HTTP client with an identifying User-Agent, and state in the UI/documentation that m/z values are sent to external databases.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 4128
+     }
+    }
+   ]
+  },
+  {
+   "title": "Placeholder test does not test the module",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "MassVision/MassVision.py",
+   "line": 91,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Module test is an empty placeholder",
+     "file": "MassVision/MassVision.py",
+     "line_start": 89,
+     "line_end": 93,
+     "evidence": "self.delayDisplay(\"Starting the test\")\n\n\t\t# logic = MassVisionLogic()\n\n\t\tself.delayDisplay('Test passed')",
+     "explanation": "The registered ctest (MassVision/CMakeLists.txt:48) always passes without exercising any logic, so CI gives no signal about regressions in the large Logic.py/VisiumVision.py code base.",
+     "suggestion": "Add at least a smoke test that loads the bundled test data and runs one import plus one visualization path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVision.py",
+      "line": 89
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Placeholder test does not test the module",
+     "file": "MassVision/MassVision.py",
+     "line_start": 77,
+     "line_end": 93,
+     "evidence": "# logic = MassVisionLogic()\n\n\t\tself.delayDisplay('Test passed')",
+     "explanation": "test_MassVision1 only calls delayDisplay and does not exercise the logic (the Logic instantiation is commented out), so the CTest registration (MassVision/CMakeLists.txt:44-48) passes without checking anything. This gives no regression protection for the many analysis functions.",
+     "suggestion": "Add a small test using the bundled test data or synthetic arrays for at least one logic path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "MassVision/MassVision.py",
+      "line": 91
+     }
+    }
+   ]
+  },
+  {
+   "title": "ST_rasterize assumes a materialized raster cube",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 4766,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "ST_rasterize assumes a materialized raster cube",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 4765,
+     "line_end": 4771,
+     "evidence": "result = self.importSpatialTranscriptomics(st_file, self.STprocessing, self.STraster)\n\t\tgene_names = result.gene_names\n\t\traster_cube = result.raster_cube\n\t\tdim_y, dim_x, _ = raster_cube.shape",
+     "explanation": "VisiumVision documents that raster_cube is None when raster['materialize_cube'] is False (VisiumVision.py:274-275, 1220-1221). If a user loads a saved configuration with materialize_cube disabled, this raises AttributeError on None instead of a clear message.",
+     "suggestion": "Check for None and either force materialization for this path or report that lazy mode is unsupported here.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 4766
+     }
+    }
+   ]
+  },
+  {
+   "title": "Squidpy fallback installs the wrong package and cannot recover",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MassVision/MassVisionLib/VisiumVision.py",
+   "line": 433,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Squidpy fallback installs the wrong package and cannot recover",
+     "file": "MassVision/MassVisionLib/VisiumVision.py",
+     "line_start": 778,
+     "line_end": 782,
+     "evidence": "try:\n\t\timport squidpy as sq\nexcept ModuleNotFoundError:\n\tslicer.util.pip_install(\"scanpy\")\n\timport squidpy as sq",
+     "explanation": "When squidpy is missing, the handler installs scanpy (already a hard dependency) and immediately re-imports squidpy, which raises ModuleNotFoundError again. Spatial gene selection therefore fails with an unhelpful error, and a pip install is performed for nothing.",
+     "suggestion": "Install \"squidpy\" (after user confirmation) or raise a clear message telling the user to install squidpy or disable spatial_gene_selection.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "MassVision/MassVisionLib/VisiumVision.py",
+      "line": 433
+     }
+    }
+   ]
+  },
+  {
+   "title": "imzML parser constructed with auto_install=True; parser implementation not found in the repository",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 252,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "imzML parser constructed with auto_install=True; parser implementation not found in the repository",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 252,
+     "line_end": 253,
+     "evidence": "# parser = ImzMLParser(imzml_file)\n\t\tparser = HybridImzMLParser(imzml_file, strict=True, check_n=8, auto_install=True, verbose=True)",
+     "explanation": "HybridImzMLParser is used with auto_install=True, which suggests it may install packages or fetch code at runtime while reading a user-supplied imzML file. I could not locate its definition in the files I read, so I cannot confirm what it downloads or installs.",
+     "suggestion": "Document what auto_install does and where HybridImzMLParser comes from, and gate any installation behind explicit user consent.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 252
+     }
+    }
+   ]
+  },
+  {
+   "title": "Catalog entry tracks branch 'main' rather than a reviewed commit",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "ExtensionIndex/MassVision.json",
+   "line": 6,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Catalog entry tracks branch 'main' rather than a reviewed commit",
+     "file": "",
+     "line_start": 0,
+     "line_end": 0,
+     "evidence": "\"scm_revision\": \"main\"",
+     "explanation": "scm_revision is 'main', so the code installed can change without an index update. The reviewed commit is fc5795105bba201ac2c5461b31c7eeed8ae87b43, and this review did not confirm that the branch tip still equals it. Per policy, a branch reference is not itself a finding but should be noted.",
+     "suggestion": "Consider pinning scm_revision to the reviewed commit hash for reproducible builds.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other file",
+      "file": "ExtensionIndex/MassVision.json",
+      "line": 6
+     }
+    }
+   ]
+  },
+  {
+   "title": "HMDB data is downloaded by the user under hmdb.ca terms",
+   "category": "license",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 3866,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "HMDB data is downloaded by the user under hmdb.ca terms",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 3866,
+     "line_end": 3871,
+     "evidence": "setupBox.setText(\"Please provide the HMDB database file.\")\n\t\tsetupBox.setInformativeText(\n\t\t\t\"1. Go to: <a href='https://hmdb.ca/downloads'>https://hmdb.ca/downloads</a><br>\"",
+     "explanation": "The extension does not bundle HMDB data (good), but users build a local SQLite database from an HMDB download whose licence is not mentioned anywhere in the module or docs. HMDB content is commonly distributed under non-commercial terms, so users should be told before relying on it.",
+     "suggestion": "Add a short note in docs/source/Identification.rst about the HMDB licence and any non-commercial restriction.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 3866
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Broad exception handler swallows all errors and only prints them",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 6,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Broad exception handler swallows all errors and only prints them",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 110,
+     "line_end": 116,
+     "evidence": "try:\n\t\t\treturn func(*args, **kwargs)\n\t\texcept Exception as e:\n\t\t\tprint(\"Exception occurred:\", str(e))\n\t\tfinally:\n\t\t\tmessageBox.close()",
+     "explanation": "Any operation wrapped in show_wait_message that fails returns None silently; the user sees the wait dialog close and no result, with the traceback only in the Python console. Downstream code then operates on None, producing confusing secondary failures instead of a reported error.",
+     "suggestion": "Re-raise or call slicer.util.errorDisplay with the traceback, and let callers handle the failure.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 6
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Global matplotlib backend and warning filters changed at import",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 12,
+     "line_end": 13,
+     "evidence": "## fix Mac crash\nmpl.use('Agg')",
+     "explanation": "mpl.use('Agg') is called at import time, which switches the process-wide matplotlib backend for any other extension in the same Slicer process. warnings.filterwarnings('ignore') followed by 'default' (which resets all filters, not just the earlier one) also changes global warning state.",
+     "suggestion": "Avoid setting the backend globally at import. Use the warnings.catch_warnings() context manager around the LDA loop.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 12
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Model and PCA pipelines loaded with pickle.load from user-selected files",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 2972,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Model and PCA pipelines loaded with pickle.load from user-selected files",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 2972,
+     "line_end": 2972,
+     "evidence": "model_type, pipeline, class_order, reference_mz, model_report = pickle.load(f)",
+     "explanation": "The 'Import Model Pipeline' feature (MassVision.py:2977 file dialog, documented in docs/source/AI Model Deployment.rst) unpickles an arbitrary .pkl chosen by the user; the same happens for PCA projections at Logic.py:1087. A shared or downloaded pipeline file executes arbitrary Python in the Slicer process with the user's privileges. Users are likely to exchange trained models, so this is a realistic path to code execution.",
+     "suggestion": "Use a data-only serialization (e.g. joblib with a restricted unpickler, JSON + numpy arrays, or ONNX) for pipelines, or at minimum warn the user that only self-created pipeline files should be opened.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 2972
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Unsafe pickle deserialization of user-selected model and PCA files",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 2971,
+     "line_end": 2972,
+     "evidence": "with open(fileName,\"rb\") as f:\n\t\t\tmodel_type, pipeline, class_order, reference_mz, model_report = pickle.load(f)",
+     "explanation": "Model pipelines and PCA projections are loaded with pickle.load from files chosen through the GUI. A pickle file from a colleague, a shared model repository, or a downloaded example can run arbitrary code when opened in Slicer. This is a concrete code-execution path, not just a bug.",
+     "suggestion": "Document that pickle files must be trusted, or switch to a safe format (JSON for metadata, joblib/skops for sklearn models with a trusted-type check). Also apply to pca_import (Logic.py:1087) and MassVision.py file dialogs at 1260 and 2977.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 2971
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "TIC temp file next to user data is overwritten and deleted",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 3075,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "TIC temp file next to user data is overwritten and deleted",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 3074,
+     "line_end": 3087,
+     "evidence": "tic_filename = os.path.splitext(filePath)[0]+'.nrrd'\nsitk.WriteImage(tic_image, tic_filename)\n...\nos.remove(tic_filename)",
+     "explanation": "RawFileLoad derives tic_filename from the user's imzML path (.nrrd with the same base name), writes the TIC into it, and then calls os.remove on it. If the user already has a file with that name (e.g. a previously exported sample.nrrd beside sample.imzML), it is silently overwritten and then deleted, causing data loss. The cleanup also runs after loadVolume, so a failure in between leaves the file behind.",
+     "suggestion": "Write the TIC to a tempfile.mkstemp/ temporary directory, or check for existence and refuse to overwrite, and remove only files the code created (use try/finally).",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 3075
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Third-party packages installed with pip_install at module import, without asking the user",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 6,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Third-party packages installed with pip_install at module import, without asking the user",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 6,
+     "line_end": 92,
+     "evidence": "try:\n\timport matplotlib as mpl\nexcept ModuleNotFoundError:\n\tslicer.util.pip_install(\"matplotlib\")\n\timport matplotlib as mpl",
+     "explanation": "Logic.py is imported in MassVisionWidget.setup() (MassVision.py:124), so simply opening the MassVision module triggers pip installs of matplotlib, pillow, scikit-learn, pandas, tqdm, h5py and curl_cffi (lines 9, 21, 27, 44, 50, 64, 91) into Slicer's shared Python environment. Any of these can pull newer numpy/scipy/pandas wheels and break other extensions or Slicer itself, for a user who only clicked on the module. MassVision.py:16-20 does the same for pandas at module-file import.",
+     "suggestion": "Move dependency installation behind an explicit user prompt (e.g. a 'Install dependencies' button or a confirmation dialog listing packages and sizes), or declare them as extension dependencies, and never install at import time.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 6
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Multiple packages pip-installed at import time without confirmation",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 6,
+     "line_end": 92,
+     "evidence": "try:\n\timport matplotlib as mpl\nexcept ModuleNotFoundError:\n\tslicer.util.pip_install(\"matplotlib\")",
+     "explanation": "Importing the module (and therefore Slicer's startup load of the module) installs pandas, matplotlib, pillow, scikit-learn, tqdm, h5py, and curl_cffi when missing, with no user prompt. This modifies Slicer's shared Python environment for users who never use the module, and it can shadow or change versions of packages that other Slicer extensions use.",
+     "suggestion": "Move installs into the widget setup or the first action that needs them, and ask the user for confirmation. Use slicer.packaging.pip_ensure with a clear requester string, and list the packages in the documentation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 6
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "pip_ensure pins typing-extensions>=4.16.0 and pulls anndata/scanpy/scikit-misc into Slicer's environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "MassVision/MassVisionLib/Logic.py",
+   "line": 4731,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "pip_ensure pins typing-extensions>=4.16.0 and pulls anndata/scanpy/scikit-misc into Slicer's environment",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 4731,
+     "line_end": 4734,
+     "evidence": "slicer.packaging.pip_ensure(\n\t\t\t\"typing-extensions>=4.16.0 anndata scanpy scikit-misc\",\n\t\t\trequester=\"MassVision spatial transcriptomics\",\n\t\t)",
+     "explanation": "typing-extensions is bundled with Slicer's Python and used by many packages; requiring >=4.16.0 can upgrade it in place. anndata/scanpy/scikit-misc are unpinned and will resolve against whatever numpy/pandas/scipy versions pip finds, potentially upgrading or downgrading Slicer-bundled packages. This runs the first time a user inspects or imports an .h5ad file, with no size or consent prompt.",
+     "suggestion": "Ask the user before installing, avoid pinning packages Slicer bundles, and report the resolved versions so users can see what changed.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 4731
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Spatial dependency ensure step pins/bumps packages Slicer may bundle",
+     "file": "MassVision/MassVisionLib/Logic.py",
+     "line_start": 4729,
+     "line_end": 4734,
+     "evidence": "slicer.packaging.pip_ensure(\n\t\t\"typing-extensions>=4.16.0 anndata scanpy scikit-misc\",",
+     "explanation": "The spatial-transcriptomics path installs 'typing-extensions>=4.16.0' and scanpy with its dependency tree. A minimum version bump of typing-extensions, and scanpy's own requirements, may change packages Slicer relies on, and the install only occurs on first use. The effect was not verified against the Slicer version in use.",
+     "suggestion": "Confirm the resolved versions against the target Slicer's bundled packages. Document the packages installed, or ask the user first.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "MassVision/MassVisionLib/Logic.py",
+      "line": 4731
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D6",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D8",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 8,
+  "single": 9,
+  "unverified": 0,
+  "total": 14
+ }
+}

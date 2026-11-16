@@ -1,0 +1,787 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Runtime pip install of dcmrtstruct2nii into the shared Slicer environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "Track/Track.py",
+   "line": 1350,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Runtime pip_install of dcmrtstruct2nii may pull opencv-python (bundled Qt) into Slicer's Python",
+     "file": "Track/Track.py",
+     "line_start": 1350,
+     "line_end": 1350,
+     "evidence": "slicer.util.pip_install('dcmrtstruct2nii')",
+     "explanation": "When the user selects a .dcm RT-STRUCT file, the module offers to install dcmrtstruct2nii into Slicer's shared Python. That package's published dependency list includes opencv-python (not opencv-python-headless), which ships its own Qt plugins and can break Slicer's Qt on some platforms. The install is at least user-confirmed (confirmOkCancelDisplay), so it is not an import-time install, but the dependency tree should be checked. I could not fetch PyPI metadata in this environment, so the dependency claim is unverified.",
+     "suggestion": "Install with a constraint that avoids opencv-python (e.g. pre-install opencv-python-headless, or use --no-deps plus an explicit list), or document the requirement and let users install it themselves.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "Track/Track.py",
+      "line": 1350
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Runtime pip install of dcmrtstruct2nii into the shared Slicer environment",
+     "file": "Track/Track.py",
+     "line_start": 1336,
+     "line_end": 1351,
+     "evidence": "if re.match('.*\\.dcm', currentPath):  # if getting a dcm -> try install dcmrtstruct2nii\n...\nslicer.util.pip_install('dcmrtstruct2nii')",
+     "explanation": "When a DICOM RT-STRUCT is selected and the import fails, the module calls pip_install('dcmrtstruct2nii') after a user OK. This is not declared in EXTENSION_DEPENDS and not routed through PyTorchUtils. dcmrtstruct2nii's transitive dependencies may pin or downgrade packages Slicer bundles, such as numpy or pydicom, which would affect every Slicer user in that session, including those who never open this module. I could not inspect the dependency tree from this repo.",
+     "suggestion": "Document the dependency in the README. Install with pip constraints that keep Slicer-bundled packages unchanged, or check the dependency tree and report it to the user before installing. Consider bundling the RT-STRUCT conversion as an optional extension dependency.",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "Track/Track.py",
+      "line": 1350
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Unguarded slicer.mrmlScene.Clear() can delete all scene content",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "Track/Track.py",
+   "line": 1187,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Unguarded slicer.mrmlScene.Clear() can delete all scene content",
+     "file": "Track/Track.py",
+     "line_start": 1187,
+     "line_end": 1191,
+     "evidence": "# Remove the Volume Rendering Node, if it exists\n...\nelse:\n  slicer.mrmlScene.Clear()",
+     "explanation": "Inside a branch of the apply/load path, the code calls slicer.mrmlScene.Clear(), which removes every node in the scene, including unrelated user data. I read only the lines around it, not the condition that selects this branch, so I cannot confirm whether a user's unsaved data can be lost. If the branch is reachable with user data loaded, the user loses work without a prompt.",
+     "suggestion": "Confirm the guard condition. Remove only the nodes this module created, or prompt the user before a full scene clear. Document the behaviour.",
+     "confidence": "low",
+     "verification": {
+      "status": "partly verified",
+      "file": "Track/Track.py",
+      "line": 1187
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Busy-wait loops pumping processEvents allow re-entrant module execution",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Track/Track.py",
+   "line": 1355,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Busy-wait loops pumping processEvents allow re-entrant module execution",
+     "file": "Track/Track.py",
+     "line_start": 1355,
+     "line_end": 1356,
+     "evidence": "while messageBox.isVisible():\n                                  slicer.app.processEvents()",
+     "explanation": "The same pattern appears for the openpyxl/xlrd installs (TrackLogic.py:242, 281) and the RT-STRUCT dialog (Track.py:1431). While the loop spins, the user can click Apply/Play again or change inputs, re-entering the same slots and mutating self.customParamNode and the MRML scene mid-operation; failures inside the loop are also swallowed by the surrounding bare `except:`.",
+     "suggestion": "Use a modal dialog with exec() or a QEventLoop, and disable the module's controls while the operation runs.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "Track/Track.py",
+      "line": 1355
+     }
+    }
+   ]
+  },
+  {
+   "title": "Displacement Field mode overwrites the user's loaded segmentation in place",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Track/utils/TrackLogic.py",
+   "line": 889,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Displacement Field mode overwrites the user's loaded segmentation in place",
+     "file": "Track/utils/TrackLogic.py",
+     "line_start": 889,
+     "line_end": 889,
+     "evidence": "labelMapNode.SetAndObserveImageData(proxyDeformedMaskNode.GetImageData())",
+     "explanation": "labelMapNode is the node created from the user's segmentation file in the scene. Each frame replaces its image data, origin, spacing and direction with the deformed mask, so the original segmentation is progressively destroyed in the scene; if the user saves the scene afterwards they save the last deformed frame instead of their input. The change is not reversible from the UI.",
+     "suggestion": "Apply the deformed mask to a dedicated output node (or a copy) and leave the input segmentation untouched.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "Track/utils/TrackLogic.py",
+      "line": 889
+     }
+    }
+   ]
+  },
+  {
+   "title": "Generic top-level package name `utils` imported from the module directory",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Track/Track.py",
+   "line": 38,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Generic top-level package name `utils` imported from the module directory",
+     "file": "Track/Track.py",
+     "line_start": 38,
+     "line_end": 39,
+     "evidence": "from utils.Helper import SpinBox, Slider",
+     "explanation": "Track/utils has no __init__.py and is imported as a top-level namespace package named `utils`. Any other extension or script that also provides a top-level `utils` package on sys.path can shadow it, producing an ImportError or, worse, importing the wrong module when SlicerCineTrack loads.",
+     "suggestion": "Rename the directory to something extension-specific (e.g. SlicerCineTrackUtils) and add an __init__.py.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "Track/Track.py",
+      "line": 38
+     }
+    }
+   ]
+  },
+  {
+   "title": "Logic constructor clears the user's Python console",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "Track/utils/TrackLogic.py",
+   "line": 25,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Logic constructor clears the user's Python console",
+     "file": "Track/utils/TrackLogic.py",
+     "line_start": 25,
+     "line_end": 25,
+     "evidence": "slicer.app.pythonConsole().clear()",
+     "explanation": "Instantiating TrackLogic (done when the module widget is created) wipes the shared Python console, destroying output the user may still need, including tracebacks from other modules. This is a global side effect unrelated to the module's function.",
+     "suggestion": "Remove the call, or only clear the console from an explicit user action.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Track/utils/TrackLogic.py",
+      "line": 25
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Console cleared on every logic instantiation",
+     "file": "Track/utils/TrackLogic.py",
+     "line_start": 25,
+     "line_end": 25,
+     "evidence": "slicer.app.pythonConsole().clear()",
+     "explanation": "TrackLogic.__init__ calls slicer.app.pythonConsole().clear(). Every time the logic object is created, the user's Python console history output is erased, which is a surprising global side effect.",
+     "suggestion": "Remove this call. It is not needed for the module's function.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Track/utils/TrackLogic.py",
+      "line": 25
+     }
+    }
+   ]
+  },
+  {
+   "title": "Pinned revision is a moving branch",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": null,
+   "line": 0,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Pinned revision is a moving branch",
+     "file": "",
+     "line_start": 0,
+     "line_end": 0,
+     "evidence": "\"scm_revision\": \"main\",",
+     "explanation": "The catalog entry sets scm_revision to \"main\", so the built extension can change without an index update. The index policy treats branch references as acceptable, but this weakens reproducibility and the audit trail.",
+     "suggestion": "Pin scm_revision to a reviewed commit hash or release tag.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Possible IndexError for genuinely 2D images in getSliceWidget",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Track/utils/TrackLogic.py",
+   "line": 1050,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Possible IndexError for genuinely 2D images in getSliceWidget",
+     "file": "Track/utils/TrackLogic.py",
+     "line_start": 1050,
+     "line_end": 1050,
+     "evidence": "if sitk_image.GetSize()[2] != 1:",
+     "explanation": "getSliceWidget is called from visualize() only when GetDataDimension() == 2, i.e. for 2D image data; a 2D SimpleITK image returns a 2-element size tuple, so indexing [2] raises IndexError and playback would fail. If the cine frames are always 3D single-slice volumes this branch is unreachable, but the guard does not match the branch condition.",
+     "suggestion": "Use sitk_image.GetDimension() before indexing, or compare against the last axis of GetSize().",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "Track/utils/TrackLogic.py",
+      "line": 1050
+     }
+    }
+   ]
+  },
+  {
+   "title": "RemoveAllObservers() on shared slice corner annotations",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Track/utils/TrackLogic.py",
+   "line": 694,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "RemoveAllObservers() on shared slice corner annotations",
+     "file": "Track/utils/TrackLogic.py",
+     "line_start": 843,
+     "line_end": 843,
+     "evidence": "sliceViewWindow.cornerAnnotation().RemoveAllObservers()",
+     "explanation": "The corner annotation object belongs to the slice view, not to this module. Removing all observers (also at lines 694-696 and 858-861) drops observers installed by Slicer or by other extensions, so their annotation updates silently stop working after SlicerCineTrack has run.",
+     "suggestion": "Track and remove only the observers this module added, or use SetText/ClearAllTexts without touching observers.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "Track/utils/TrackLogic.py",
+      "line": 694
+     }
+    }
+   ]
+  },
+  {
+   "title": "Scene nodes deleted by name, which can hit unrelated data",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Track/Track.py",
+   "line": 1125,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Scene nodes deleted by name, which can hit unrelated data",
+     "file": "Track/Track.py",
+     "line_start": 1264,
+     "line_end": 1270,
+     "evidence": "nodes = slicer.mrmlScene.GetNodesByClassByName(\"vtkMRMLScalarVolumeNode\", \"Image Nodes Sequence\")",
+     "explanation": "Cleanup removes whichever node happens to be first among nodes with the hard-coded names \"Image Nodes Sequence\" / \"Transform Nodes Sequence\" (lines 1264-1284). A user volume or a node created by another module with that name can be removed, and the code assumes index 0 is the stale one.",
+     "suggestion": "Keep direct references to the nodes to delete (or use MRML node IDs) instead of looking them up by name.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "Track/Track.py",
+      "line": 1125
+     }
+    }
+   ]
+  },
+  {
+   "title": "Slider mousePressEvent passes the method object instead of a width value",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Track/utils/Helper.py",
+   "line": 15,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Slider mousePressEvent passes the method object instead of a width value",
+     "file": "Track/utils/Helper.py",
+     "line_start": 15,
+     "line_end": 15,
+     "evidence": "clickValue = qt.QStyle.sliderValueFromPosition(self.minimum, self.maximum, event.pos().x(), self.width)",
+     "explanation": "The width argument to sliderValueFromPosition is self.width, a bound method, not a number. The computed click value is wrong and the slider jumps incorrectly when clicked. Track/utils/Helper.py also emits sliderReleased explicitly in mouseReleaseEvent. This is an ordinary correctness bug, not a safety issue.",
+     "suggestion": "Pass self.width() and check the Qt slider geometry logic. Test the slider in the GUI.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Track/utils/Helper.py",
+      "line": 15
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unchecked loadVolume result and unbound `headers` on decode failure",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Track/utils/TrackLogic.py",
+   "line": 131,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Unchecked loadVolume result and unbound `headers` on decode failure",
+     "file": "Track/utils/TrackLogic.py",
+     "line_start": 130,
+     "line_end": 131,
+     "evidence": "loadedImageNode.SetName(nodeName)",
+     "explanation": "slicer.util.loadVolume returns None on failure, and the next line dereferences it, so one unreadable file in a folder aborts the whole import with an AttributeError instead of a user-facing message (same pattern at line 182 for masks). Relatedly, in getColumnNamesFromTransformsInput the `headers` variable is only assigned inside the encoding loop, so if every encoding fails the function raises UnboundLocalError at `return headers` (line 213).",
+     "suggestion": "Check for None after loadVolume and report the failing file; initialise headers = [] before the encoding loop.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Track/utils/TrackLogic.py",
+      "line": 131
+     }
+    }
+   ]
+  },
+  {
+   "title": "BSD-style license includes an advertising-acknowledgement clause",
+   "category": "license",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "LICENSE.txt",
+   "line": 14,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "BSD-style license includes an advertising-acknowledgement clause",
+     "file": "LICENSE.txt",
+     "line_start": 14,
+     "line_end": 16,
+     "evidence": "3. All advertising materials mentioning features or use of this software must\ndisplay the following acknowledgement: This product includes software developed\nby the laboratory-for-translational-medicine - Toronto Metropolitan University.",
+     "explanation": "This is the old BSD 4-clause advertising clause. It still permits redistribution and modification, so it is not a distribution blocker, but downstream redistributors (including binary package builders) must reproduce the acknowledgement in advertising material. Worth noting for users who repackage the extension.",
+     "suggestion": "Consider whether the advertising clause is intended; a plain BSD-3-Clause text would avoid friction for redistributors.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "LICENSE.txt",
+      "line": 14
+     }
+    }
+   ]
+  },
+  {
+   "title": "License text inconsistent between LICENSE.txt and Track.py header",
+   "category": "license",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "Track/Track.py",
+   "line": 7,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "License text inconsistent between LICENSE.txt and Track.py header",
+     "file": "Track/Track.py",
+     "line_start": 7,
+     "line_end": 14,
+     "evidence": "See LICENSE.txt\n   or http://www.slicer.org/copyright/copyright.txt for details.",
+     "explanation": "LICENSE.txt is a BSD-style license with advertising and endorsement clauses. The Track.py header uses Apache-style AS-IS wording and refers to 'the License' without naming it. Distribution is still permitted, but the terms should be unambiguous.",
+     "suggestion": "Use one license notice consistently across the source headers and LICENSE.txt.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "Track/Track.py",
+      "line": 7
+     }
+    }
+   ]
+  },
+  {
+   "title": "Python unit test in Testing/Python is commented out",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "Track/Testing/Python/CMakeLists.txt",
+   "line": 2,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Python unit test in Testing/Python is commented out",
+     "file": "Track/Testing/Python/CMakeLists.txt",
+     "line_start": 2,
+     "line_end": 2,
+     "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+     "explanation": "The dedicated test directory registers no test; coverage relies on the unittest registered from Track.py plus the CI workflow that downloads Data.zip and runs ctest under xvfb. Adding a real test that exercises the load/apply path would make regressions in the transform handling visible.",
+     "suggestion": "Add a small self-test using the sample dataset (or synthetic volumes) and register it here.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Track/Testing/Python/CMakeLists.txt",
+      "line": 2
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Runtime pip install of dcmrtstruct2nii into the shared Slicer environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "Track/Track.py",
+   "line": 1350,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Runtime pip_install of dcmrtstruct2nii may pull opencv-python (bundled Qt) into Slicer's Python",
+     "file": "Track/Track.py",
+     "line_start": 1350,
+     "line_end": 1350,
+     "evidence": "slicer.util.pip_install('dcmrtstruct2nii')",
+     "explanation": "When the user selects a .dcm RT-STRUCT file, the module offers to install dcmrtstruct2nii into Slicer's shared Python. That package's published dependency list includes opencv-python (not opencv-python-headless), which ships its own Qt plugins and can break Slicer's Qt on some platforms. The install is at least user-confirmed (confirmOkCancelDisplay), so it is not an import-time install, but the dependency tree should be checked. I could not fetch PyPI metadata in this environment, so the dependency claim is unverified.",
+     "suggestion": "Install with a constraint that avoids opencv-python (e.g. pre-install opencv-python-headless, or use --no-deps plus an explicit list), or document the requirement and let users install it themselves.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "Track/Track.py",
+      "line": 1350
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Runtime pip install of dcmrtstruct2nii into the shared Slicer environment",
+     "file": "Track/Track.py",
+     "line_start": 1336,
+     "line_end": 1351,
+     "evidence": "if re.match('.*\\.dcm', currentPath):  # if getting a dcm -> try install dcmrtstruct2nii\n...\nslicer.util.pip_install('dcmrtstruct2nii')",
+     "explanation": "When a DICOM RT-STRUCT is selected and the import fails, the module calls pip_install('dcmrtstruct2nii') after a user OK. This is not declared in EXTENSION_DEPENDS and not routed through PyTorchUtils. dcmrtstruct2nii's transitive dependencies may pin or downgrade packages Slicer bundles, such as numpy or pydicom, which would affect every Slicer user in that session, including those who never open this module. I could not inspect the dependency tree from this repo.",
+     "suggestion": "Document the dependency in the README. Install with pip constraints that keep Slicer-bundled packages unchanged, or check the dependency tree and report it to the user before installing. Consider bundling the RT-STRUCT conversion as an optional extension dependency.",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "Track/Track.py",
+      "line": 1350
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Unguarded slicer.mrmlScene.Clear() can delete all scene content",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "Track/Track.py",
+   "line": 1187,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Unguarded slicer.mrmlScene.Clear() can delete all scene content",
+     "file": "Track/Track.py",
+     "line_start": 1187,
+     "line_end": 1191,
+     "evidence": "# Remove the Volume Rendering Node, if it exists\n...\nelse:\n  slicer.mrmlScene.Clear()",
+     "explanation": "Inside a branch of the apply/load path, the code calls slicer.mrmlScene.Clear(), which removes every node in the scene, including unrelated user data. I read only the lines around it, not the condition that selects this branch, so I cannot confirm whether a user's unsaved data can be lost. If the branch is reachable with user data loaded, the user loses work without a prompt.",
+     "suggestion": "Confirm the guard condition. Remove only the nodes this module created, or prompt the user before a full scene clear. Document the behaviour.",
+     "confidence": "low",
+     "verification": {
+      "status": "partly verified",
+      "file": "Track/Track.py",
+      "line": 1187
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D3",
+   "rating_dispute": {
+    "deepseek": "ok",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "minor"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "utility": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  }
+ },
+ "overall": {
+  "deepseek": "minor issues",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 5,
+  "single": 13,
+  "unverified": 1,
+  "total": 15
+ }
+}

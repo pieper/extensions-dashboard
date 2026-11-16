@@ -1,0 +1,155 @@
+{
+ "purpose": "A 3D Slicer module that performs medical image registration with the uniGradICON/multiGradICON foundation models, either locally (PyTorch in Slicer) or by uploading images to a UniGradICON registration server, with optional masking, segmentation guidance and label propagation. It is aimed at researchers and clinicians doing inter-/intra-subject image registration in Slicer.",
+ "summary": "Well-structured, documented extension: Apache-2.0, all Python files installed by CMake, heavy imports deferred, registration off the GUI thread, temp dirs used, weights loaded with torch.load(weights_only=True), no telemetry or obfuscation. Main concerns are environment and network defaults: the bundled registration server binds 0.0.0.0 with an optional (often empty) token and no upload limits, the module can downgrade Slicer's bundled NumPy to <2, and it pip-installs an exactly pinned unigradicon whose dependency chain includes torch. PyTorchUtils is used correctly but the PyTorch extension is not declared in EXTENSION_DEPENDS. No blocking issue found; fixes recommended before wide distribution.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Read UniGradICONLib/server.py, UniGradICONServer/server.py, UniGradICONHelpers/remote.py and registration.py. No malicious behavior, telemetry or obfuscation; remote upload is explicit and documented. But the Slicer-launched server binds 0.0.0.0 with an optional token and no upload size limit, and the client defaults to plain HTTP for medical images."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Read UniGradICONLib/logic.py and server.py: torch is installed via PyTorchUtils (good), but logic.py can run slicer.util.pip_install(\"numpy<2\"), downgrading Slicer's bundled NumPy, and pip-installs the exact pin unigradicon==1.0.6 whose requirements include torch/icon_registration into Slicer's Python."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "UniGradICON/CMakeLists.txt lists every Python file and resource present in the tree (Lib, Helpers, Tests, Server, Presets, UI, icon), and the catalog entry's scm_url/scm_revision are usable. EXTENSION_DEPENDS is \"NA\" although PyTorchUtils is required for local registration."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is the full Apache License 2.0, permitting distribution of the extension source. Model weights are downloaded from the project's own GitHub releases; the license of those weights and of the pip packages was not verified."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Read UniGradICON.py, logic.py, task.py, preview.py, readiness.py, server.py: standard ScriptedLoadableModule structure, parameter node for state, observers removed in cleanup, work in a worker thread/process with progress and cancellation, temp directories, errors surfaced to the user. Only small oddities (e.g. aliasing stagesPresetsComboBox to modelComboBox, commented-out Testing/Python test) were found."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md is extensive (install, local vs remote, user guide, segmentation, troubleshooting, GPU memory, citations) and there are unit tests plus screenshots. No explicit research-use/clinical disclaimer was found in the README."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Slicer-started registration server listens on 0.0.0.0 with an optional (often empty) token and no upload limits",
+   "file": "UniGradICON/UniGradICONLib/server.py",
+   "line_start": 365,
+   "line_end": 393,
+   "evidence": "def __init__(self, port, token=None, weightsDir=None, host=\"0.0.0.0\", jobsPerGpu=1, logCallback=None,\n      self.address = f\"{socket.gethostname() if host == '0.0.0.0' else host}:{port}\"",
+   "explanation": "startServer() constructs RegistrationServerProcess without a host, so the default 0.0.0.0 applies and the FastAPI server is reachable from the whole network. The token comes from a free-text field that is empty by default; UniGradICONServer/server.py check_token() only enforces auth when a token is set, and /jobs accepts arbitrarily large multipart uploads with no size cap. A user who clicks \"Start server\" on a hospital or campus network therefore exposes an unauthenticated endpoint that accepts files and runs GPU inference, and can be used to fill the disk. The UI does warn afterwards (\"It has no token: anyone who can reach this computer can use it.\"), but the safe default (127.0.0.1, or refusing to start without a token) is not used.",
+   "suggestion": "Default the Slicer-launched server to 127.0.0.1, or require a non-empty token before binding to 0.0.0.0, and add a request/upload size limit in the server.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Remote client silently upgrades bare addresses to plain HTTP for medical image uploads",
+   "file": "UniGradICON/UniGradICONHelpers/remote.py",
+   "line_start": 27,
+   "line_end": 31,
+   "evidence": "self.url = url.strip().rstrip(\"/\")\n    if \"://\" not in self.url:\n      self.url = \"http://\" + self.url",
+   "explanation": "Entering \"host:8899\" sends the fixed/moving images, masks and segmentations unencrypted over the network; the README does advise an SSH tunnel or HTTPS outside a trusted network, but the client neither warns nor requires TLS. On an untrusted network this exposes patient images and the access token in transit.",
+   "suggestion": "Warn in the UI when the configured server URL is plain http and not localhost, or support/encourage https.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Model weights are downloaded without any integrity check",
+   "file": "UniGradICON/UniGradICONHelpers/registration.py",
+   "line_start": 50,
+   "line_end": 67,
+   "evidence": "urllib.request.urlretrieve(url, partial_path)\n      os.replace(partial_path, path)",
+   "explanation": "Weights come from GitHub release URLs over HTTPS but are not verified against a known hash before being loaded. A compromised or replaced release asset would be used silently. The impact is limited because the file is loaded with torch.load(..., weights_only=True) (line 99), so no arbitrary code execution, but a tampered model would produce wrong registrations without any signal.",
+   "suggestion": "Pin and verify a SHA-256 of each weights file before os.replace().",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Module can downgrade Slicer's bundled NumPy to <2",
+   "file": "UniGradICON/UniGradICONLib/logic.py",
+   "line_start": 23,
+   "line_end": 52,
+   "evidence": "slicer.util.pip_install(\"numpy<2\")",
+   "explanation": "When an installed PyTorch reports a NumPy ABI mismatch, _checkPyTorchNumPyCompatibility offers to pip-install numpy<2 into Slicer's shared Python. This downgrades a package Slicer bundles, affecting every other module and extension in that Slicer installation, not only users of UniGradICON. It is behind a confirmation dialog and a restart is requested, which limits the harm, but the recommended path is to let the PyTorch extension provide a matching build rather than changing NumPy.",
+   "suggestion": "Do not modify NumPy; instead report the incompatibility and point users to the PyTorch extension / remote processing (as detectLocalBackendProblem already does).",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "pip-installs an exactly pinned unigradicon whose dependency chain includes torch",
+   "file": "UniGradICON/UniGradICONLib/logic.py",
+   "line_start": 111,
+   "line_end": 122,
+   "evidence": "slicer.util.pip_install(UNIGRADICON_REQUIREMENT)",
+   "explanation": "UNIGRADICON_REQUIREMENT is \"unigradicon==1.0.6\" (UniGradICONHelpers/segmentation.py line 7). unigradicon depends on icon_registration and torch, so pip resolves torch from PyPI inside Slicer's environment; if the installed torch does not satisfy unigradicon's requirement, pip can replace the PyTorch-extension-provided torch (and its CUDA build) for all extensions. The install is user-confirmed, but the resulting environment is no longer the one the PyTorch extension manages.",
+   "suggestion": "Install with --no-deps and check/declare the required torch and icon_registration versions explicitly, or vendor the needed code, so torch is never resolved from PyPI.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Server packages installed into Slicer's Python on demand",
+   "file": "UniGradICON/UniGradICONLib/server.py",
+   "line_start": 286,
+   "line_end": 296,
+   "evidence": "slicer.util.pip_install(\"fastapi uvicorn python-multipart\")",
+   "explanation": "Starting the local server installs fastapi/uvicorn/python-multipart into Slicer's shared environment after a confirmation dialog. This is user-initiated and confirmed, but it adds unpinned web-server packages to every module in that Slicer, and a later version change can break the server without notice.",
+   "suggestion": "Pin compatible versions and document that these packages are added to Slicer's Python.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "PyTorch extension is required for local registration but not declared as a dependency",
+   "file": "CMakeLists.txt",
+   "line_start": 13,
+   "line_end": 13,
+   "evidence": "set(EXTENSION_DEPENDS \"NA\") # Specified as a list or \"NA\" if no dependencies",
+   "explanation": "UniGradICONLib/logic.py imports PyTorchUtils and raises \"This module requires PyTorch extension. Install it from the Extensions Manager.\" when it is missing, and the catalog entry has build_dependencies []. Users who install UniGradICON for local registration therefore get a runtime error instead of the PyTorch extension being installed with it. Remote-only use works without it, so this is not a loading failure.",
+   "suggestion": "Declare PyTorch in EXTENSION_DEPENDS and in the catalog entry's build_dependencies, or state clearly in the module UI that local registration needs a separate install.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No research-use / clinical disclaimer",
+   "file": "README.md",
+   "line_start": 1,
+   "line_end": 5,
+   "evidence": "This is the official Slicer extension for [uniGradICON and multiGradICON](https://github.com/uncbiag/uniGradICON), foundation models for medical image registration.",
+   "explanation": "The module runs a deep-learning registration model on clinical images and writes transforms/volumes into the scene, but the README and module help text contain no statement that results are for research use and must be verified before clinical use. Model provenance (papers, weights source) is otherwise well documented.",
+   "suggestion": "Add a short research-use-only disclaimer to README.md and to the module helpText/acknowledgementText.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "Downloaded weights are loaded with weights_only=True",
+   "file": "UniGradICON/UniGradICONHelpers/registration.py",
+   "line_start": 99,
+   "line_end": 99,
+   "evidence": "model.regis_net.load_state_dict(torch.load(weights_path, map_location=torch_device, weights_only=True))",
+   "explanation": "Positive observation: the downloaded checkpoint is deserialized with weights_only=True, so a tampered file cannot execute code through pickle. No eval/exec, no telemetry, and no reviewer-directed instructions were found in the inspected files.",
+   "suggestion": "",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "UniGradICONLib/comparison.py, UniGradICONLib/registration.py, UniGradICONLib/segmentation.py, UniGradICONHelpers/icon_helper.py and the three test modules were not read line by line.",
+  "The license of the uniGradICON model weights (GitHub release assets) and of the pip packages unigradicon/icon_registration was not verified.",
+  "Whether unigradicon==1.0.6's declared requirements actually pin or replace torch/numpy in Slicer's environment (no package metadata access).",
+  "The exact source at commit 7a0bfeae3470994753ff45f4b31ac8edca13a5dc was not fetched; I reviewed the file tree provided for that revision.",
+  "CI/build results for the catalog entry and whether the extension builds on all supported platforms.",
+  "Runtime behavior of the FastAPI server (no execution possible in this environment)."
+ ],
+ "questions_for_author": [
+  "Why does the Slicer-launched registration server default to host 0.0.0.0 instead of 127.0.0.1, and can it require a token before binding to all interfaces?",
+  "Does unigradicon==1.0.6 declare a torch requirement that could cause pip to replace the PyTorch-extension-provided torch in Slicer's Python?",
+  "Can the NumPy<2 downgrade be replaced by an error message pointing to the PyTorch extension or remote processing?",
+  "Should the PyTorch extension be declared in EXTENSION_DEPENDS/build_dependencies given that local registration needs PyTorchUtils?"
+ ]
+}

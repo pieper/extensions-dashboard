@@ -1,0 +1,153 @@
+{
+ "purpose": "ASLtoolkit provides two Slicer CLI modules (CBF/ATT ASL and Multi Echo ASL) that reconstruct quantitative cerebral blood flow, arterial transit time and T1 blood-gray-matter maps from Arterial Spin Labeling MRI, aimed at neuroimaging researchers.",
+ "summary": "Two thin ScriptedCLI wrappers around the third-party `asltk` PyPI package. No telemetry, network transmission, obfuscation or destructive file handling was found; the MIT LICENSE covers the extension itself and the catalog entry/CMake are consistent. Two issues should be fixed: the modules silently `pip install asltk==1.1.3` into Slicer's shared Python environment on first run without any user confirmation, and the Multi Echo module's T2 Blood / T2 Gray Matter GUI parameters are parsed and printed but never passed to the reconstruction, so user input is silently ignored. Remaining items (validation bug in the CBF module, requirements.txt version mismatch, no tests, no clinical disclaimer) are non-blocking.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read both module scripts in full: no network calls, telemetry, credential access, eval/exec/pickle, subprocess or file deletion; the only writes are `save_image(args.out_cbf/out_att/out_tblgm)` to paths supplied by the Slicer CLI. No text aimed at AI reviewers was found in the repository."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Both scripts run `slicer.util.pip_install(\"asltk==1.1.3\")` at script start (CBF_ATT_ASL.py:32-34, Multi_Echo_ASL.py:32-34) with no confirmation dialog, modifying the shared Slicer Python environment; the exact pin can also constrain packages Slicer bundles if asltk declares them."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMakeLists.txt adds both module subdirectories, each CMakeLists.txt uses SlicerMacroBuildScriptedCLI with the matching .py/.xml present; EXTENSION_DEPENDS \"NA\" matches the entry's empty build_dependencies; no large binaries beyond small PNGs."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "MIT LICENSE at repository root and matching MIT headers in both module scripts; docs/index.md:82 states MIT. The license of the runtime-downloaded `asltk` package and of the Google-Drive sample data could not be verified."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Multi_Echo_ASL.py parses t2b/t2gm (lines 245-246) and prints them (108-109) but never passes them to ASLData/MultiTE_ASLMapping (115-134), so the GUI parameters have no effect; CBF_ATT_ASL.py:187,192 compares smoothMethod against lowercase strings that can never match the XML enumeration, disabling that validation."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "docs/index.md documents both modules, a quick tutorial and sample data (Google Drive link), and the XML files carry descriptions; there are no tests, no clinical-use disclaimer, and the sample dataset has no stated license."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "asltk installed into Slicer's shared Python environment at module run without user confirmation",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 28,
+   "line_end": 37,
+   "evidence": "except ModuleNotFoundError:\n    import slicer.util\n    slicer.util.pip_install(\"asltk==1.1.3\")",
+   "explanation": "The identical block exists in Multi_Echo_ASL/Multi_Echo_ASL.py:32-34. The first time a user runs either module, the script silently pip-installs `asltk==1.1.3` (plus its transitive dependencies) into the Slicer Python environment shared by all extensions and by users who never open this module. There is no confirmation dialog and no progress/size information; the only disclosure is a sentence in README.md:14 and docs/index.md:69. The exact `==1.1.3` pin can also force a specific version of a dependency that Slicer bundles (numpy/scipy/nibabel class packages) if asltk declares one, which can break other extensions.",
+   "suggestion": "Ask the user before installing (e.g. a qt.QMessageBox / ctk confirmation in the module, or ship the dependency via the extension build), avoid exact pins of packages Slicer bundles, and state the download size and target environment in the prompt.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "T2 Blood and T2 Gray Matter parameters are accepted but never used in the computation",
+   "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+   "line_start": 115,
+   "line_end": 134,
+   "evidence": "  data = ASLData(\n   pcasl=args.asl, m0=args.m0, ld_values=ld, pld_values=pld, te_values=te,\n   average_m0=True\n   )",
+   "explanation": "`args.t2b` and `args.t2gm` are parsed from the CLI (lines 245-246) and echoed in the verbose output (lines 108-109), but neither ASLData nor MultiTE_ASLMapping receives them; the only other occurrences in the file are those four lines. A user who changes 'T2 Blood (ms)' or 'T2 Gray Matter (ms)' in the GUI gets identical results, silently, which for a quantitative mapping tool can lead to misinterpreted output values.",
+   "suggestion": "Pass the T2 values to the reconstruction (e.g. as arguments to MultiTE_ASLMapping/create_map) or remove the parameters from the XML so users are not misled.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Smoothing-parameter validation in the CBF module can never trigger",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 187,
+   "line_end": 196,
+   "evidence": "  if args.smoothMethod == 'gaussian' and args.smoothParameter <= 0:",
+   "explanation": "The XML enumeration supplies 'None'/'Gaussian'/'Median' (CBF_ATT_ASL.xml:96-98), so the lowercase comparisons at lines 187 and 192 are always False and invalid sigma/kernel values (e.g. sigma <= 0, even median size) reach asltk unchecked. Multi_Echo_ASL.py:192,197 uses the correct capitalisation, so the two modules behave differently.",
+   "suggestion": "Compare against 'Gaussian'/'Median' (or lower-case args.smoothMethod once, as is done at line 81).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "requirements.txt pins a different asltk version than the code installs",
+   "file": "requirements.txt",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "asltk==1.1.0",
+   "explanation": "The documentation build (readthedocs) installs asltk 1.1.0 while both modules install 1.1.3 at runtime, so the documented API and the executed API can diverge; the file is also not used by the CMake build, so it is easy to leave stale.",
+   "suggestion": "Keep a single version pin shared by requirements.txt and the pip_install call.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Default brain mask is a numpy array while a user mask is an ImageIO object",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 65,
+   "line_end": 67,
+   "evidence": "  mask_img = np.ones(asl_img.get_as_numpy()[0, 0, :, :, :].shape)\n  if args.mask != '':\n      mask_img = ImageIO(args.mask)",
+   "explanation": "`recon.set_brain_mask(mask_img)` therefore receives two different types depending on whether a mask was supplied, and the default path assumes a 5-D ASL array (indexing [0,0,:,:,:]) which raises IndexError for 4-D input. Same pattern in Multi_Echo_ASL.py:66-68.",
+   "suggestion": "Build the default mask from the M0 image geometry as an ImageIO-compatible object and derive the shape without hard-coded 5-D indexing.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Output folder is validated but never used; XML text about a home-directory default is misleading",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 233,
+   "line_end": 233,
+   "evidence": "      out_folder=parsed.get('outputFolder', os.path.expanduser('~')),",
+   "explanation": "`out_folder` is only checked for existence (line 148) and never used to build output paths; outputs go to the paths Slicer passes for the output image nodes. The XML description (CBF_ATT_ASL.xml:11) tells users the home directory is used when --outputFolder is omitted, which does not match the code.",
+   "suggestion": "Either use out_folder to resolve relative output names or remove the parameter and the corresponding description text.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "rich.print interprets bracketed text in messages as markup",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 40,
+   "line_end": 40,
+   "evidence": "from rich import print",
+   "explanation": "`print` is replaced by rich's markup-aware version, so messages such as the validation text at line 184 containing `['None', 'Gaussian', 'Median']` or file paths containing '[' are parsed as style tags and can raise a markup/style error instead of printing the diagnostic, hiding the real error from the user.",
+   "suggestion": "Use rich.print with markup=False (or the builtin print) for diagnostics and for echoing user-supplied paths.",
+   "confidence": "low"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No tests, no clinical-use disclaimer, sample data hosted externally without stated license",
+   "file": "docs/index.md",
+   "line_start": 52,
+   "line_end": 54,
+   "evidence": "1. Download the sample data (hosted at a [public link from Google Drive](https://drive.google.com/file/d/1agtHY9SLvC9975L6H0RL6PfIHATnJKcI/view))",
+   "explanation": "The repository contains no test or self-test, and the tutorial depends on a Google Drive file whose license/redistribution terms are not stated. Quantitative CBF/ATT maps are clinically suggestive, but neither the README nor the module XML carries a research-use-only disclaimer.",
+   "suggestion": "Add a short self-test or sample-data download through Slicer's Sample Data mechanism, state the sample-data license, and add a research-use-only notice.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Empty <license/> element in both module XML files",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.xml",
+   "line_start": 14,
+   "line_end": 14,
+   "evidence": "  <license/>",
+   "explanation": "The repository has a valid MIT LICENSE and MIT headers in the scripts, but the CLI metadata shown in Slicer's module information panel is empty, so users do not see the terms where they look for them. Same in Multi_Echo_ASL/Multi_Echo_ASL.xml:14.",
+   "suggestion": "Fill in the license field (e.g. 'MIT') in both XML files.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The `asltk` PyPI package (v1.1.3) itself was not inspected: its dependency list (whether it pulls torch, or pins numpy/scipy/nibabel that Slicer bundles), its license, and its own network/file behaviour are unknown.",
+  "Whether `rich` is bundled with the targeted Slicer version, or only arrives as an asltk dependency, could not be verified.",
+  "The Google Drive sample dataset referenced in docs/index.md:52 was not accessed, so its license and content are unverified.",
+  "No build or runtime test was possible; behaviour of asltk's ImageIO/save_image and set_brain_mask with the types passed here is inferred from the code only.",
+  "The catalog entry uses scm_revision \"main\" (a moving branch); the exact commit b805616adc86eb902505f27dd58764d83647228c named in the review request could not be resolved or diffed against the working tree."
+ ],
+ "questions_for_author": [
+  "Can the asltk installation be made explicit (user confirmation dialog) and moved out of the shared Slicer environment, or at least documented with download size and target environment?",
+  "Should the T2 Blood / T2 Gray Matter parameters be forwarded to MultiTE_ASLMapping, or removed from the Multi Echo ASL interface?",
+  "What are the license terms of the sample dataset hosted on Google Drive?"
+ ]
+}

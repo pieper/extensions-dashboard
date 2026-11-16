@@ -1,0 +1,125 @@
+{
+ "purpose": "Provides Slicer CLI modules (CBF/ATT ASL and Multi Echo ASL) that wrap the external asltk Python package to compute perfusion (CBF, ATT) and T1 blood-GM maps from arterial spin labelling MRI. It is aimed at MRI researchers working with ASL data in 3D Slicer.",
+ "summary": "The code is a thin wrapper around asltk with no network transmission, credentials, or obfuscation in the files reviewed. The main concern is that both modules pip-install asltk==1.1.3 into Slicer's shared Python environment at first use, without user confirmation and with unvetted transitive dependencies. Secondary issues: the version differs from requirements.txt (1.1.0), a smoothing-validation case mismatch means that check never fires, the outputFolder flag is never applied to outputs, the catalog tracks the moving branch \"main\", and there are no tests. The repository content is untrusted and contains no embedded instructions. Overall: needs fixes, none blocking on safety.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Inspected both .py modules and XML descriptors; no network calls for data, telemetry, or credentials. The runtime slicer.util.pip_install of a third-party package on ModuleNotFoundError is a supply-chain surface that runs without an explicit user prompt; asltk's own dependencies were not inspected."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "CBF_ATT_ASL.py line 34 and Multi_Echo_ASL.py line 34 install asltk==1.1.3 into the shared Slicer Python environment at import time. Transitive dependencies (possibly bringing Qt/VTK-bundling or torch packages) were not verified, so their effect on other extensions is unknown."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt sets EXTENSION_DEPENDS \"NA\" and the catalog has empty build_dependencies, which is consistent. Both CMakeLists.txt files use SlicerMacroBuildScriptedCLI with XML and .py files that exist. scm_revision is the moving branch 'main', and requirements.txt pins asltk==1.1.0, which does not match the 1.1.3 installed at runtime."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Root LICENSE is MIT and text is standard. The module XML files contain an empty <license/> element, which is cosmetic. asltk's license was not checked."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "CBF_ATT_ASL.py line 187 compares args.smoothMethod to lowercase 'gaussian', while line 181 lists 'Gaussian', so the parameter check never runs. Output paths (out_cbf, out_att) are used as given and ignore outputFolder, although the XML description says outputs go to the home directory by default. Pip-install failures are not caught."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "Docs (docs/index.md) give a tutorial and sample data on Google Drive. There are no automated tests. The Multi Echo XML t2gm description says 'T2 value for the blood'. The README banner image points to the develop branch while CMake uses main."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Runtime pip install of asltk into Slicer's shared Python environment without user confirmation",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 28,
+   "line_end": 37,
+   "evidence": "except ModuleNotFoundError:\n    import slicer.util\n    slicer.util.pip_install(\"asltk==1.1.3\")",
+   "explanation": "When asltk is missing, the module silently installs a pinned package and its transitive dependencies into the shared Slicer environment, affecting other extensions and users who never open the module. Nothing asks for consent, and failures are not handled. The same pattern is in Multi_Echo_ASL/Multi_Echo_ASL.py lines 32-34. The transitive dependency set was not verified, so conflicts or bundled Qt/VTK/torch packages are possible.",
+   "suggestion": "Ask the user for confirmation before installing, show the package list, handle pip failures with a clear message, and prefer declaring the dependency in the extension's install step or documentation. Verify asltk's transitive dependencies against Slicer-bundled packages.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "asltk version mismatch between runtime install and requirements.txt",
+   "file": "requirements.txt",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "asltk==1.1.0",
+   "explanation": "The modules install asltk==1.1.3 at runtime (CBF_ATT_ASL.py line 34, Multi_Echo_ASL.py line 34), but requirements.txt pins asltk==1.1.0. Documentation and the tested version are therefore unclear, which makes reproducibility harder.",
+   "suggestion": "Align requirements.txt and the runtime pin, and record the tested asltk version in the docs.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Smoothing parameter validation compares against wrong-case value and never fires for CBF",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 181,
+   "line_end": 187,
+   "evidence": "valid_smooth_methods = ['None', 'Gaussian', 'Median']\n...\nif args.smoothMethod == 'gaussian' and args.smoothParameter <= 0:",
+   "explanation": "The GUI passes 'Gaussian' (CBF XML line 97), but the check compares against lowercase 'gaussian', so a non-positive sigma is not rejected here. Downstream code may then fail or produce wrong output. Multi_Echo_ASL.py uses the correct capitalized comparison on line 192.",
+   "suggestion": "Compare against 'Gaussian' and 'Median' consistently, or normalize case before validation.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "outputFolder argument is parsed but never applied to output paths",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 233,
+   "line_end": 241,
+   "evidence": "out_folder=parsed.get('outputFolder', os.path.expanduser('~')),",
+   "explanation": "out_folder is only validated. Output files are written to out_cbf and out_att exactly as given (lines 130-133), so a relative output name is resolved against the process working directory. The XML description (CBF_ATT_ASL.xml lines 8-11) says the home directory is assumed when outputFolder is absent, which does not match what the code does. Multi_Echo_ASL.py has the same gap.",
+   "suggestion": "Join output file names with out_folder when they are relative, or correct the documentation.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Catalog tracks moving branch 'main' rather than a fixed revision",
+   "file": "CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 28,
+   "evidence": "set(EXTENSION_DEPENDS \"NA\") # Specified as a list or \"NA\" if no dependencies",
+   "explanation": "The catalog entry sets scm_revision to 'main', so the code built by the index can change without review. Per policy this is not a finding by itself, but the reviewed commit b805616 is not pinned.",
+   "suggestion": "Pin scm_revision to the reviewed commit or a release tag for reproducible builds.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No automated tests and documentation inconsistencies",
+   "file": "Multi_Echo_ASL/Multi_Echo_ASL.xml",
+   "line_start": 78,
+   "line_end": 101,
+   "evidence": "<description><![CDATA[The T2 value for the blood. By default, the value of 75 ms is assumed.]]></description>",
+   "explanation": "The t2gm parameter description says 'blood' when it refers to gray matter. No unit tests or sample-data test cases are present in the repository, so regressions in the CLI parsing and validation logic are not caught. The README image points to the develop branch while CMake uses main.",
+   "suggestion": "Fix the t2gm description, add tests for argument parsing and validation, and align documentation branch references.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Empty license element in module descriptors",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.xml",
+   "line_start": 14,
+   "line_end": 14,
+   "evidence": "<license/>",
+   "explanation": "The module XML lists no license, while the root LICENSE file is MIT. This is a descriptive inconsistency only and does not block distribution.",
+   "suggestion": "Fill in the license element with MIT to match the LICENSE file.",
+   "confidence": "low"
+  }
+ ],
+ "not_checked": [
+  "The asltk 1.1.3 PyPI package and its transitive dependencies (e.g., whether it pulls torch, opencv-python, or Qt/VTK-bundling packages) were not inspected.",
+  "The upstream source at scm_revision 'main' was not resolved; the reviewed commit b805616 was not verified against the files shown.",
+  "The Slicer CMake macros, the docs site, and the sample dataset on Google Drive were not accessible.",
+  "No CI or build results were available; the modules were not run.",
+  "asltk's license terms were not checked; the extension's own MIT license was verified from the LICENSE file only."
+ ],
+ "questions_for_author": []
+}

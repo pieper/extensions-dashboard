@@ -1,0 +1,189 @@
+{
+ "purpose": "A 3D Slicer extension for segmenting temporal-bone structures in CT: it resamples and rigidly registers a user's scan to a left/right atlas (fiducial + Elastix), crops an ROI, then runs a deep-learning model either in a local Docker container or on a remote ABLInfer server, and exports results for CardinalSim. It also ships a second module for batch intra-sample registration.",
+ "summary": "Useful, documented otolaryngology workflow (README tutorial, screenshots, BSD-3 license, catalog entry consistent). Two blockers-class problems: `ablinfer` is pip-installed at module import with no user consent or pin (affects the shared Slicer Python environment for every user at startup), and the build fetches the model descriptor JSON from a mutable `master` branch, without checksum, overwriting a tracked source file, so the reviewed content is not what ships. Also: TLS verification is disabled (`s.verify = False`) and server passwords are stored in plain text in Slicer settings. Tests are disabled/absent and there are minor code bugs. 🔴 Do not merge yet.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Remote-server path sets `s.verify = False` and stores the password in plain text in Slicer settings (ABLTemporalBoneSegmentationModule.py:933-938), so credentials and study data cross an unauthenticated TLS channel. SuperBuild.cmake:39-42 downloads the model descriptor that selects the container/model to run from a mutable branch with no checksum."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "ABLTemporalBoneSegmentationModule.py:23-26 runs `slicer.util.pip_install(\"ablinfer\")` at module import (i.e. at Slicer startup, unpinned, no confirmation), modifying the shared environment for users who never open the module; line 37 also globally disables urllib3 warnings. Runtime-installed packages are not installed by CMake."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "Catalog entry, EXTENSION_DEPENDS 'SlicerElastix' and build_subdirectory match CMakeLists.txt, and all Resources referenced in ABLTemporalBoneSegmentationModule/CMakeLists.txt exist. But the committed Resources/Models/ABLTempSeg.json is a 1-line placeholder and SuperBuild.cmake writes the real file into the source tree at build time without a checksum; both Testing/Python/CMakeLists.txt files have the unit-test registration commented out."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE is BSD 3-Clause (Auditory Biophysics Lab, Western University), permitting redistribution. Licenses of the separately downloaded atlas (.mha), the model JSON / Docker image from temporal-bone-segmentation, and the PyPI `ablinfer` package could not be verified from this repository."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Logic is scripted-module based and heavy CLI work is at least shown with progress, but `logging.warning` is used without `import logging` (line 1370), `Elastix.ElastixLogic()` and mutable UI state are class-level (lines 95-96, 151), work runs on the GUI thread with `processEvents`, and there is no test coverage for the main module."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README has a step-by-step tutorial with screenshots and links to the network and ablinfer; tier 1 is appropriate. It requires Docker or an external server, documents no clinical/research-use disclaimer or model validation, and has no functioning automated tests."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "`ablinfer` is pip-installed at module import, unpinned, without user consent",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 23,
+   "line_end": 26,
+   "evidence": "try:\n    import ablinfer\nexcept ModuleNotFoundError:\n    slicer.util.pip_install(\"ablinfer\")",
+   "explanation": "Slicer imports every installed module's script at startup to discover its classes, so this installs a package from PyPI into Slicer's shared Python on first start after installation, for every user, with no prompt, no version pin and no record. It also drags in `docker`/`requests` (imported at lines 18, 33) and can silently upgrade or conflict with packages Slicer bundles. Offline machines fail here and then the module cannot load at all because lines 28-33 import from the package unconditionally.",
+   "suggestion": "Remove the import-time pip_install; use the Slicer extension build system (install into the extension's own site-packages via CMake/SuperBuild, as the commented block in SuperBuild.cmake:32-36 suggests) or a user-confirmed, version-pinned install button per the ScriptedLoadableModule dependency-install convention.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "TLS certificate verification disabled for remote inference, and server password stored in plain text",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 933,
+   "line_end": 938,
+   "evidence": "            s = requests.Session()\n            s.verify = False\n            if username:\n                s.auth = (username, password)",
+   "explanation": "When the user chooses 'Run on a remote server?', the session sends the user's CT data (and Basic-Auth credentials, line 936) over a connection whose certificate is never validated, so any network attacker can intercept both. The password is additionally persisted in clear text in the Slicer settings file (`settings.setValue(\"ablinfer_server_password\", password)`, line 938) and re-loaded into the UI at startup (line 363). Line 37 suppresses the urllib3 warning that would otherwise tell the user.",
+   "suggestion": "Drop `s.verify = False` (offer an explicit, warned-about opt-in if self-signed certs must be supported), do not persist the password (or store it via a keychain), and remove the global `disable_warnings` call.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Model descriptor is downloaded from a mutable branch at build time, without checksum, overwriting a tracked source file",
+   "file": "SuperBuild.cmake",
+   "line_start": 38,
+   "line_end": 42,
+   "evidence": "## Pull the latest model JSON file on build\nset(_download_model COMMAND ${CMAKE_COMMAND}",
+   "explanation": "The build step runs urllib.request.urlretrieve against `.../temporal-bone-segmentation/master/ABLTempSeg.json` and writes the result over `${CMAKE_CURRENT_SOURCE_DIR}/ABLTemporalBoneSegmentationModule/Resources/Models/ABLTempSeg.json`. That JSON determines which container image / remote model id is executed on the user's machine, so the content that runs is whatever is on someone else's `master` at build time — not what was reviewed here — and no checksum is checked (unlike the atlas download, which does use SHA256, line 1200-1203). It also writes into the source checkout, which dirties the tree and fails on read-only sources.",
+   "suggestion": "Commit a real model descriptor and pin it, or download with a versioned URL plus SHA256 verification at runtime into the user's cache directory, not into the source tree.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Export recursively deletes an existing subfolder of the user-chosen directory",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 1393,
+   "line_end": 1396,
+   "evidence": "        if os.path.exists(dicom_dir):\n            shutil.rmtree(dicom_dir)\n        os.makedirs(dicom_dir, exist_ok=True)",
+   "explanation": "`export_for_cardinalsim` is called with a directory picked via QFileDialog (line 1038) and unconditionally `shutil.rmtree`s `<directory>/<volumeName>_dicom` if it exists, with no confirmation. If the user selects a non-empty folder (the dialog text asks for an empty one but nothing enforces it) and a folder of that name is already there, its contents are destroyed irreversibly. The name is derived from a user-editable volume name.",
+   "suggestion": "Refuse to write into a non-empty directory, or ask for confirmation before removing anything, and use a temporary folder plus explicit copy.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Option deletes every fiducial node in the scene without confirmation",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 1174,
+   "line_end": 1176,
+   "evidence": "    def clear_all_markups_from_scene():\n        for n in slicer.mrmlScene.GetNodesByClass(\"vtkMRMLMarkupsFiducialNode\"): slicer.mrmlScene.RemoveNode(n)",
+   "explanation": "Called from `finalize_input` (line 606) whenever the 'Clear All Markups When Loading New Input Volume' checkbox is ticked. It removes all fiducial markups in the scene, including ones the user created for other purposes, with no confirmation and no undo prompt.",
+   "suggestion": "Only remove markups created by this module (track their node IDs), or ask for confirmation.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Global warning suppression at import",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 37,
+   "line_end": 37,
+   "evidence": "urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)",
+   "explanation": "Executed when Slicer imports the module at startup, this silences insecure-request warnings for all of Slicer's Python, hiding the `verify = False` issue from the user and from other code.",
+   "suggestion": "Remove it; if truly needed, scope suppression to the single request.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "`logging.warning` used without importing logging, so remote model retrieval failure raises NameError",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 1366,
+   "line_end": 1370,
+   "evidence": "                logging.warning(\"Encountered an error retrieving model from remote: \" + str(e))",
+   "explanation": "`logging` is never imported in this file. When fetching the model from a remote server fails, the except handler raises NameError instead of degrading gracefully to the locally configured model, and the user sees a confusing traceback.",
+   "suggestion": "Add `import logging` (or use `slicer.util.errorDisplay`/print as elsewhere in the file).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Declared module dependencies are empty although Elastix is required at import",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 82,
+   "line_end": 82,
+   "evidence": "        self.parent.dependencies = []",
+   "explanation": "The module imports `Elastix` at line 16 and `IntraSampleRegistration.py` imports it at line 4; if SlicerElastix is missing, the module fails to load entirely instead of Slicer warning the user. Same for IntraSampleRegistration.py:87.",
+   "suggestion": "Set `self.parent.dependencies = [\"Elastix\"]` (and in the second module) so Slicer reports the missing dependency.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Committed model descriptor is a placeholder; no unit tests are registered",
+   "file": "ABLTemporalBoneSegmentationModule/Resources/Models/ABLTempSeg.json",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "you shouldn't see this, this file should be retrieved during build",
+   "explanation": "The file installed by CMake (CMakeLists.txt:20) is not valid JSON, so any build that does not run the SuperBuild download (offline build, download failure, or a user running from a checkout) produces a module whose inference step fails with 'Unable to load inference model'. Additionally both Testing/Python/CMakeLists.txt files keep the unittest registration commented out, and ABLTemporalBoneSegmentationModule.py defines no test class at all.",
+   "suggestion": "Commit a valid, versioned model descriptor and add at least a smoke test (module loads, atlas/mask files load) for both modules.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Elastix logic and mutable UI state created/held at class level",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 95,
+   "line_end": 96,
+   "evidence": "    registrationSteps = []\n    volumePairs = []",
+   "explanation": "In IntraSampleRegistration.py these lists and `elastixLogic = Elastix.ElastixLogic()` (line 100) are class attributes, and ABLTemporalBoneSegmentationModule.py:151 instantiates `Elastix.ElastixLogic()` at class definition time (i.e. at import). State therefore leaks between widget instances/reloads and an Elastix logic object is constructed even if the user never opens the module.",
+   "suggestion": "Initialise these in `__init__`/`setup` as instance attributes.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No research/clinical-use disclaimer or model validation information",
+   "file": "README.md",
+   "line_start": 5,
+   "line_end": 13,
+   "evidence": "This 3D Slicer module handles spacing resampling, fiducial registration, rigid registration, and inference of the major structures of CT temporal bone scans.",
+   "explanation": "The module produces anatomical segmentations of temporal bone structures used downstream (e.g. CardinalSim), but the README gives no statement that it is for research use, no accuracy/validation figures, and no model provenance beyond a link; the Docker image version actually run depends on the remote model descriptor.",
+   "suggestion": "Add a research-use disclaimer and cite the network's validation study and image version.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "IDE project files are committed despite being git-ignored",
+   "file": "gitignore",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "# Idea\n.idea/",
+   "explanation": ".idea/ is listed in .gitignore yet 9 .idea files (including a 26 KB .idea/workspace.xml that typically records local paths and usernames) are in the repository; .gitignore also carries leftovers from an unrelated project (SkullThicknessMapping lines 127-130). Harmless but noise.",
+   "suggestion": "Remove the committed .idea files and the unrelated ignore entries.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The `ablinfer` PyPI package (licence, dependencies, what it sends to Docker/remote servers) and the `temporal-bone-segmentation` repository (model JSON content, Docker image, atlas files, licence) were not accessible from this environment.",
+  "`.idea/workspace.xml`, `.idea/inspectionProfiles/Project_Default.xml`, `Parameters_Rigid_Sumit.txt` and the binary Resources (atlas .mha download, masks, icons, Images/*.png) were not read; the .mha atlas is downloaded at runtime and its content was not inspected.",
+  "Runtime behaviour (Docker image pull/exec, remote inference payloads, whether the model descriptor references a specific image tag) could not be executed or verified.",
+  "The exact commit 227bc565ddec65509bac6dcbbddd6c02e718eaeb was not resolvable here; all citations are from the file contents supplied for review."
+ ],
+ "questions_for_author": [
+  "Why is `ablinfer` installed with `pip_install` at import rather than shipped by the extension build, and which version of it is expected?",
+  "Is `s.verify = False` required for your server deployment, and can it be replaced by a proper certificate or an explicit opt-in with a warning?",
+  "What does the downloaded `ABLTempSeg.json` contain (container image tag / remote model id), and can it be pinned with a checksum instead of pulled from `master` at build time?",
+  "What are the licences of the atlas volumes, the trained model and the Docker image distributed from the `temporal-bone-segmentation` repository?"
+ ]
+}

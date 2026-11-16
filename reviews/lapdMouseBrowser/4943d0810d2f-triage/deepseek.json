@@ -1,0 +1,191 @@
+{
+ "purpose": "lapdMouseBrowser lets Slicer users browse the lapdMouse (mouse lung anatomy + aerosol deposition) archive hosted at NIEHS, download datasets to a local cache folder, and load them into Slicer with preconfigured display settings; a second module converts *.meta airway trees and *.csv compartment measurements into mesh models. It targets researchers working with these mouse lung datasets.",
+ "summary": "Two scripted modules plus a bundled file index (allfiles.json). All network access is HTTPS to a fixed NIH host, downloads are user-confirmed with size shown, nothing is installed, no credentials, telemetry or code execution; license is BSD-3-Clause. Main problems are quality: a registered unit test that depends on files under ~/Documents and will fail on every build machine, broken dead helper functions, an updateForm IndexError path, downloads run on the GUI thread, and MRML colour-table nodes added to the scene at module registration (affects users who never open the module). No blocking admission issue found.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Reviewed lapdMouseDBBrowser.py and lapdMouseVisualizer.py: all I/O is HTTPS GET from https://cebs-ext.niehs.nih.gov/cahs/file/download/lapd/ into a user-chosen cache folder; no eval/exec/pickle/pip/subprocess/credentials/telemetry. Minor issues only: file deletion without a confirmation dialog (deleteFiles) and a legacy-TLS renegotiation option in the unused _canAccess check."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "No packages installed and no sys.path/env changes, but lapdMouseDBBrowser.__init__ calls loadColorTables(), adding three MRML colour-table nodes (two with 5000 colours each) to the scene when the scripted module is registered at startup, i.e. also for users who never open the module; setupSegmentsColorTable/outlets also call random.seed(3), reseeding the global RNG used by other code."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists lists every imported .py and resource (Resources/allfiles.json, all three icons) and EXTENSION_DEPENDS \"NA\" matches build_dependencies []; catalog uses scm_revision \"master\" (branch, allowed). But Testing/Python/CMakeLists.txt only contains a commented-out slicer_add_python_unittest for a file that does not exist, and the registered tests are effectively no-ops."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "License.txt is a complete BSD-3-Clause text ('Copyright 2018 University of Iowa ... Redistribution and use in source and binary forms ... are permitted'), and README.md states '**lapdMouseBrowser** is distributed under [3-clause BSD license](License.txt)'. No third-party code or model weights are bundled; allfiles.json is only a metadata list."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "lapdMouseVisualizerTest reads ~/Documents/data/lapdMouseTest/... unconditionally so the registered ctest fails on any clean machine; updateForm() continues after finding no selection and indexes self.datasets[-1]; module-level helpers (downloadItem, getStatus, summarizeItems, testDBAccess) reference keys never produced by allfiles.json or call methods unbound; downloads run synchronously on the GUI thread behind processEvents."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README.md documents installation, storage folder, standard/custom download workflows, the *.meta/*.csv visualizer and links tutorial videos; a peer-reviewed reference (J Appl Physiol 2020) and the archive DOI are cited, and the data itself is hosted publicly. Tests are placeholders, which limits verification but does not block use."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Registered unit test depends on files in ~/Documents and fails on every build machine",
+   "file": "lapdMouseVisualizer/lapdMouseVisualizer.py",
+   "line_start": 513,
+   "line_end": 517,
+   "evidence": "    measurementsFile =  os.path.join(os.path.expanduser(\"~\"),\\\n                                     'Documents/data/lapdMouseTest/test/test_LobesDeposition.csv')\n    slicer.util.loadNodeFromFile(measurementsFile, 'TableFile')",
+   "explanation": "lapdMouseVisualizer/CMakeLists.txt registers this test with slicer_add_python_unittest; _internalTest() unconditionally loads a table and a *.meta tree from a fixed path in the developer's home directory. On CI or any other machine the load returns nothing, so slicer.util.getFirstNodeByClassByName('vtkMRMLTableNode','test_LobesDeposition') is None and logic.measurementsTable2Model(None) raises AttributeError. Every build's test run therefore reports a failure that is unrelated to real regressions, and the test verifies nothing about the module on the machines that matter.",
+   "suggestion": "Ship the two small test files under lapdMouseVisualizer/Testing/Data, register them with slicer_add_test / --testing-data-dir, and skip or fail gracefully when they are absent.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Colour-table nodes are added to the MRML scene when the module is registered, not when it is used",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 743,
+   "line_end": 746,
+   "evidence": "    self.parent.acknowledgementText = \"\"\"\n    This work was supported in part by NIH project R01ES023863.\n\"\"\" # replace with organization, grant and thanks.\n    lapdMouseDBBrowser.loadColorTables()",
+   "explanation": "Slicer instantiates every scripted module class during startup registration, so loadColorTables() (lines 748-813) runs for all users with the extension installed, even those who never open lapdMouse or use the module. It adds 'lapdMouseLobes', 'lapdMouseSegments' and 'lapdMouseOutlets' nodes, two of them with 5000 colours, into every new scene; these are hidden from editors but are still scene content that gets serialized into saved .mrb/.mrml files of unrelated user scenes.",
+   "suggestion": "Create the colour tables lazily (on first use in loadFiles/the browser window) or check for an existing scene and only add them when data is actually being loaded.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Seeds the global random module from a colour-table helper",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 789,
+   "line_end": 792,
+   "evidence": "    import random\n    random.seed(3) # seed 3: nothing too dark and first few generations reasonably well contrasted\n    for i in range (1,numSegments):\n      colors.SetColor(i, str(i),random.uniform(0.0,1.0),random.uniform(0.0,1.0),random.uniform(0.0,1.0),1)",
+   "explanation": "random.seed(3) reseeds Python's global RNG shared with all other Slicer modules and scripts (repeated in setupOutletsColorTable at line 810). Any other code relying on random for e.g. sampling or shuffling gets a deterministic, correlated state after Slicer starts with this extension installed, which is a global side effect for users who never open the module.",
+   "suggestion": "Use a private instance, e.g. rng = random.Random(3) and rng.uniform(...).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "updateForm() proceeds with no dataset selected and reads datasets[-1]",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 342,
+   "line_end": 347,
+   "evidence": "    if datasetId==-1: # clear form\n      pass\n    datasetname = self.datasets[datasetId]\n    self.customFormName.text = datasetname",
+   "explanation": "The 'clear form' branch is a no-op: execution continues and self.datasets[-1] is used, which shows the last dataset when nothing is selected and raises IndexError when the dataset list is empty (e.g. the archive is unreachable so only local folders were scanned and none exist). Called from onDatasetChanged, updateForm and after downloads.",
+   "suggestion": "return after clearing the widgets when datasetId==-1.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Downloads and loading run synchronously on the GUI thread, and Cancel does not interrupt a download",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 447,
+   "line_end": 449,
+   "evidence": "      print('Downloading '+remoteName)\n      t0 = time.time()\n      lapdMouseDBUtil(self.remoteFolderUrl).downloadFile(remoteName, localName)",
+   "explanation": "The per-file download runs inside the button slot, kept responsive only by slicer.app.processEvents() in the loop; pd.wasCanceled is tested only between files, so cancelling a multi-GB file has no effect. During a large transfer the UI remains fragile (re-entrant events, possible frozen window) and the progress dialog reports file counts rather than bytes.",
+   "suggestion": "Move the transfer to a worker thread or slicer.cli-style background task with a real cancellation check inside the read loop and byte-level progress.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "deleteFiles removes user files with no confirmation and no way to undo",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 466,
+   "line_end": 472,
+   "evidence": "  def deleteFiles(self, datasetname, files):\n    for f in files:\n      remoteName = os.path.join(datasetname,f.replace('/',os.sep))\n      localName = os.path.join(self.localCacheFolder,remoteName)\n      if os.path.exists(localName):\n        print(\"deleting file \"+localName)\n        os.remove(localName)",
+   "explanation": "Clicking 'delete selected files' permanently deletes the selected files from the user's cache folder without any Qt confirmation dialog, and the storage folder is freely configurable via ctkDirectoryButton (line 865-870), so a mis-click or a folder pointed at a data directory deletes previously downloaded multi-GB data irrecoverably. Deletion is at least confined to <cache>/<dataset>/<name>.",
+   "suggestion": "Ask for confirmation listing the files before deleting, and refuse to delete anything outside the configured cache folder.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "Downloaded files are not verified against the archive's MD5SUMS",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 25,
+   "line_end": 30,
+   "evidence": "    httpCode = urllib.request.urlopen(self.gdriveURL+'m01/MD5SUMS',context=ctx).getcode()",
+   "explanation": "The archive publishes per-dataset MD5SUMS (present throughout Resources/allfiles.json, e.g. 'm01/MD5SUMS'), but the code only checks HTTP 200 for m01/MD5SUMS and never validates downloaded content; truncated or corrupted transfers are detected only by os.path.exists before the file is loaded, and Slicer then reports a load error instead of a clear integrity error.",
+   "suggestion": "Fetch MD5SUMS per dataset and verify hash after download, retrying or reporting a checksum mismatch.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "TLS context enables legacy renegotiation in the availability check",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 22,
+   "line_end": 23,
+   "evidence": "    ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)\n    ctx.options |= 0x4  # OP_LEGACY_SERVER_CONNECT",
+   "explanation": "OP_LEGACY_SERVER_CONNECT (0x4) re-allows insecure renegotiation in this context, weakening TLS against renegotiation-style attacks. Impact is small because the context is used only in _canAccess, which is itself only reached from the broken module-level testDBAccess() (line 193-200) and by default downloads use a normal validating context.",
+   "suggestion": "Drop the option, or set it only after an explicit legacy-server failure and document why.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Dead helper functions with wrong keys and an unbound-method call",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 193,
+   "line_end": 200,
+   "evidence": "  def testDBAccess(db):\n    serverStatus = 'unknown'\n    if lapdMouseDBUtil._canAccess():",
+   "explanation": "_canAccess is called on the class without an instance, raising TypeError (missing self). Similarly downloadItem/getStatus/summarizeItems (lines 117-191) read item['localName'], item['remoteName'] and item['status'], keys that do not exist in Resources/allfiles.json (entries only have name/isFolder/size/modificationTimestamp, e.g. lines 2-7). This is leftover CLI code; if it were ever called it would silently fail or raise, so it should be removed or fixed.",
+   "suggestion": "Delete the unused module-level helpers or port them to the dictionary structure actually produced by _listFolderRemote.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Directory listing slices off the first character of the path",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 88,
+   "line_end": 92,
+   "evidence": "    if (dirname == '.' or os.path.commonprefix([dirname,oneFile['name']]) == dirname):\n      remainingPath = oneFile['name'][len(dirname)+1:]",
+   "explanation": "_listFolderRemote('') computes remainingPath = name[1:], dropping the first character of the name; the depth filter then accidentally still works only because every entry has the same 1-character offset. Any archive with differently shaped top-level names, or a caller passing a trailing separator, would list the wrong entries.",
+   "suggestion": "Normalize the prefix (strip separators) before slicing, and use a path-component comparison rather than os.path.commonprefix.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Tests are placeholders and the Python test CMake file is commented out",
+   "file": "lapdMouseDBBrowser/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "\n#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "Both Testing/Python/CMakeLists.txt files only reference a commented-out test whose file does not exist in the repository, and lapdMouseDBBrowserTest.test_lapdMouseDBBrowser1 is a no-op ('self.delayDisplay(\"Test passed!\")', line 915-916). No test covers the download path, JSON-based listing, or the .meta/.csv conversion beyond the file-dependent visualizer test.",
+   "suggestion": "Add a hermetic unit test for readMetaTree/tree2Mesh and for the listing logic using the bundled allfiles.json.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Modules register under a custom category while the extension is listed as Informatics",
+   "file": "lapdMouseDBBrowser/lapdMouseDBBrowser.py",
+   "line_start": 736,
+   "line_end": 738,
+   "evidence": "    self.parent.title = \"lapdMouseDBBrowser\"\n    self.parent.categories = [\"lapdMouse\"]",
+   "explanation": "Both modules declare categories = [\"lapdMouse\"] whereas the catalog entry says Informatica/Informatics; users looking in the Informatics category will not find the modules and README.md tells them to look under 'lapdMouse', so behaviour is inconsistent with the catalog metadata.",
+   "suggestion": "Use ['Informatics'] or a category consistent with the catalog entry.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "The full 9590-line Resources/allfiles.json was only sampled and searched (patterns for '..', 'http', script/exec) rather than read end to end.",
+  "Binary files (lapdMouseBrowser.png, Screenshots/*.png, Resources/Icons/*.png) were not inspected; their content and provenance are unverified.",
+  "I did not verify that commit 4943d0810d2ff91c4b07e938102015d91725e875 actually matches the file contents provided, nor the current state of the master branch referenced by scm_revision.",
+  "Behaviour of the remote NIEHS cebs-ext.niehs.nih.gov endpoints (HTTP status codes, redirects, whether the file URLs return the expected payloads, and the archive's own data terms of use) could not be checked without network access.",
+  "No build, ctest run or Slicer launch was possible, so it is unverified whether the studio's tests, CMake packaging and Python 3 syntax work in practice.",
+  "Whether ~/Documents/data/lapdMouseTest test data exists on the extension build machine is unknown; the finding assumes a standard clean machine."
+ ],
+ "questions_for_author": [
+  "Could the visualizer test data be bundled under Testing/Data so the registered ctest passes on clean machines?",
+  "Is it necessary to create the lapdMouse colour tables during module registration, or can they be created when data is first loaded?",
+  "Should 'delete selected files' ask for confirmation before removing previously downloaded data?",
+  "Do the archive's usage terms permit redistribution of downloaded data, and does the module need to surface those terms?"
+ ]
+}

@@ -1,0 +1,1366 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Identifiable DICOM data uploaded to a third-party cloud endpoint without de-identification or explicit consent",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 585,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "Identifiable DICOM data uploaded to a third-party cloud endpoint without de-identification or explicit consent",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 585,
+     "line_end": 590,
+     "evidence": "                    # Create a new neuropacs order               \n                    orderId = self.npcs.new_job()\n                    logging.info(f\"neuropacs order '{orderId}' created\")\n\n                    # Upload dataset\n                    self.npcs.upload_dataset_from_path(orderId, selectedFolderPath)",
+     "explanation": "selectedFolderPath comes from Slicer's DICOM database (line 461: `dataset_folder = os.path.dirname(first_file_path)`), i.e. the raw .dcm files including PatientName, PatientID, birth date and study metadata. The whole folder is sent to the hard-coded endpoint `https://jdfkdttvlf.execute-api.us-east-1.amazonaws.com/prod` (line 502). A search of the repository for 'de-identif', 'anonym', 'consent', 'HIPAA', 'privacy' or 'PHI' returns no matches, and the UI (Resources/UI/NeuropacsScriptedModule.ui) contains no notice or confirmation dialog. A clinician clicking 'Run analysis' therefore transmits identifiable patient imaging to a third party with no informed opt-in and no way to know what is included in the payload.",
+     "suggestion": "Add an explicit, one-time consent/notice dialog that names the destination, lists the data sent, and states whether identifiers are included; offer de-identification (e.g. DICOM anonymization before upload) or document that the service requires identifiable data and that the user is responsible for consent; document the endpoint and privacy policy in the README and module help.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 585
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Core upload behaviour is delegated to a PyPI package fetched and auto-upgraded at runtime",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 143,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Core upload behaviour is delegated to a PyPI package fetched and auto-upgraded at runtime",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 209,
+     "line_end": 224,
+     "evidence": "        try:\n            response = requests.get(\"https://pypi.org/pypi/neuropacs/json\")\n            latest_version = response.json()[\"info\"][\"version\"]\n        except Exception:\n            print(\"Error fetching the latest version of neuropacs from PyPI.\")\n            return",
+     "explanation": "The code that actually serialises and uploads the DICOM data (`neuropacs.init`, `upload_dataset_from_path`, `get_results`) is not in this repository; it is installed from PyPI at runtime and, worse, always upgraded to whatever version PyPI reports as latest (line 224 `slicer.util.pip_install(f\"neuropacs=={latest_version}\")`). The reviewed source therefore does not determine what is transmitted, where, or with which dependencies, and the behaviour can change without any change to this repository or to the catalog revision.",
+     "suggestion": "Pin a reviewed version of the neuropacs client (or vendor the upload code), remove the automatic 'latest' upgrade, and show the user a confirmation before installing/upgrading anything.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 143
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "PyPI version lookup has no timeout and silently proceeds on failure",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 211,
+     "line_end": 211,
+     "evidence": "response = requests.get(\"https://pypi.org/pypi/neuropacs/json\")",
+     "explanation": "requests.get is called without a timeout (line 211). A stalled network can hang the GUI thread. On any exception the function returns silently (lines 213-215), so the subsequent 'import neuropacs' can run against an older or missing package without the user being told.",
+     "suggestion": "Add a timeout, run the install off the GUI thread with progress, and surface a clear error when the package is missing or outdated.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 211
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Help PDF is not installed by CMake, so the Help button fails in the packaged extension",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "NeuropacsScriptedModule/CMakeLists.txt",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Help PDF is not installed by CMake, so the Help button fails in the packaged extension",
+     "file": "NeuropacsScriptedModule/CMakeLists.txt",
+     "line_start": 9,
+     "line_end": 12,
+     "evidence": "set(MODULE_PYTHON_RESOURCES\n  Resources/Icons/${MODULE_NAME}.png\n  Resources/UI/${MODULE_NAME}.ui\n  )",
+     "explanation": "The module resolves its help file at runtime as `os.path.join(modulePath, 'Resources', 'Docs', 'neuropacs_instructions.pdf')` (NeuropacsScriptedModule.py:534) and shows 'PDF not found' if missing (line 541). Resources/Docs/neuropacs_instructions.pdf exists in the repository but is not listed in MODULE_PYTHON_RESOURCES, so it is not installed into the extension build and the Help button is broken for every catalog user.",
+     "suggestion": "Add `Resources/Docs/neuropacs_instructions.pdf` to MODULE_PYTHON_RESOURCES (and the Examples PNG if it should ship).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/CMakeLists.txt",
+      "line": 9
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Medical data is sent to a hosted third-party endpoint with no disclosure or opt-in beyond an API key",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 502,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Medical data is sent to a hosted third-party endpoint with no disclosure or opt-in beyond an API key",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 502,
+     "line_end": 502,
+     "evidence": "self.npcs = neuropacs.init(\"https://jdfkdttvlf.execute-api.us-east-1.amazonaws.com/prod\", enteredKey, \"Slicer\")",
+     "explanation": "The hard-coded AWS API endpoint receives DICOM data from the user's machine (lines 502 and 590). Nothing in the UI, the README or the module warns that images leave the computer, where they go, or how they are retained. The only gate is the 'Run analysis' click. Clinicians could upload identifiable patient data without informed consent or knowledge of the data-processing terms.",
+     "suggestion": "Add an explicit informed-consent dialog before the first upload that names the destination, the data sent (including identifiers in DICOM headers) and the retention terms. Link to the privacy policy and document the transmission in the README.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 502
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Patient names are stored in plaintext in a config file in Documents",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 244,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Patient names stored in plaintext in a JSON config file",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 242,
+     "line_end": 245,
+     "evidence": "    def storeNeuropacsOrder(self, patientId, orderId):\n        \"\"\"Associate an orderId with the patient.\"\"\"\n        self.neuropacsOrderMap[orderId] = patientId  # Store the order associated with the dataset\n        self.save_config()  # Save the updated map to a file",
+     "explanation": "`selectedPatient` is the DICOM patient name (line 464 `self.ui.datasetComboBox.addItem(patientName, dataset_folder)`), and it is written unencrypted to `slicer_neuropacs.config` in the user's Documents folder (default at line 73) and displayed in the order table. On a shared clinical workstation this leaves PHI at rest in a plain file with no access control or warning.",
+     "suggestion": "Store only the order ID and a non-identifying label (or a hash), or warn the user that the config file contains patient identifiers and where it is written.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 242
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Patient names are stored in plaintext in a config file in Documents",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 242,
+     "line_end": 245,
+     "evidence": "self.neuropacsOrderMap[orderId] = patientId  # Store the order associated with the dataset\n        self.save_config()  # Save the updated map to a file",
+     "explanation": "storeNeuropacsOrder writes orderId -> patient name (from DICOM PatientName via the dropdown text) to slicer_neuropacs.config in the user's Documents folder (lines 244, 604, 228-231). This persists protected health information in an unencrypted file that is not mentioned to the user, and the file is kept indefinitely after the analysis.",
+     "suggestion": "Store only the neuropacs order ID, or a pseudonymous label, and not the patient name. Document the file and its contents if it must be kept.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 244
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Runtime pip install into Slicer's shared Python environment without user confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 222,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Runtime pip install into Slicer's shared Python environment without user confirmation",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 222,
+     "line_end": 224,
+     "evidence": "        if needToInstallNeuropacs:\n            print(f\"Upgrading neuropacs to version {latest_version}...\")\n            slicer.util.pip_install(f\"neuropacs=={latest_version}\")",
+     "explanation": "Pressing 'Validate' silently installs/upgrades a third-party package into the Slicer Python environment shared by all extensions, with no confirmation prompt and no visibility into the package's declared requirements. If `neuropacs` pins or downgrades packages Slicer bundles (numpy, scipy, SimpleITK, requests, ...) or pulls heavy dependencies, every other extension in that Slicer installation is affected. The transitive dependency set could not be inspected from this repository.",
+     "suggestion": "Ask the user before installing, use slicer.util.pip_install only after explicit confirmation, and verify/declare the dependency set (e.g. a requirements file) so bundled-package pins can be reviewed.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 222
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Runtime pip installation of neuropacs from PyPI at button press without user confirmation",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 222,
+     "line_end": 224,
+     "evidence": "if needToInstallNeuropacs:\n            print(f\"Upgrading neuropacs to version {latest_version}...\")\n            slicer.util.pip_install(f\"neuropacs=={latest_version}\")",
+     "explanation": "On API key validation, the module queries PyPI and calls slicer.util.pip_install(f'neuropacs=={latest_version}') with no user prompt (lines 222-224). This changes Slicer's shared Python environment for all modules, and the package's own dependencies are installed without a pin or review. The package is fetched from PyPI at run time rather than declared through the extension build, so the installed version is whatever is latest at that moment.",
+     "suggestion": "Ask for confirmation before installing, and document the package and version. Check that its dependencies do not downgrade or bring their own Qt, VTK or torch. Avoid the unbounded PyPI lookup with no timeout (line 211) and handle failure explicitly.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 222
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "Uploads may send an entire DICOM storage folder, not the selected series, to a third-party cloud",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 461,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Uploads may send an entire DICOM storage folder, not the selected series, to a third-party cloud",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 461,
+     "line_end": 464,
+     "evidence": "dataset_folder = os.path.dirname(first_file_path)\n\n# Add the dataset name and file path to the dropdown\nself.ui.datasetComboBox.addItem(patientName, dataset_folder)",
+     "explanation": "The dataset path is derived as the parent directory of the first file of the first series of each study (lines 455-461). Slicer's DICOM database typically stores many patients' files in one flat directory, so dirname(first_file) can contain other patients' data. onNeuropacsButton then uploads that whole folder with upload_dataset_from_path (line 590). Unrelated patients' medical images could leave the machine, and the user would not know the scope.",
+     "suggestion": "Upload only the files of the selected series or study, for example by copying them to a temporary folder or passing an explicit file list. Show the exact upload scope to the user before transmitting.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 461
+     }
+    }
+   ],
+   "id": "D7"
+  },
+  {
+   "title": "Widget adds to self.layout in __init__, before setup() creates it",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 76,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Widget adds to self.layout in __init__, before setup() creates it",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 76,
+     "line_end": 81,
+     "evidence": "        self.neuropacsConfigPath = default_path\n        #     # self.load_npcs_file_selector(qt.QStandardPaths.writableLocation(qt.QStandardPaths.DocumentsLocation) + \"/slicer_neuropacs.config\")\n        # else:\n        #     self.load_npcs_file_selector(last_used_path)\n        #     self.neuropacsConfigPath = last_used_path\n        self.load_npcs_file_selector(default_path)",
+     "explanation": "load_npcs_file_selector (lines 111-114) does `self.layout.addWidget(parametersCollapsibleButton)`, but in Slicer's ScriptedLoadableModuleWidget `self.layout` is assigned in setup() (`self.layout = self.parent.layout()`), not in __init__. Constructing the widget therefore raises AttributeError before the UI is built, so the module panel would fail to appear. I could not execute Slicer to confirm, but the ordering is inconsistent with the base class contract.",
+     "suggestion": "Move the config-file selector creation into setup() after `ScriptedLoadableModuleWidget.setup(self)` and after the .ui widget is added.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 76
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Widget builds its UI into self.layout from __init__ before setup()",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 81,
+     "line_end": 81,
+     "evidence": "self.load_npcs_file_selector(default_path)",
+     "explanation": "__init__ calls load_npcs_file_selector, which adds a collapsible button and form to self.layout (lines 81, 112-114). The layout is normally created in setup(), so this call may fail or add widgets to the wrong place. A second, unused configPathFileSelector is also created here.",
+     "suggestion": "Move widget construction into setup() after ScriptedLoadableModuleWidget.setup(self) and remove the dead code.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 81
+     }
+    }
+   ],
+   "id": "D8"
+  },
+  {
+   "title": "Malformed logging call in the analysis error handler",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 147,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Malformed logging call in the analysis error handler",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 615,
+     "line_end": 618,
+     "evidence": "            except Exception as e:\n                self.ui.infoLabel.setText(\"Failed to run analysis.\")\n                qt.QApplication.processEvents()\n                logging.error(\"Failed to run neuropacs analysis: \", str(e))",
+     "explanation": "`logging.error` is called with two positional arguments and no format placeholder, which raises a logging TypeError and hides the real error; the user only sees 'Failed to run analysis.' with no detail.",
+     "suggestion": "Use `logging.error(\"Failed to run neuropacs analysis: %s\", e)` and surface the message to the user.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 147
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Malformed logging call and broad error swallowing",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 618,
+     "line_end": 618,
+     "evidence": "logging.error(\"Failed to run neuropacs analysis: \", str(e))",
+     "explanation": "logging.error(\"Failed to run neuropacs analysis: \", str(e)) passes an extra positional argument with no format placeholder, so the logging module reports an internal formatting error and the real message is lost. Several handlers (e.g. the validate and delete paths) catch Exception and only log or print, so users see a generic failure with no detail.",
+     "suggestion": "Use logging.error(\"Failed to run neuropacs analysis: %s\", e) or an f-string, and show the error to the user with slicer.util.errorDisplay.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 618
+     }
+    }
+   ]
+  },
+  {
+   "title": "No meaningful automated test",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 641,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No meaningful automated test",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 641,
+     "line_end": 646,
+     "evidence": "    def test_NeuropacsScriptedModule1(self):\n        \"\"\"Integration tests\"\"\"\n\n        self.delayDisplay(\"Starting the test\")\n\n        self.delayDisplay(\"Test passed\")",
+     "explanation": "The registered unittest contains no assertions, and NeuropacsScriptedModule/Testing/Python/CMakeLists.txt has its only test line commented out, so the extension's CI provides no functional coverage of the module.",
+     "suggestion": "Add at least a widget-creation test (which would also catch the self.layout problem) and a config-file round-trip test.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 641
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Test case is a placeholder and does not test any behavior",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 644,
+     "line_end": 646,
+     "evidence": "self.delayDisplay(\"Test passed\")",
+     "explanation": "NeuropacsScriptedModuleTest.test_NeuropacsScriptedModule1 only calls delayDisplay and asserts nothing. The Testing/Python CMake registration is commented out. The module's logic (config handling, order map, dataset selection) has no automated tests.",
+     "suggestion": "Add unit tests for the config and order-map logic with a mocked neuropacs client, and register them in CMake.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 646
+     }
+    }
+   ]
+  },
+  {
+   "title": "Report PNG loaded as a Slicer volume",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "flash-lite"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 291,
+   "findings": [
+    {
+     "reviewer": "flash-lite",
+     "severity": "minor",
+     "title": "Report PNG loaded as a Slicer volume",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 291,
+     "line_end": 302,
+     "evidence": "    def display_png_in_slicer(self, file_path):\n        # Load the PNG as a volume\n        success, volume_node = slicer.util.loadVolume(file_path, returnNode=True)\n        \n        if success:\n            # Set up the slice viewer to show the PNG image\n            slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutOneUpRedSliceView)\n            red_logic = slicer.app.layoutManager().sliceWidget(\"Red\").sliceLogic()\n            red_logic.GetSliceCompositeNode().SetBackgroundVolumeID(volume_node.GetID())\n        else:\n            print(\"Failed to load and display the PNG image.\")",
+     "explanation": "When downloading a report in PNG format, the code attempts to load it via slicer.util.loadVolume and display it in the red slice viewer. However, `slicer.util.loadVolume` interprets 2D PNG images (such as biomarker reports) as scalar volumes/architectures, which can cause unexpected volume registration, scaling issues, or clutter the MRML scene with non-imaging report artifacts. While not a security concern, it is a soundness/correctness issue in how reports are rendered.",
+     "suggestion": "Use a suitable document or image viewer widget (or save/display appropriately) rather than loading report PNGs into the 3D Slicer volume hierarchy as anatomical volumes.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 291
+     }
+    }
+   ]
+  },
+  {
+   "title": "Report download uses file_path even when the user cancels the save dialog",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 267,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Report download uses file_path even when the user cancels the save dialog",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 267,
+     "line_end": 285,
+     "evidence": "            file_dialog = qt.QFileDialog()\n            file_path = file_dialog.getSaveFileName(None, \"Save Report\", f\"neuropacs_{orderId}.{format}\")\n\n            if file_path:",
+     "explanation": "When the user cancels, file_path is empty and the code still calls display_png_in_slicer('') / display_text_in_slicer('') (lines 282-285), which fails to load and then reports 'downloaded successfully at ' (line 289). The report is also fetched from the server before the user chooses a destination.",
+     "suggestion": "Return early when the dialog is cancelled and only fetch/display after a valid path is chosen.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 267
+     }
+    }
+   ]
+  },
+  {
+   "title": "Report text is injected into the Slicer main window layout",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 314,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Report text is injected into the Slicer main window layout",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 313,
+     "line_end": 324,
+     "evidence": "        main_window = slicer.util.mainWindow()\n        central_widget = main_window.centralWidget()\n\n        # Create a layout if not already present\n        layout = central_widget.layout()",
+     "explanation": "Adding a QTextEdit to the main window's central widget layout modifies Slicer's global UI from a module and can leave a stray widget (or a re-parented layout) behind after the module is closed, affecting the whole application session.",
+     "suggestion": "Show the report in a module-owned dialog or in the module panel instead of the main window layout.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 314
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unbound `status` when check_status raises an unexpected error",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 143,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Unbound `status` when check_status raises an unexpected error",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 383,
+     "line_end": 391,
+     "evidence": "            try:\n                status = self.npcs.check_status(order)  \n            except Exception as e:\n                if (\"Bucket not found\") in str(e):\n                    exp_orders.append(order)\n                    continue\n\n            status_info = self.__extractInfoFromStatus(status)",
+     "explanation": "Any exception other than 'Bucket not found' (network error, expired API key, server error) falls through with `status` undefined, so populateOrderTable raises UnboundLocalError and the whole table refresh fails instead of reporting the problem.",
+     "suggestion": "Handle the general exception case (continue with an error status or re-raise with a user-visible message).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 143
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Uncaught branch leaves 'status' undefined or stale in populateOrderTable",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 383,
+     "line_end": 390,
+     "evidence": "except Exception as e:\n                if (\"Bucket not found\") in str(e):\n                    exp_orders.append(order)\n                    continue\n\n            status_info = self.__extractInfoFromStatus(status)",
+     "explanation": "If check_status raises an exception other than one containing 'Bucket not found', the except block does nothing and execution continues to use 'status'. That variable is either undefined (NameError, aborting the table refresh) or left over from the previous row (wrong data shown). The error is not reported to the user.",
+     "suggestion": "Handle the other exception paths explicitly, for example by logging the error and continuing to the next order, and do not reuse the previous status.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 147
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unchecked indexing of series/files and only the first series of the first study is offered",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 451,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Unchecked indexing of series/files and only the first series of the first study is offered",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 451,
+     "line_end": 464,
+     "evidence": "                series = dicomDatabase.seriesForStudy(study)\n\n                first_series = series[0]\n\n                files = dicomDatabase.filesForSeries(first_series)",
+     "explanation": "`series[0]` and `files[0]` raise IndexError for patients/studies with no series or an empty series, aborting the whole dropdown population. Also only the first series of the first study is listed, so for a diffusion MRI study with several series the user cannot choose which series is uploaded, and the uploaded folder is whatever directory the first file happens to live in.",
+     "suggestion": "Guard empty lists and list series (with descriptions) rather than a single arbitrary series.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 451
+     }
+    }
+   ]
+  },
+  {
+   "title": "Upload and analysis run synchronously on the GUI thread",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 570,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Upload and analysis run synchronously on the GUI thread",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 570,
+     "line_end": 590,
+     "evidence": "        with slicer.util.tryWithErrorDisplay(_(\"Failed to run neuropacs analysis.\"), waitCursor=True):\n            try:\n            # Get the folder path associated with the selected item in the dropdown\n                selectedFolderPath = self.ui.datasetComboBox.currentData",
+     "explanation": "The DICOM upload (line 590) and status polling in populateOrderTable run on the GUI thread with only a wait cursor and processEvents calls; for a multi-hundred-MB diffusion dataset Slicer will appear frozen and cannot be cancelled, and there is no progress reporting.",
+     "suggestion": "Run the upload in a worker thread (slicer.util.ProgressDialog / qSlicerCLIProgressBar style) and report progress.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 570
+     }
+    }
+   ]
+  },
+  {
+   "title": "_checkCanNeuropacs references an undefined parameter node",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 251,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "_checkCanNeuropacs references an undefined parameter node",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 251,
+     "line_end": 258,
+     "evidence": "    def _checkCanNeuropacs(self, caller=None, event=None) -> None:\n        \"\"\"Can neuropacs be pressed\"\"\" \n        if self._parameterNode:",
+     "explanation": "`self._parameterNode` is never assigned anywhere in the class (no parameter node is created), so this method raises AttributeError if it is ever connected. It is currently dead code, which also means the module keeps no state in a parameter node as Slicer conventions suggest.",
+     "suggestion": "Remove the method or implement a real parameter node and connect it.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 251
+     }
+    }
+   ]
+  },
+  {
+   "title": "No statement of regulatory status or privacy policy for the cloud service",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "README.md",
+   "line": 5,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "No statement of regulatory status or privacy policy for the cloud service",
+     "file": "README.md",
+     "line_start": 5,
+     "line_end": 13,
+     "evidence": "The neuropacs™ system is a software application intended to receive and analyze\ndiffusion MRI data from patients aged 40 years and older presenting with Parkinson’s\ndisease (PD) symptoms.",
+     "explanation": "The extension advertises a clinical decision-support use (MSAp/PSP differentiation) but the README and module help give no regulatory clearance status, no privacy policy or data-retention statement for the uploaded data, and no model validation information. Users cannot judge whether the service is cleared for clinical use in their jurisdiction.",
+     "suggestion": "Add a short section on intended use, regulatory status, data handling/privacy policy link, and any published validation of the model.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 5
+     }
+    }
+   ]
+  },
+  {
+   "title": "README clone URL points to a different repository",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "README.md",
+   "line": 60,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "README clone URL points to a different repository",
+     "file": "README.md",
+     "line_start": 60,
+     "line_end": 62,
+     "evidence": "1. Clone the repository\n\n   git clone https://github.com/neuropacman/SlicerNeuropacs",
+     "explanation": "The documented clone URL uses the account name 'neuropacman' instead of 'neuropacs', so the local-install instructions fail for users following the README.",
+     "suggestion": "Correct the URL to https://github.com/neuropacs/SlicerNeuropacs.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 60
+     }
+    }
+   ]
+  },
+  {
+   "title": "scm_revision is the branch 'main' rather than a pinned commit",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "SlicerNeuropacs.json",
+   "line": 6,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "scm_revision is the branch 'main' rather than a pinned commit",
+     "file": "SlicerNeuropacs.json",
+     "line_start": 6,
+     "line_end": 6,
+     "evidence": "\"scm_revision\": \"main\",",
+     "explanation": "The catalog entry tracks a moving branch, so the code users get can change without review. Allowed by policy, but the reviewed source is only the commit named in the request.",
+     "suggestion": "Pin scm_revision to a reviewed commit hash for future updates.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerNeuropacs.json",
+      "line": 6
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Identifiable DICOM data uploaded to a third-party cloud endpoint without de-identification or explicit consent",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 585,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "Identifiable DICOM data uploaded to a third-party cloud endpoint without de-identification or explicit consent",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 585,
+     "line_end": 590,
+     "evidence": "                    # Create a new neuropacs order               \n                    orderId = self.npcs.new_job()\n                    logging.info(f\"neuropacs order '{orderId}' created\")\n\n                    # Upload dataset\n                    self.npcs.upload_dataset_from_path(orderId, selectedFolderPath)",
+     "explanation": "selectedFolderPath comes from Slicer's DICOM database (line 461: `dataset_folder = os.path.dirname(first_file_path)`), i.e. the raw .dcm files including PatientName, PatientID, birth date and study metadata. The whole folder is sent to the hard-coded endpoint `https://jdfkdttvlf.execute-api.us-east-1.amazonaws.com/prod` (line 502). A search of the repository for 'de-identif', 'anonym', 'consent', 'HIPAA', 'privacy' or 'PHI' returns no matches, and the UI (Resources/UI/NeuropacsScriptedModule.ui) contains no notice or confirmation dialog. A clinician clicking 'Run analysis' therefore transmits identifiable patient imaging to a third party with no informed opt-in and no way to know what is included in the payload.",
+     "suggestion": "Add an explicit, one-time consent/notice dialog that names the destination, lists the data sent, and states whether identifiers are included; offer de-identification (e.g. DICOM anonymization before upload) or document that the service requires identifiable data and that the user is responsible for consent; document the endpoint and privacy policy in the README and module help.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 585
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Core upload behaviour is delegated to a PyPI package fetched and auto-upgraded at runtime",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 143,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Core upload behaviour is delegated to a PyPI package fetched and auto-upgraded at runtime",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 209,
+     "line_end": 224,
+     "evidence": "        try:\n            response = requests.get(\"https://pypi.org/pypi/neuropacs/json\")\n            latest_version = response.json()[\"info\"][\"version\"]\n        except Exception:\n            print(\"Error fetching the latest version of neuropacs from PyPI.\")\n            return",
+     "explanation": "The code that actually serialises and uploads the DICOM data (`neuropacs.init`, `upload_dataset_from_path`, `get_results`) is not in this repository; it is installed from PyPI at runtime and, worse, always upgraded to whatever version PyPI reports as latest (line 224 `slicer.util.pip_install(f\"neuropacs=={latest_version}\")`). The reviewed source therefore does not determine what is transmitted, where, or with which dependencies, and the behaviour can change without any change to this repository or to the catalog revision.",
+     "suggestion": "Pin a reviewed version of the neuropacs client (or vendor the upload code), remove the automatic 'latest' upgrade, and show the user a confirmation before installing/upgrading anything.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 143
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "PyPI version lookup has no timeout and silently proceeds on failure",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 211,
+     "line_end": 211,
+     "evidence": "response = requests.get(\"https://pypi.org/pypi/neuropacs/json\")",
+     "explanation": "requests.get is called without a timeout (line 211). A stalled network can hang the GUI thread. On any exception the function returns silently (lines 213-215), so the subsequent 'import neuropacs' can run against an older or missing package without the user being told.",
+     "suggestion": "Add a timeout, run the install off the GUI thread with progress, and surface a clear error when the package is missing or outdated.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 211
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Help PDF is not installed by CMake, so the Help button fails in the packaged extension",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "NeuropacsScriptedModule/CMakeLists.txt",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Help PDF is not installed by CMake, so the Help button fails in the packaged extension",
+     "file": "NeuropacsScriptedModule/CMakeLists.txt",
+     "line_start": 9,
+     "line_end": 12,
+     "evidence": "set(MODULE_PYTHON_RESOURCES\n  Resources/Icons/${MODULE_NAME}.png\n  Resources/UI/${MODULE_NAME}.ui\n  )",
+     "explanation": "The module resolves its help file at runtime as `os.path.join(modulePath, 'Resources', 'Docs', 'neuropacs_instructions.pdf')` (NeuropacsScriptedModule.py:534) and shows 'PDF not found' if missing (line 541). Resources/Docs/neuropacs_instructions.pdf exists in the repository but is not listed in MODULE_PYTHON_RESOURCES, so it is not installed into the extension build and the Help button is broken for every catalog user.",
+     "suggestion": "Add `Resources/Docs/neuropacs_instructions.pdf` to MODULE_PYTHON_RESOURCES (and the Examples PNG if it should ship).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/CMakeLists.txt",
+      "line": 9
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Medical data is sent to a hosted third-party endpoint with no disclosure or opt-in beyond an API key",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 502,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Medical data is sent to a hosted third-party endpoint with no disclosure or opt-in beyond an API key",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 502,
+     "line_end": 502,
+     "evidence": "self.npcs = neuropacs.init(\"https://jdfkdttvlf.execute-api.us-east-1.amazonaws.com/prod\", enteredKey, \"Slicer\")",
+     "explanation": "The hard-coded AWS API endpoint receives DICOM data from the user's machine (lines 502 and 590). Nothing in the UI, the README or the module warns that images leave the computer, where they go, or how they are retained. The only gate is the 'Run analysis' click. Clinicians could upload identifiable patient data without informed consent or knowledge of the data-processing terms.",
+     "suggestion": "Add an explicit informed-consent dialog before the first upload that names the destination, the data sent (including identifiers in DICOM headers) and the retention terms. Link to the privacy policy and document the transmission in the README.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 502
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Patient names are stored in plaintext in a config file in Documents",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 244,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Patient names stored in plaintext in a JSON config file",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 242,
+     "line_end": 245,
+     "evidence": "    def storeNeuropacsOrder(self, patientId, orderId):\n        \"\"\"Associate an orderId with the patient.\"\"\"\n        self.neuropacsOrderMap[orderId] = patientId  # Store the order associated with the dataset\n        self.save_config()  # Save the updated map to a file",
+     "explanation": "`selectedPatient` is the DICOM patient name (line 464 `self.ui.datasetComboBox.addItem(patientName, dataset_folder)`), and it is written unencrypted to `slicer_neuropacs.config` in the user's Documents folder (default at line 73) and displayed in the order table. On a shared clinical workstation this leaves PHI at rest in a plain file with no access control or warning.",
+     "suggestion": "Store only the order ID and a non-identifying label (or a hash), or warn the user that the config file contains patient identifiers and where it is written.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 242
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Patient names are stored in plaintext in a config file in Documents",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 242,
+     "line_end": 245,
+     "evidence": "self.neuropacsOrderMap[orderId] = patientId  # Store the order associated with the dataset\n        self.save_config()  # Save the updated map to a file",
+     "explanation": "storeNeuropacsOrder writes orderId -> patient name (from DICOM PatientName via the dropdown text) to slicer_neuropacs.config in the user's Documents folder (lines 244, 604, 228-231). This persists protected health information in an unencrypted file that is not mentioned to the user, and the file is kept indefinitely after the analysis.",
+     "suggestion": "Store only the neuropacs order ID, or a pseudonymous label, and not the patient name. Document the file and its contents if it must be kept.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 244
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Runtime pip install into Slicer's shared Python environment without user confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 222,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Runtime pip install into Slicer's shared Python environment without user confirmation",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 222,
+     "line_end": 224,
+     "evidence": "        if needToInstallNeuropacs:\n            print(f\"Upgrading neuropacs to version {latest_version}...\")\n            slicer.util.pip_install(f\"neuropacs=={latest_version}\")",
+     "explanation": "Pressing 'Validate' silently installs/upgrades a third-party package into the Slicer Python environment shared by all extensions, with no confirmation prompt and no visibility into the package's declared requirements. If `neuropacs` pins or downgrades packages Slicer bundles (numpy, scipy, SimpleITK, requests, ...) or pulls heavy dependencies, every other extension in that Slicer installation is affected. The transitive dependency set could not be inspected from this repository.",
+     "suggestion": "Ask the user before installing, use slicer.util.pip_install only after explicit confirmation, and verify/declare the dependency set (e.g. a requirements file) so bundled-package pins can be reviewed.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 222
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Runtime pip installation of neuropacs from PyPI at button press without user confirmation",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 222,
+     "line_end": 224,
+     "evidence": "if needToInstallNeuropacs:\n            print(f\"Upgrading neuropacs to version {latest_version}...\")\n            slicer.util.pip_install(f\"neuropacs=={latest_version}\")",
+     "explanation": "On API key validation, the module queries PyPI and calls slicer.util.pip_install(f'neuropacs=={latest_version}') with no user prompt (lines 222-224). This changes Slicer's shared Python environment for all modules, and the package's own dependencies are installed without a pin or review. The package is fetched from PyPI at run time rather than declared through the extension build, so the installed version is whatever is latest at that moment.",
+     "suggestion": "Ask for confirmation before installing, and document the package and version. Check that its dependencies do not downgrade or bring their own Qt, VTK or torch. Avoid the unbounded PyPI lookup with no timeout (line 211) and handle failure explicitly.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 222
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "Uploads may send an entire DICOM storage folder, not the selected series, to a third-party cloud",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 461,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Uploads may send an entire DICOM storage folder, not the selected series, to a third-party cloud",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 461,
+     "line_end": 464,
+     "evidence": "dataset_folder = os.path.dirname(first_file_path)\n\n# Add the dataset name and file path to the dropdown\nself.ui.datasetComboBox.addItem(patientName, dataset_folder)",
+     "explanation": "The dataset path is derived as the parent directory of the first file of the first series of each study (lines 455-461). Slicer's DICOM database typically stores many patients' files in one flat directory, so dirname(first_file) can contain other patients' data. onNeuropacsButton then uploads that whole folder with upload_dataset_from_path (line 590). Unrelated patients' medical images could leave the machine, and the user would not know the scope.",
+     "suggestion": "Upload only the files of the selected series or study, for example by copying them to a temporary folder or passing an explicit file list. Show the exact upload scope to the user before transmitting.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 461
+     }
+    }
+   ],
+   "id": "D7"
+  },
+  {
+   "title": "Widget adds to self.layout in __init__, before setup() creates it",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+   "line": 76,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Widget adds to self.layout in __init__, before setup() creates it",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 76,
+     "line_end": 81,
+     "evidence": "        self.neuropacsConfigPath = default_path\n        #     # self.load_npcs_file_selector(qt.QStandardPaths.writableLocation(qt.QStandardPaths.DocumentsLocation) + \"/slicer_neuropacs.config\")\n        # else:\n        #     self.load_npcs_file_selector(last_used_path)\n        #     self.neuropacsConfigPath = last_used_path\n        self.load_npcs_file_selector(default_path)",
+     "explanation": "load_npcs_file_selector (lines 111-114) does `self.layout.addWidget(parametersCollapsibleButton)`, but in Slicer's ScriptedLoadableModuleWidget `self.layout` is assigned in setup() (`self.layout = self.parent.layout()`), not in __init__. Constructing the widget therefore raises AttributeError before the UI is built, so the module panel would fail to appear. I could not execute Slicer to confirm, but the ordering is inconsistent with the base class contract.",
+     "suggestion": "Move the config-file selector creation into setup() after `ScriptedLoadableModuleWidget.setup(self)` and after the .ui widget is added.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 76
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Widget builds its UI into self.layout from __init__ before setup()",
+     "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+     "line_start": 81,
+     "line_end": 81,
+     "evidence": "self.load_npcs_file_selector(default_path)",
+     "explanation": "__init__ calls load_npcs_file_selector, which adds a collapsible button and form to self.layout (lines 81, 112-114). The layout is normally created in setup(), so this call may fail or add widgets to the wrong place. A second, unused configPathFileSelector is also created here.",
+     "suggestion": "Move widget construction into setup() after ScriptedLoadableModuleWidget.setup(self) and remove the dead code.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "NeuropacsScriptedModule/NeuropacsScriptedModule.py",
+      "line": 81
+     }
+    }
+   ],
+   "id": "D8"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D9",
+   "rating_dispute": {
+    "deepseek": "blocking",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D10",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of packaging",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D11",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "ok"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D12",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8",
+  "D9",
+  "D10",
+  "D11",
+  "D12"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "blocking",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 12,
+  "single": 13,
+  "unverified": 0,
+  "total": 20
+ }
+}
