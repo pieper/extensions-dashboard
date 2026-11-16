@@ -1,0 +1,101 @@
+{
+ "purpose": "WebSubInterface connects 3D Slicer as an Image Display client to a FHIRcast/WebSub-style messaging hub (cloud or local) for worklist-driven study loading, live scene synchronization, and multi-user conferencing, and can also run a local FastAPI/uvicorn hub server and download browser SPA clients.",
+ "summary": "🔴 Do not merge yet: `WebSubInterface` has two blocking module-loading defects in an installed Slicer environment: (1) `WebSubInterface/CMakeLists.txt` omits `Lib/spa_download.py` from `MODULE_PYTHON_SCRIPTS`, even though `Lib/HubServer.py` imports it at startup; and (2) `Lib/ImageDisplayClient.py` imports `hub_client` (which imports `aiohttp`) at module load time before the user is ever prompted to install dependencies. Additionally, `image_display_client_load.py` calls `zipfile.extractall()` without path-traversal checks on downloaded archives, the local hub binds to `0.0.0.0` by default, and connecting to a hub exposes `slicer.dicomDatabase` metadata/files to `status-request`/`dicom-request` events without prior confirmation.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Inspected all Python files in `WebSubInterface/Lib/`, `WebSubInterface/hub/`, `WebSubInterface/image_display/`, and `WebSubInterface/python_client/`. No malicious intent or reviewer manipulation was found, and SPA zip downloads use path-traversal checks. However, `image_display_client_load.py` uses raw `archive.extractall()` on zip payloads from hub events, the local hub binds to `0.0.0.0` by default without authentication required, and connecting to a hub exposes `slicer.dicomDatabase` study listings (`status-request`) and DICOM files (`dicom-request`) to peers on the topic before any PHI warning is shown."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Inspected `WebSubInterface/Lib/HubServer.py` and `WebSubInterface/Lib/repo_paths.py`. `pip_install` in `HubServer.py` prompts the user via `slicer.util.confirmYesNoDisplay` before installing `fastapi`, `uvicorn[standard]`, `python-multipart`, `aiohttp`, and `psutil` when starting the local hub, and does not run at startup. However, `ensure_monorepo_import_paths()` runs at module import and inserts generic paths at `sys.path[0]`."
+  },
+  "packaging": {
+   "rating": "blocking",
+   "rationale": "Inspected `CMakeLists.txt` and `WebSubInterface/CMakeLists.txt`. `Lib/spa_download.py` is imported at startup by `Lib/HubServer.py` but is omitted from `MODULE_PYTHON_SCRIPTS` in `WebSubInterface/CMakeLists.txt`, so an installed build will fail to import `WebSubInterface`. Furthermore, `WebSubInterface` imports `aiohttp` at module load time via `hub_client`, which is not installed in Slicer by default."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE.txt` at the repository root, which provides clear MIT License terms permitting distribution."
+  },
+  "soundness": {
+   "rating": "blocking",
+   "rationale": "Inspected `WebSubInterface.py`, `Lib/ImageDisplayClient.py`, `Lib/HubServer.py`, and `Lib/ConferenceDialog.py`. Importing `hub_client` (and thus `aiohttp`) at module import time breaks loading the module in a clean Slicer environment before any dependency installation prompt can run."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `WebSubInterface.py`, `README.md`, and `WebSubInterface/docs/`. The extension provides thorough documentation, architecture diagrams, quick-start instructions for both cloud and local hubs, and smoke tests."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "blocking",
+   "title": "Missing `Lib/spa_download.py` in `MODULE_PYTHON_SCRIPTS` breaks module loading in installed builds",
+   "file": "WebSubInterface/CMakeLists.txt",
+   "line_start": 4,
+   "line_end": 13,
+   "evidence": "set(MODULE_PYTHON_SCRIPTS\n  WebSubInterface.py\n  Lib/HubServer.py\n  Lib/ImageDisplayClient.py\n  Lib/ConferenceDialog.py\n  Lib/hub_presets.py\n  Lib/conference.py\n  Lib/repo_paths.py\n  Lib/__init__.py\n  )",
+   "explanation": "`WebSubInterface/Lib/HubServer.py` imports `from .spa_download import (...)` at module import time (lines 23-30), which is triggered when `WebSubInterface.py` imports `HubServerWidget` at Slicer startup. However, `Lib/spa_download.py` is omitted from `MODULE_PYTHON_SCRIPTS` in `WebSubInterface/CMakeLists.txt` (and there is no `install(DIRECTORY Lib ...)` rule). As a result, an installed package built by CMake will not include `Lib/spa_download.py`, causing `WebSubInterface` to fail to load with `ModuleNotFoundError: No module named 'Lib.spa_download'`.",
+   "suggestion": "Add `Lib/spa_download.py` to `MODULE_PYTHON_SCRIPTS` in `WebSubInterface/CMakeLists.txt`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "blocking",
+   "title": "Top-level import of `aiohttp` via `hub_client` causes module load failure at Slicer startup",
+   "file": "WebSubInterface/Lib/ImageDisplayClient.py",
+   "line_start": 15,
+   "line_end": 17,
+   "evidence": "from hub_client import IMAGINGSTUDY_OPEN, generate_subscriber_name\nfrom .conference import hub_endpoint_for_name\nfrom .ConferenceDialog import ConferenceDialog",
+   "explanation": "`WebSubInterface.py` imports `Lib.ImageDisplayClient` at module import time (Slicer startup), which imports `hub_client`, which in turn executes `import aiohttp` at the top level (`WebSubInterface/python_client/src/hub_client/client.py:167`). `aiohttp` is not bundled in Slicer's standard Python environment and is only installed when the user clicks the local Hub \"Start\" button (`_ensure_hub_deps()` in `Lib/HubServer.py`). On a fresh Slicer installation, `WebSubInterface` will fail to import at startup before the user can open the module or trigger dependency installation. Furthermore, if a user only uses the \"Image Display Client\" section with a cloud hub and never starts a local hub, nothing prompts to install `aiohttp`.",
+   "suggestion": "Defer importing `hub_client` and `image_display_client_hub` until the user clicks Connect (or enters the module), and ensure `aiohttp` is checked and installed (with user confirmation via `slicer.util.confirmYesNoDisplay`) before connecting the Image Display Client as well as before starting the local Hub.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Generic package and module paths inserted at the front of `sys.path` at Slicer startup",
+   "file": "WebSubInterface/Lib/repo_paths.py",
+   "line_start": 23,
+   "line_end": 35,
+   "evidence": "def ensure_monorepo_import_paths() -> Path:\n    \"\"\"Add python_client, service-provider runtime, and image-display lib to sys.path.\"\"\"\n    root = repo_root()\n    extras = (\n        root,\n        root / \"python_client\" / \"src\",\n        root / \"image_display\" / \"lib\",\n    )\n    for path in extras:\n        s = str(path)\n        if path.is_dir() and s not in sys.path:\n            sys.path.insert(0, s)\n    return root",
+   "explanation": "`ensure_monorepo_import_paths()` is called at the top level of `WebSubInterface.py` during Slicer startup and prepends `WebSubInterface` (which contains a top-level `Lib/` package) and `image_display/lib` directly to `sys.path[0]`. Note that in `WebSubInterface.py`, `from Lib.repo_paths import ...` relies on Slicer adding the scripted module directory to `sys.path`, which exposes the generic top-level package name `Lib` across Slicer's shared Python environment and can collide with other Slicer modules that use a `Lib` subdirectory.",
+   "suggestion": "Namespace the helper libraries under a module-specific package name (e.g., `WebSubInterfaceLib`) rather than a generic `Lib` package and flat `sys.path` entries.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Local Hub binds to `0.0.0.0` by default and Image Display Client exposes `slicer.dicomDatabase` studies to hub peers",
+   "file": "WebSubInterface/hub/hub.py",
+   "line_start": 261,
+   "line_end": 264,
+   "evidence": "    parser = argparse.ArgumentParser(description=\"Standalone Slicer WebSub Server\")\n    parser.add_argument(\"--port\", type=int, default=2018, help=\"Server port (default: 2018)\")\n    parser.add_argument(\"--host\", type=str, default=\"0.0.0.0\", help=\"Server host (default: 0.0.0.0)\")\n    args = parser.parse_args()",
+   "explanation": "When the user starts the local Hub from Slicer (`HubServer.py:367`), `hub.py` is launched with only `--port`, so `--host` defaults to `0.0.0.0` (all network interfaces) and `HUB_AUTH_MODE` defaults to `mock` with `HUB_REQUIRE_AUTH=False`. In addition, when connected to a hub (local or cloud), `image_display_client_requests.py` responds to `status-request` events on the subscribed topic with `list_local_dicom_worklist_studies()` (which includes `PatientName`, `StudyDescription`, `StudyDate`, and `StudyInstanceUID` from `slicer.dicomDatabase`) and responds to `dicom-request` events by reading and publishing the raw DICOM files from `slicer.dicomDatabase` (`local_dicom_export.py`). While the UI shows a PHI warning when creating a conference, connecting to a shared/cloud hub or starting the local hub on `0.0.0.0` can expose local DICOM database metadata and images to other subscribers on the same topic or local network without a prompt before Connect or Start.",
+   "suggestion": "Bind the local embedded Slicer hub to `127.0.0.1` by default in `HubServer.py` (e.g., passing `--host 127.0.0.1` unless the user explicitly opts in to LAN listening), and require explicit user confirmation before connecting the Image Display Client or allowing remote `dicom-request` / `status-request` access to `slicer.dicomDatabase`.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Unvalidated `zipfile.extractall` when loading zip payloads from hub events",
+   "file": "WebSubInterface/image_display/lib/image_display_client_load.py",
+   "line_start": 138,
+   "line_end": 143,
+   "evidence": "        if _is_zip_name(local_path):\n            extract_dir = os.path.join(temp_dir, f\"zip-{index}\")\n            os.makedirs(extract_dir, exist_ok=True)\n            with zipfile.ZipFile(local_path, \"r\") as archive:\n                archive.extractall(extract_dir)",
+   "explanation": "In `WebSubInterface/image_display/lib/image_display_client_load.py` (lines 142 and 163), zip archives received from a hub `imagingstudy-open` event are extracted using `archive.extractall(extract_dir)` without validating member paths against `..` or absolute paths (unlike `Lib/spa_download.py`, which uses `_safe_extract_zip`). On Python versions without PEP 706 enforcement or with crafted zip entries, a malicious publisher on the hub topic could write files outside `extract_dir`.",
+   "suggestion": "Validate zip member paths before extraction (reuse the `_safe_extract_zip` logic from `Lib/spa_download.py`) instead of calling `archive.extractall()` directly.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "External SPA client zip bundles downloaded on demand from GitHub release `spa-clients` (https://github.com/mbellehumeur/SlicerWebSub/releases/download/spa-clients/) were not fetched or inspected.",
+  "Cloud hub deployments at `bellehumeur-engineering.com` and `oidc.bellehumeur-engineering.com` were not tested."
+ ],
+ "questions_for_author": [
+  "Should the local Hub started from inside Slicer bind to `127.0.0.1` by default rather than `0.0.0.0`?",
+  "Should users be prompted before exposing their local `slicer.dicomDatabase` study list and DICOM instances to hub `status-request` and `dicom-request` events on Connect (not just when creating a conference)?"
+ ]
+}

@@ -1,0 +1,1019 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "A valid ordinary user token grants privileged admin access",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/hub/Lib/oauth_tokens.py",
+   "line": 422,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "A valid ordinary user token grants privileged admin access",
+     "file": "WebSubInterface/hub/Lib/oauth_tokens.py",
+     "line_start": 422,
+     "line_end": 427,
+     "evidence": "        for token in ordered:\n            if HUB_ADMIN_TOKEN and _token_matches_admin(token):\n                return {\"admin\": True, \"via\": \"admin_token\"}\n            try:\n                claims = verify_bearer_token(token)\n                return claims_to_identity(claims)",
+     "explanation": "In OIDC mode HUB_REQUIRE_AUTH is always true, and any valid bearer token is accepted as an admin without checking an admin role, even when a separate admin token is configured. Consequently any authenticated user can read all users' subscription and audit contexts through /api/hub/admin/snapshot or reset all sessions via /api/admin/reset (routes/admin.py:78-119, 133-148).",
+     "suggestion": "Require an explicit admin authorization claim or the configured admin secret for privileged endpoints, separately from ordinary user authentication.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/Lib/oauth_tokens.py",
+      "line": 422
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "WebSubInterface/hub/Lib/oauth_tokens.py:43-50 sets OIDC authentication required, and lines 402-427 accept either the admin token or any successfully verified client JWT, without testing an admin role: 'return claims_to_identity(claims)'. WebSubInterface/hub/Lib/http_util.py:93-101 performs no further role check, and routes/admin.py:78-119, 133-148 exposes the snapshot and resets all hub state. This permits an ordinary authenticated user to access other users' audit contexts and disconnect all sessions."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/hub/Lib/oauth_tokens.py:407-433 (validate_admin_access) and WebSubInterface/hub/Lib/routes/admin.py:78-119, 133-148. When HUB_REQUIRE_AUTH is True (always true in OIDC mode, line 47), validate_admin_access accepts any valid bearer JWT via verify_bearer_token(token) and returns claims_to_identity(claims) without checking any admin role or requiring HUB_ADMIN_TOKEN, granting access to /api/hub/admin/snapshot and /api/admin/reset. While the standalone hub is primarily a development/collaborative component, in multi-user OIDC mode this allows any authenticated user to read all subscriptions/audit logs and reset the hub."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Any OIDC user can join other users' topics to extract their data",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/hub/Lib/routes/conference.py",
+   "line": 61,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Any OIDC user can join other users' topics to extract their data",
+     "file": "WebSubInterface/hub/Lib/routes/conference.py",
+     "line_start": 61,
+     "line_end": 72,
+     "evidence": "@router.post(\"/api/hub/conference\")\nasync def post_conference(request: Request):\n    \"\"\"Create a conference\"\"\"\n    _enforce_bearer_auth(request)\n    try:\n        data = await _parse_request_body(request)\n    except Exception as e:\n        raise HTTPException(status_code=400, detail=f\"Could not parse request: {e}\")\n\n    host_topic = str(data.get(\"hostTopic\") or data.get(\"user\") or \"\").strip()\n    title = str(data.get(\"title\") or \"\").strip()\n    attendee_topics = _normalize_conference_topics(data.get(\"topics\", []))",
+     "explanation": "The authenticated identity is discarded and host/attendee topics are accepted without ownership checks or participant consent. hub_request.py:45-59 expands a request to every conference participant, so an authenticated attacker can create a conference involving a victim and request the victim's local DICOM worklist or studies; the client returns patient names and publishes DICOM bytes to the request topic. Conference publish fan-out similarly forwards payloads to all listed attendees (publish.py:219-248). This bypasses OIDC topic isolation.",
+     "suggestion": "Bind conference operations to the authenticated identity, require recipient authorization or consent before adding topics, and enforce per-request and per-payload access checks.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/Lib/routes/conference.py",
+      "line": 61
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "WebSubInterface/hub/Lib/routes/conference.py:61-90 calls '_enforce_bearer_auth(request)' but discards its identity and accepts caller-supplied host and participant topics. WebSubInterface/hub/Lib/hub_request.py:44-60, 143-171 expands a request from the attacker's own topic to connected participants, and lines 306-322 preserve the requester's topic in the forwarded event. image_display/lib/image_display_client_requests.py:115-162 returns local studies, and lines 295-335 exports DICOM and publishes it. hub/Lib/routes/hub_api.py:27-33 allows authenticated multipart publishing without a topic match, and hub/Lib/publish.py:219-248 fans conference messages out. The attack requires the victim's image-display client to be connected and the requester to have a matching connected subscription; it can expose patient data without the victim consenting to that conference."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/hub/Lib/routes/conference.py:61-91 (post_conference), WebSubInterface/hub/Lib/hub_request.py:44-60 (_request_allowed_topics), WebSubInterface/hub/Lib/publish.py:219-248, and WebSubInterface/image_display/lib/image_display_client_requests.py:102-133, 295-335. post_conference calls _enforce_bearer_auth(request) without capturing the identity or calling _enforce_topic_match, and adds any specified attendee topics to hub.conferences without participant opt-in. Because _request_allowed_topics expands requests on a conference participant's topic to all conference participant topics, any authenticated user can create a conference including another user's topic and send status-request or dicom-request on their own topic, causing the victim's connected Slicer client to return local DICOM worklist metadata (including patient names) or publish DICOM files."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Client dependency is imported before the installation prompt",
+   "category": "packaging",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/python_client/src/hub_client/client.py",
+   "line": 167,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Client dependency is imported before the installation prompt",
+     "file": "WebSubInterface/python_client/src/hub_client/client.py",
+     "line_start": 165,
+     "line_end": 169,
+     "evidence": "\n\nimport aiohttp\n\nLOGGER = logging.getLogger(__name__)",
+     "explanation": "WebSubInterface.py imports ImageDisplayClient at module import; that imports hub_client, whose __init__ immediately imports this file. If aiohttp is absent in Slicer's Python, the entire module fails to load before the user can reach HubServer's Start button and its dependency confirmation. The separately installed python_client tree does not install its pip dependencies.",
+     "suggestion": "Defer the client import until after a user-confirmed dependency check, or provide a supported dependency mechanism that makes aiohttp available before module import.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/python_client/src/hub_client/client.py",
+      "line": 167
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "WebSubInterface/WebSubInterface.py:17-18 imports both widgets at module import; Lib/ImageDisplayClient.py:15 imports hub_client, python_client/src/hub_client/__init__.py:7 imports its client, and client.py:167 says 'import aiohttp'. Lib/HubServer.py:47-68 and 339-351 show installation occurs only after the Start action and confirmation. WebSubInterface/CMakeLists.txt:54-59 copies the client tree, while python_client/pyproject.toml:11-13 declares aiohttp but the copy does not install it. If aiohttp is absent, module loading fails before the prompt; the separate missing spa_download import in D5 can fail first. not_checked: whether every targeted Slicer distribution already bundles aiohttp; runtime behavior and exact checkout revision were not independently verified."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/WebSubInterface.py:18, WebSubInterface/Lib/ImageDisplayClient.py:15, WebSubInterface/python_client/src/hub_client/__init__.py:7, and WebSubInterface/python_client/src/hub_client/client.py:167. WebSubInterface.py imports Lib.ImageDisplayClient at top level, which imports hub_client, which immediately imports hub_client.client where 'import aiohttp' executes at module import time. Because aiohttp is not bundled with Slicer and is only installed when clicking Start in HubServer.py:47-60 (_ensure_hub_deps), importing WebSubInterface at Slicer startup fails with ModuleNotFoundError before the module UI can load."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Default local hub exposes patient data and controls to the network",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "WebSubInterface/hub/hub.py",
+   "line": 261,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Local Hub binds to `0.0.0.0` by default and Image Display Client exposes `slicer.dicomDatabase` studies to hub peers",
+     "file": "WebSubInterface/hub/hub.py",
+     "line_start": 261,
+     "line_end": 264,
+     "evidence": "    parser = argparse.ArgumentParser(description=\"Standalone Slicer WebSub Server\")\n    parser.add_argument(\"--port\", type=int, default=2018, help=\"Server port (default: 2018)\")\n    parser.add_argument(\"--host\", type=str, default=\"0.0.0.0\", help=\"Server host (default: 0.0.0.0)\")\n    args = parser.parse_args()",
+     "explanation": "When the user starts the local Hub from Slicer (`HubServer.py:367`), `hub.py` is launched with only `--port`, so `--host` defaults to `0.0.0.0` (all network interfaces) and `HUB_AUTH_MODE` defaults to `mock` with `HUB_REQUIRE_AUTH=False`. In addition, when connected to a hub (local or cloud), `image_display_client_requests.py` responds to `status-request` events on the subscribed topic with `list_local_dicom_worklist_studies()` (which includes `PatientName`, `StudyDescription`, `StudyDate`, and `StudyInstanceUID` from `slicer.dicomDatabase`) and responds to `dicom-request` events by reading and publishing the raw DICOM files from `slicer.dicomDatabase` (`local_dicom_export.py`). While the UI shows a PHI warning when creating a conference, connecting to a shared/cloud hub or starting the local hub on `0.0.0.0` can expose local DICOM database metadata and images to other subscribers on the same topic or local network without a prompt before Connect or Start.",
+     "suggestion": "Bind the local embedded Slicer hub to `127.0.0.1` by default in `HubServer.py` (e.g., passing `--host 127.0.0.1` unless the user explicitly opts in to LAN listening), and require explicit user confirmation before connecting the Image Display Client or allowing remote `dicom-request` / `status-request` access to `slicer.dicomDatabase`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/hub.py",
+      "line": 261
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Default local hub exposes patient data and controls to the network",
+     "file": "WebSubInterface/hub/hub.py",
+     "line_start": 261,
+     "line_end": 264,
+     "evidence": "    parser = argparse.ArgumentParser(description=\"Standalone Slicer WebSub Server\")\n    parser.add_argument(\"--port\", type=int, default=2018, help=\"Server port (default: 2018)\")\n    parser.add_argument(\"--host\", type=str, default=\"0.0.0.0\", help=\"Server host (default: 0.0.0.0)\")\n    args = parser.parse_args()",
+     "explanation": "The Slicer Start button passes no host override (Lib/HubServer.py:365-368), while oauth_tokens.py:43-50 defaults to mock mode with authentication disabled. Any network peer, and potentially a website through the permissive CORS policy, can use the hub APIs and read the admin snapshot, whose audit contains event contexts. A connected image-display client also responds to requests with local patient names and can publish complete DICOM studies (image_display_client_requests.py:115-162, 295-335). Starting what the UI calls a local hub therefore exposes sensitive data without informed protection.",
+     "suggestion": "Bind to loopback by default, make network exposure an explicit informed choice, and require effective authentication and authorization before enabling sensitive operations.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/hub.py",
+      "line": 261
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "WebSubInterface/Lib/HubServer.py:365-367 runs the server with only '--port'; hub/hub.py:261-264 defaults the host to '0.0.0.0', and hub/Lib/oauth_tokens.py:33-50 defaults to mock mode and no required authentication. The UI calls it a local server (HubServer.py:155-160). routes/admin.py:78-119 exposes audit data and lines 133-148 reset sessions. When an image-display client is connected, image_display/lib/image_display_client_requests.py:115-162 and 295-335 automatically return worklist data and export requested DICOM; local_dicom_worklist.py:92-116 includes patient name and study UID. Network reachability depends on firewall and the hub actually starting; client connection and an accessible DICOM database are required for that data path. Default CORS is wildcard (hub/Lib/env.py:20-31), but browser access also depends on browser network restrictions. Exposure of identifiable medical data is blocking."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/Lib/HubServer.py:365-368, WebSubInterface/hub/hub.py:223-232, 261-264, WebSubInterface/hub/Lib/oauth_tokens.py:43-50, and WebSubInterface/image_display/lib/image_display_client_requests.py:115-133, 295-335. Clicking Start in HubServer.py launches hub.py with only '--port', so '--host' defaults to '0.0.0.0' (listening on all network interfaces) with HUB_AUTH_MODE='mock', HUB_REQUIRE_AUTH=False, and CORS allow_origins=['*']. When Slicer's Image Display Client is connected to this local hub (or any hub), it automatically responds to 'status-request' with all patient names and study descriptions from slicer.dicomDatabase (local_dicom_worklist.py:98-120) and responds to 'dicom-request' by reading and publishing raw DICOM files from slicer.dicomDatabase (local_dicom_export.py:96-119). This exposes local patient data to any peer on the local network (and via CORS to websites in the local browser) without explicit user warning or opt-in."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Missing `Lib/spa_download.py` in `MODULE_PYTHON_SCRIPTS` breaks module loading in installed builds",
+   "category": "packaging",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "blocking"
+   ],
+   "file": "WebSubInterface/CMakeLists.txt",
+   "line": 4,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Missing `Lib/spa_download.py` in `MODULE_PYTHON_SCRIPTS` breaks module loading in installed builds",
+     "file": "WebSubInterface/CMakeLists.txt",
+     "line_start": 4,
+     "line_end": 13,
+     "evidence": "set(MODULE_PYTHON_SCRIPTS\n  WebSubInterface.py\n  Lib/HubServer.py\n  Lib/ImageDisplayClient.py\n  Lib/ConferenceDialog.py\n  Lib/hub_presets.py\n  Lib/conference.py\n  Lib/repo_paths.py\n  Lib/__init__.py\n  )",
+     "explanation": "`WebSubInterface/Lib/HubServer.py` imports `from .spa_download import (...)` at module import time (lines 23-30), which is triggered when `WebSubInterface.py` imports `HubServerWidget` at Slicer startup. However, `Lib/spa_download.py` is omitted from `MODULE_PYTHON_SCRIPTS` in `WebSubInterface/CMakeLists.txt` (and there is no `install(DIRECTORY Lib ...)` rule). As a result, an installed package built by CMake will not include `Lib/spa_download.py`, causing `WebSubInterface` to fail to load with `ModuleNotFoundError: No module named 'Lib.spa_download'`.",
+     "suggestion": "Add `Lib/spa_download.py` to `MODULE_PYTHON_SCRIPTS` in `WebSubInterface/CMakeLists.txt`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/CMakeLists.txt",
+      "line": 4
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Required SPA download helper is not installed",
+     "file": "WebSubInterface/CMakeLists.txt",
+     "line_start": 4,
+     "line_end": 13,
+     "evidence": "set(MODULE_PYTHON_SCRIPTS\n  WebSubInterface.py\n  Lib/HubServer.py\n  Lib/ImageDisplayClient.py\n  Lib/ConferenceDialog.py\n  Lib/hub_presets.py\n  Lib/conference.py\n  Lib/repo_paths.py\n  Lib/__init__.py\n  )",
+     "explanation": "Lib/HubServer.py:23 imports .spa_download during module import, but Lib/spa_download.py is absent from this SCRIPTS list. The separate install rules only cover hub, python_client and image_display/lib, so the installed extension cannot import the module even if its other dependencies are present.",
+     "suggestion": "Add Lib/spa_download.py to MODULE_PYTHON_SCRIPTS and verify loading from an installed extension package.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/CMakeLists.txt",
+      "line": 4
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "WebSubInterface/WebSubInterface.py:17 imports HubServerWidget, and WebSubInterface/Lib/HubServer.py:23-30 imports '.spa_download' at module load. WebSubInterface/CMakeLists.txt:4-13 lists Lib scripts but omits Lib/spa_download.py; lines 49-68 install only hub, python_client and image_display/lib separately. Thus the normal CMake-installed module lacks the imported file and cannot load. not_checked: an actual Slicer build or installation."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/CMakeLists.txt:4-13, 49-68 and WebSubInterface/Lib/HubServer.py:23-30. Lib/HubServer.py imports from .spa_download at top level (imported by WebSubInterface.py:17), but Lib/spa_download.py is missing from MODULE_PYTHON_SCRIPTS in CMakeLists.txt and there is no install(DIRECTORY) rule for Lib/. Consequently, an installed build of the extension will fail to load WebSubInterface due to ModuleNotFoundError: No module named 'Lib.spa_download'."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Top-level import of `aiohttp` via `hub_client` causes module load failure at Slicer startup",
+   "category": "soundness",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/Lib/ImageDisplayClient.py",
+   "line": 15,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Top-level import of `aiohttp` via `hub_client` causes module load failure at Slicer startup",
+     "file": "WebSubInterface/Lib/ImageDisplayClient.py",
+     "line_start": 15,
+     "line_end": 17,
+     "evidence": "from hub_client import IMAGINGSTUDY_OPEN, generate_subscriber_name\nfrom .conference import hub_endpoint_for_name\nfrom .ConferenceDialog import ConferenceDialog",
+     "explanation": "`WebSubInterface.py` imports `Lib.ImageDisplayClient` at module import time (Slicer startup), which imports `hub_client`, which in turn executes `import aiohttp` at the top level (`WebSubInterface/python_client/src/hub_client/client.py:167`). `aiohttp` is not bundled in Slicer's standard Python environment and is only installed when the user clicks the local Hub \"Start\" button (`_ensure_hub_deps()` in `Lib/HubServer.py`). On a fresh Slicer installation, `WebSubInterface` will fail to import at startup before the user can open the module or trigger dependency installation. Furthermore, if a user only uses the \"Image Display Client\" section with a cloud hub and never starts a local hub, nothing prompts to install `aiohttp`.",
+     "suggestion": "Defer importing `hub_client` and `image_display_client_hub` until the user clicks Connect (or enters the module), and ensure `aiohttp` is checked and installed (with user confirmation via `slicer.util.confirmYesNoDisplay`) before connecting the Image Display Client as well as before starting the local Hub.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/Lib/ImageDisplayClient.py",
+      "line": 15
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "concern",
+     "reason": "WebSubInterface/WebSubInterface.py:17-18 imports ImageDisplayClient at load, Lib/ImageDisplayClient.py:15 imports hub_client, python_client/src/hub_client/__init__.py:7 imports client, and client.py:167 imports aiohttp unconditionally. HubServer.py:47-68 and 339-351 defer the install prompt until Start, so missing aiohttp prevents reaching it. This duplicates D3: broken loading when the dependency is missing is blocking for packaging; the soundness criterion is concern, with ordinary robustness feedback non-blocking under the index policy. not_checked: whether aiohttp is absent in a particular fresh Slicer build, or remote-only use in a running Slicer instance."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/WebSubInterface.py:18, WebSubInterface/Lib/ImageDisplayClient.py:15, WebSubInterface/python_client/src/hub_client/__init__.py:7, and WebSubInterface/python_client/src/hub_client/client.py:167. Duplicate of D3: top-level import of hub_client in ImageDisplayClient.py triggers top-level 'import aiohttp' in hub_client/client.py:167 at Slicer startup before _ensure_hub_deps() in Lib/HubServer.py can ever run, causing the scripted module to fail to load on a clean Slicer environment."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Unvalidated `zipfile.extractall` when loading zip payloads from hub events",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "WebSubInterface/image_display/lib/image_display_client_load.py",
+   "line": 138,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Unvalidated `zipfile.extractall` when loading zip payloads from hub events",
+     "file": "WebSubInterface/image_display/lib/image_display_client_load.py",
+     "line_start": 138,
+     "line_end": 143,
+     "evidence": "        if _is_zip_name(local_path):\n            extract_dir = os.path.join(temp_dir, f\"zip-{index}\")\n            os.makedirs(extract_dir, exist_ok=True)\n            with zipfile.ZipFile(local_path, \"r\") as archive:\n                archive.extractall(extract_dir)",
+     "explanation": "In `WebSubInterface/image_display/lib/image_display_client_load.py` (lines 142 and 163), zip archives received from a hub `imagingstudy-open` event are extracted using `archive.extractall(extract_dir)` without validating member paths against `..` or absolute paths (unlike `Lib/spa_download.py`, which uses `_safe_extract_zip`). On Python versions without PEP 706 enforcement or with crafted zip entries, a malicious publisher on the hub topic could write files outside `extract_dir`.",
+     "suggestion": "Validate zip member paths before extraction (reuse the `_safe_extract_zip` logic from `Lib/spa_download.py`) instead of calling `archive.extractall()` directly.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/image_display/lib/image_display_client_load.py",
+      "line": 138
+     }
+    }
+   ],
+   "id": "D7",
+   "outcome": "still disputed",
+   "positions": {
+    "gpt": {
+     "item": "D7",
+     "real": "no",
+     "severity": null,
+     "rating": null,
+     "reason": "WebSubInterface/image_display/lib/image_display_client_load.py:138-142 and 159-163 do use 'archive.extractall(extract_dir)' on incoming ZIPs, but the claimed traversal outside that directory is not established: Python's zipfile extraction removes absolute prefixes and '..' path components; PEP 706 concerns tarfile, not zipfile. The absence of an explicit path validation wrapper alone does not demonstrate the asserted file escape. not_checked: resource-exhaustion risks such as ZIP bombs, alternative Python implementations, and an actual runtime exploit."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/image_display/lib/image_display_client_load.py:138-143 and 159-163. When handling an imagingstudy-open event with a zip file payload or URL, _download_hub_file_entry calls archive.extractall(extract_dir) directly without validating member paths (unlike _safe_extract_zip in WebSubInterface/Lib/spa_download.py:109-121). A malicious or compromised publisher on the subscribed topic could supply a zip archive with path traversal entries to write arbitrary files outside the temporary directory."
+    }
+   }
+  },
+  {
+   "title": "Generic package and module paths inserted at the front of `sys.path` at Slicer startup",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "WebSubInterface/Lib/repo_paths.py",
+   "line": 23,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Generic package and module paths inserted at the front of `sys.path` at Slicer startup",
+     "file": "WebSubInterface/Lib/repo_paths.py",
+     "line_start": 23,
+     "line_end": 35,
+     "evidence": "def ensure_monorepo_import_paths() -> Path:\n    \"\"\"Add python_client, service-provider runtime, and image-display lib to sys.path.\"\"\"\n    root = repo_root()\n    extras = (\n        root,\n        root / \"python_client\" / \"src\",\n        root / \"image_display\" / \"lib\",\n    )\n    for path in extras:\n        s = str(path)\n        if path.is_dir() and s not in sys.path:\n            sys.path.insert(0, s)\n    return root",
+     "explanation": "`ensure_monorepo_import_paths()` is called at the top level of `WebSubInterface.py` during Slicer startup and prepends `WebSubInterface` (which contains a top-level `Lib/` package) and `image_display/lib` directly to `sys.path[0]`. Note that in `WebSubInterface.py`, `from Lib.repo_paths import ...` relies on Slicer adding the scripted module directory to `sys.path`, which exposes the generic top-level package name `Lib` across Slicer's shared Python environment and can collide with other Slicer modules that use a `Lib` subdirectory.",
+     "suggestion": "Namespace the helper libraries under a module-specific package name (e.g., `WebSubInterfaceLib`) rather than a generic `Lib` package and flat `sys.path` entries.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/Lib/repo_paths.py",
+      "line": 23
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Startup prepends generic import directories to Slicer's shared Python path",
+     "file": "WebSubInterface/Lib/repo_paths.py",
+     "line_start": 25,
+     "line_end": 34,
+     "evidence": "    root = repo_root()\n    extras = (\n        root,\n        root / \"python_client\" / \"src\",\n        root / \"image_display\" / \"lib\",\n    )\n    for path in extras:\n        s = str(path)\n        if path.is_dir() and s not in sys.path:\n            sys.path.insert(0, s)",
+     "explanation": "WebSubInterface.py calls this at import, before the module is opened. Prepending directories containing generic top-level modules and the package name Lib can shadow similarly named modules in other extensions for the rest of the Slicer process.",
+     "suggestion": "Use uniquely named packages and avoid prepending generic module directories to the process-wide import path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/Lib/repo_paths.py",
+      "line": 25
+     }
+    }
+   ]
+  },
+  {
+   "title": "Hub dependency check omits mandatory PyJWT",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "WebSubInterface/Lib/HubServer.py",
+   "line": 33,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Hub dependency check omits mandatory PyJWT",
+     "file": "WebSubInterface/Lib/HubServer.py",
+     "line_start": 33,
+     "line_end": 40,
+     "evidence": "# pip spec -> import name (Slicer pip_install accepts one package per call).\n_HUB_PIP_PACKAGES = (\n    (\"fastapi\", \"fastapi\"),\n    (\"uvicorn[standard]\", \"uvicorn\"),\n    (\"python-multipart\", \"multipart\"),\n    (\"aiohttp\", \"aiohttp\"),\n    (\"psutil\", \"psutil\"),\n)",
+     "explanation": "hub.py unconditionally imports oauth_tokens, which imports jwt and PyJWKClient at module import (oauth_tokens.py:14-15). When PyJWT is not already installed, accepting the offered package installation still leaves the hub subprocess unable to start.",
+     "suggestion": "Include PyJWT with its needed crypto support in the confirmed dependency check and test on a clean Slicer environment.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/Lib/HubServer.py",
+      "line": 33
+     }
+    }
+   ]
+  },
+  {
+   "title": "Study downloads block Slicer's GUI thread",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "WebSubInterface/image_display/lib/image_display_client_handler.py",
+   "line": 100,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Study downloads block Slicer's GUI thread",
+     "file": "WebSubInterface/image_display/lib/image_display_client_handler.py",
+     "line_start": 143,
+     "line_end": 148,
+     "evidence": "            _clear_hub_loaded_study(connection)\n\n            if _is_stale_open_load(connection, load_generation):\n                return\n\n            result = load_imaging_study_open(context)",
+     "explanation": "The callback is queued on the main thread at line 168, while the loading path performs URL downloads and archive extraction (image_display_client_load.py:126-163). Slow or stalled servers can freeze the Slicer interface despite the displayed progress dialog.",
+     "suggestion": "Perform network download and extraction in a cancellable worker, scheduling only Slicer scene operations on the main thread.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "WebSubInterface/image_display/lib/image_display_client_handler.py",
+      "line": 100
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "A valid ordinary user token grants privileged admin access",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/hub/Lib/oauth_tokens.py",
+   "line": 422,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "A valid ordinary user token grants privileged admin access",
+     "file": "WebSubInterface/hub/Lib/oauth_tokens.py",
+     "line_start": 422,
+     "line_end": 427,
+     "evidence": "        for token in ordered:\n            if HUB_ADMIN_TOKEN and _token_matches_admin(token):\n                return {\"admin\": True, \"via\": \"admin_token\"}\n            try:\n                claims = verify_bearer_token(token)\n                return claims_to_identity(claims)",
+     "explanation": "In OIDC mode HUB_REQUIRE_AUTH is always true, and any valid bearer token is accepted as an admin without checking an admin role, even when a separate admin token is configured. Consequently any authenticated user can read all users' subscription and audit contexts through /api/hub/admin/snapshot or reset all sessions via /api/admin/reset (routes/admin.py:78-119, 133-148).",
+     "suggestion": "Require an explicit admin authorization claim or the configured admin secret for privileged endpoints, separately from ordinary user authentication.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/Lib/oauth_tokens.py",
+      "line": 422
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "WebSubInterface/hub/Lib/oauth_tokens.py:43-50 sets OIDC authentication required, and lines 402-427 accept either the admin token or any successfully verified client JWT, without testing an admin role: 'return claims_to_identity(claims)'. WebSubInterface/hub/Lib/http_util.py:93-101 performs no further role check, and routes/admin.py:78-119, 133-148 exposes the snapshot and resets all hub state. This permits an ordinary authenticated user to access other users' audit contexts and disconnect all sessions."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/hub/Lib/oauth_tokens.py:407-433 (validate_admin_access) and WebSubInterface/hub/Lib/routes/admin.py:78-119, 133-148. When HUB_REQUIRE_AUTH is True (always true in OIDC mode, line 47), validate_admin_access accepts any valid bearer JWT via verify_bearer_token(token) and returns claims_to_identity(claims) without checking any admin role or requiring HUB_ADMIN_TOKEN, granting access to /api/hub/admin/snapshot and /api/admin/reset. While the standalone hub is primarily a development/collaborative component, in multi-user OIDC mode this allows any authenticated user to read all subscriptions/audit logs and reset the hub."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Any OIDC user can join other users' topics to extract their data",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/hub/Lib/routes/conference.py",
+   "line": 61,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Any OIDC user can join other users' topics to extract their data",
+     "file": "WebSubInterface/hub/Lib/routes/conference.py",
+     "line_start": 61,
+     "line_end": 72,
+     "evidence": "@router.post(\"/api/hub/conference\")\nasync def post_conference(request: Request):\n    \"\"\"Create a conference\"\"\"\n    _enforce_bearer_auth(request)\n    try:\n        data = await _parse_request_body(request)\n    except Exception as e:\n        raise HTTPException(status_code=400, detail=f\"Could not parse request: {e}\")\n\n    host_topic = str(data.get(\"hostTopic\") or data.get(\"user\") or \"\").strip()\n    title = str(data.get(\"title\") or \"\").strip()\n    attendee_topics = _normalize_conference_topics(data.get(\"topics\", []))",
+     "explanation": "The authenticated identity is discarded and host/attendee topics are accepted without ownership checks or participant consent. hub_request.py:45-59 expands a request to every conference participant, so an authenticated attacker can create a conference involving a victim and request the victim's local DICOM worklist or studies; the client returns patient names and publishes DICOM bytes to the request topic. Conference publish fan-out similarly forwards payloads to all listed attendees (publish.py:219-248). This bypasses OIDC topic isolation.",
+     "suggestion": "Bind conference operations to the authenticated identity, require recipient authorization or consent before adding topics, and enforce per-request and per-payload access checks.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/Lib/routes/conference.py",
+      "line": 61
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "WebSubInterface/hub/Lib/routes/conference.py:61-90 calls '_enforce_bearer_auth(request)' but discards its identity and accepts caller-supplied host and participant topics. WebSubInterface/hub/Lib/hub_request.py:44-60, 143-171 expands a request from the attacker's own topic to connected participants, and lines 306-322 preserve the requester's topic in the forwarded event. image_display/lib/image_display_client_requests.py:115-162 returns local studies, and lines 295-335 exports DICOM and publishes it. hub/Lib/routes/hub_api.py:27-33 allows authenticated multipart publishing without a topic match, and hub/Lib/publish.py:219-248 fans conference messages out. The attack requires the victim's image-display client to be connected and the requester to have a matching connected subscription; it can expose patient data without the victim consenting to that conference."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/hub/Lib/routes/conference.py:61-91 (post_conference), WebSubInterface/hub/Lib/hub_request.py:44-60 (_request_allowed_topics), WebSubInterface/hub/Lib/publish.py:219-248, and WebSubInterface/image_display/lib/image_display_client_requests.py:102-133, 295-335. post_conference calls _enforce_bearer_auth(request) without capturing the identity or calling _enforce_topic_match, and adds any specified attendee topics to hub.conferences without participant opt-in. Because _request_allowed_topics expands requests on a conference participant's topic to all conference participant topics, any authenticated user can create a conference including another user's topic and send status-request or dicom-request on their own topic, causing the victim's connected Slicer client to return local DICOM worklist metadata (including patient names) or publish DICOM files."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Client dependency is imported before the installation prompt",
+   "category": "packaging",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/python_client/src/hub_client/client.py",
+   "line": 167,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Client dependency is imported before the installation prompt",
+     "file": "WebSubInterface/python_client/src/hub_client/client.py",
+     "line_start": 165,
+     "line_end": 169,
+     "evidence": "\n\nimport aiohttp\n\nLOGGER = logging.getLogger(__name__)",
+     "explanation": "WebSubInterface.py imports ImageDisplayClient at module import; that imports hub_client, whose __init__ immediately imports this file. If aiohttp is absent in Slicer's Python, the entire module fails to load before the user can reach HubServer's Start button and its dependency confirmation. The separately installed python_client tree does not install its pip dependencies.",
+     "suggestion": "Defer the client import until after a user-confirmed dependency check, or provide a supported dependency mechanism that makes aiohttp available before module import.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/python_client/src/hub_client/client.py",
+      "line": 167
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "WebSubInterface/WebSubInterface.py:17-18 imports both widgets at module import; Lib/ImageDisplayClient.py:15 imports hub_client, python_client/src/hub_client/__init__.py:7 imports its client, and client.py:167 says 'import aiohttp'. Lib/HubServer.py:47-68 and 339-351 show installation occurs only after the Start action and confirmation. WebSubInterface/CMakeLists.txt:54-59 copies the client tree, while python_client/pyproject.toml:11-13 declares aiohttp but the copy does not install it. If aiohttp is absent, module loading fails before the prompt; the separate missing spa_download import in D5 can fail first. not_checked: whether every targeted Slicer distribution already bundles aiohttp; runtime behavior and exact checkout revision were not independently verified."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/WebSubInterface.py:18, WebSubInterface/Lib/ImageDisplayClient.py:15, WebSubInterface/python_client/src/hub_client/__init__.py:7, and WebSubInterface/python_client/src/hub_client/client.py:167. WebSubInterface.py imports Lib.ImageDisplayClient at top level, which imports hub_client, which immediately imports hub_client.client where 'import aiohttp' executes at module import time. Because aiohttp is not bundled with Slicer and is only installed when clicking Start in HubServer.py:47-60 (_ensure_hub_deps), importing WebSubInterface at Slicer startup fails with ModuleNotFoundError before the module UI can load."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Default local hub exposes patient data and controls to the network",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "WebSubInterface/hub/hub.py",
+   "line": 261,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Local Hub binds to `0.0.0.0` by default and Image Display Client exposes `slicer.dicomDatabase` studies to hub peers",
+     "file": "WebSubInterface/hub/hub.py",
+     "line_start": 261,
+     "line_end": 264,
+     "evidence": "    parser = argparse.ArgumentParser(description=\"Standalone Slicer WebSub Server\")\n    parser.add_argument(\"--port\", type=int, default=2018, help=\"Server port (default: 2018)\")\n    parser.add_argument(\"--host\", type=str, default=\"0.0.0.0\", help=\"Server host (default: 0.0.0.0)\")\n    args = parser.parse_args()",
+     "explanation": "When the user starts the local Hub from Slicer (`HubServer.py:367`), `hub.py` is launched with only `--port`, so `--host` defaults to `0.0.0.0` (all network interfaces) and `HUB_AUTH_MODE` defaults to `mock` with `HUB_REQUIRE_AUTH=False`. In addition, when connected to a hub (local or cloud), `image_display_client_requests.py` responds to `status-request` events on the subscribed topic with `list_local_dicom_worklist_studies()` (which includes `PatientName`, `StudyDescription`, `StudyDate`, and `StudyInstanceUID` from `slicer.dicomDatabase`) and responds to `dicom-request` events by reading and publishing the raw DICOM files from `slicer.dicomDatabase` (`local_dicom_export.py`). While the UI shows a PHI warning when creating a conference, connecting to a shared/cloud hub or starting the local hub on `0.0.0.0` can expose local DICOM database metadata and images to other subscribers on the same topic or local network without a prompt before Connect or Start.",
+     "suggestion": "Bind the local embedded Slicer hub to `127.0.0.1` by default in `HubServer.py` (e.g., passing `--host 127.0.0.1` unless the user explicitly opts in to LAN listening), and require explicit user confirmation before connecting the Image Display Client or allowing remote `dicom-request` / `status-request` access to `slicer.dicomDatabase`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/hub.py",
+      "line": 261
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Default local hub exposes patient data and controls to the network",
+     "file": "WebSubInterface/hub/hub.py",
+     "line_start": 261,
+     "line_end": 264,
+     "evidence": "    parser = argparse.ArgumentParser(description=\"Standalone Slicer WebSub Server\")\n    parser.add_argument(\"--port\", type=int, default=2018, help=\"Server port (default: 2018)\")\n    parser.add_argument(\"--host\", type=str, default=\"0.0.0.0\", help=\"Server host (default: 0.0.0.0)\")\n    args = parser.parse_args()",
+     "explanation": "The Slicer Start button passes no host override (Lib/HubServer.py:365-368), while oauth_tokens.py:43-50 defaults to mock mode with authentication disabled. Any network peer, and potentially a website through the permissive CORS policy, can use the hub APIs and read the admin snapshot, whose audit contains event contexts. A connected image-display client also responds to requests with local patient names and can publish complete DICOM studies (image_display_client_requests.py:115-162, 295-335). Starting what the UI calls a local hub therefore exposes sensitive data without informed protection.",
+     "suggestion": "Bind to loopback by default, make network exposure an explicit informed choice, and require effective authentication and authorization before enabling sensitive operations.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/hub.py",
+      "line": 261
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "WebSubInterface/Lib/HubServer.py:365-367 runs the server with only '--port'; hub/hub.py:261-264 defaults the host to '0.0.0.0', and hub/Lib/oauth_tokens.py:33-50 defaults to mock mode and no required authentication. The UI calls it a local server (HubServer.py:155-160). routes/admin.py:78-119 exposes audit data and lines 133-148 reset sessions. When an image-display client is connected, image_display/lib/image_display_client_requests.py:115-162 and 295-335 automatically return worklist data and export requested DICOM; local_dicom_worklist.py:92-116 includes patient name and study UID. Network reachability depends on firewall and the hub actually starting; client connection and an accessible DICOM database are required for that data path. Default CORS is wildcard (hub/Lib/env.py:20-31), but browser access also depends on browser network restrictions. Exposure of identifiable medical data is blocking."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/Lib/HubServer.py:365-368, WebSubInterface/hub/hub.py:223-232, 261-264, WebSubInterface/hub/Lib/oauth_tokens.py:43-50, and WebSubInterface/image_display/lib/image_display_client_requests.py:115-133, 295-335. Clicking Start in HubServer.py launches hub.py with only '--port', so '--host' defaults to '0.0.0.0' (listening on all network interfaces) with HUB_AUTH_MODE='mock', HUB_REQUIRE_AUTH=False, and CORS allow_origins=['*']. When Slicer's Image Display Client is connected to this local hub (or any hub), it automatically responds to 'status-request' with all patient names and study descriptions from slicer.dicomDatabase (local_dicom_worklist.py:98-120) and responds to 'dicom-request' by reading and publishing raw DICOM files from slicer.dicomDatabase (local_dicom_export.py:96-119). This exposes local patient data to any peer on the local network (and via CORS to websites in the local browser) without explicit user warning or opt-in."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Missing `Lib/spa_download.py` in `MODULE_PYTHON_SCRIPTS` breaks module loading in installed builds",
+   "category": "packaging",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "blocking"
+   ],
+   "file": "WebSubInterface/CMakeLists.txt",
+   "line": 4,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Missing `Lib/spa_download.py` in `MODULE_PYTHON_SCRIPTS` breaks module loading in installed builds",
+     "file": "WebSubInterface/CMakeLists.txt",
+     "line_start": 4,
+     "line_end": 13,
+     "evidence": "set(MODULE_PYTHON_SCRIPTS\n  WebSubInterface.py\n  Lib/HubServer.py\n  Lib/ImageDisplayClient.py\n  Lib/ConferenceDialog.py\n  Lib/hub_presets.py\n  Lib/conference.py\n  Lib/repo_paths.py\n  Lib/__init__.py\n  )",
+     "explanation": "`WebSubInterface/Lib/HubServer.py` imports `from .spa_download import (...)` at module import time (lines 23-30), which is triggered when `WebSubInterface.py` imports `HubServerWidget` at Slicer startup. However, `Lib/spa_download.py` is omitted from `MODULE_PYTHON_SCRIPTS` in `WebSubInterface/CMakeLists.txt` (and there is no `install(DIRECTORY Lib ...)` rule). As a result, an installed package built by CMake will not include `Lib/spa_download.py`, causing `WebSubInterface` to fail to load with `ModuleNotFoundError: No module named 'Lib.spa_download'`.",
+     "suggestion": "Add `Lib/spa_download.py` to `MODULE_PYTHON_SCRIPTS` in `WebSubInterface/CMakeLists.txt`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/CMakeLists.txt",
+      "line": 4
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Required SPA download helper is not installed",
+     "file": "WebSubInterface/CMakeLists.txt",
+     "line_start": 4,
+     "line_end": 13,
+     "evidence": "set(MODULE_PYTHON_SCRIPTS\n  WebSubInterface.py\n  Lib/HubServer.py\n  Lib/ImageDisplayClient.py\n  Lib/ConferenceDialog.py\n  Lib/hub_presets.py\n  Lib/conference.py\n  Lib/repo_paths.py\n  Lib/__init__.py\n  )",
+     "explanation": "Lib/HubServer.py:23 imports .spa_download during module import, but Lib/spa_download.py is absent from this SCRIPTS list. The separate install rules only cover hub, python_client and image_display/lib, so the installed extension cannot import the module even if its other dependencies are present.",
+     "suggestion": "Add Lib/spa_download.py to MODULE_PYTHON_SCRIPTS and verify loading from an installed extension package.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/CMakeLists.txt",
+      "line": 4
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "WebSubInterface/WebSubInterface.py:17 imports HubServerWidget, and WebSubInterface/Lib/HubServer.py:23-30 imports '.spa_download' at module load. WebSubInterface/CMakeLists.txt:4-13 lists Lib scripts but omits Lib/spa_download.py; lines 49-68 install only hub, python_client and image_display/lib separately. Thus the normal CMake-installed module lacks the imported file and cannot load. not_checked: an actual Slicer build or installation."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/CMakeLists.txt:4-13, 49-68 and WebSubInterface/Lib/HubServer.py:23-30. Lib/HubServer.py imports from .spa_download at top level (imported by WebSubInterface.py:17), but Lib/spa_download.py is missing from MODULE_PYTHON_SCRIPTS in CMakeLists.txt and there is no install(DIRECTORY) rule for Lib/. Consequently, an installed build of the extension will fail to load WebSubInterface due to ModuleNotFoundError: No module named 'Lib.spa_download'."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Top-level import of `aiohttp` via `hub_client` causes module load failure at Slicer startup",
+   "category": "soundness",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/Lib/ImageDisplayClient.py",
+   "line": 15,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Top-level import of `aiohttp` via `hub_client` causes module load failure at Slicer startup",
+     "file": "WebSubInterface/Lib/ImageDisplayClient.py",
+     "line_start": 15,
+     "line_end": 17,
+     "evidence": "from hub_client import IMAGINGSTUDY_OPEN, generate_subscriber_name\nfrom .conference import hub_endpoint_for_name\nfrom .ConferenceDialog import ConferenceDialog",
+     "explanation": "`WebSubInterface.py` imports `Lib.ImageDisplayClient` at module import time (Slicer startup), which imports `hub_client`, which in turn executes `import aiohttp` at the top level (`WebSubInterface/python_client/src/hub_client/client.py:167`). `aiohttp` is not bundled in Slicer's standard Python environment and is only installed when the user clicks the local Hub \"Start\" button (`_ensure_hub_deps()` in `Lib/HubServer.py`). On a fresh Slicer installation, `WebSubInterface` will fail to import at startup before the user can open the module or trigger dependency installation. Furthermore, if a user only uses the \"Image Display Client\" section with a cloud hub and never starts a local hub, nothing prompts to install `aiohttp`.",
+     "suggestion": "Defer importing `hub_client` and `image_display_client_hub` until the user clicks Connect (or enters the module), and ensure `aiohttp` is checked and installed (with user confirmation via `slicer.util.confirmYesNoDisplay`) before connecting the Image Display Client as well as before starting the local Hub.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/Lib/ImageDisplayClient.py",
+      "line": 15
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "concern",
+     "reason": "WebSubInterface/WebSubInterface.py:17-18 imports ImageDisplayClient at load, Lib/ImageDisplayClient.py:15 imports hub_client, python_client/src/hub_client/__init__.py:7 imports client, and client.py:167 imports aiohttp unconditionally. HubServer.py:47-68 and 339-351 defer the install prompt until Start, so missing aiohttp prevents reaching it. This duplicates D3: broken loading when the dependency is missing is blocking for packaging; the soundness criterion is concern, with ordinary robustness feedback non-blocking under the index policy. not_checked: whether aiohttp is absent in a particular fresh Slicer build, or remote-only use in a running Slicer instance."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/WebSubInterface.py:18, WebSubInterface/Lib/ImageDisplayClient.py:15, WebSubInterface/python_client/src/hub_client/__init__.py:7, and WebSubInterface/python_client/src/hub_client/client.py:167. Duplicate of D3: top-level import of hub_client in ImageDisplayClient.py triggers top-level 'import aiohttp' in hub_client/client.py:167 at Slicer startup before _ensure_hub_deps() in Lib/HubServer.py can ever run, causing the scripted module to fail to load on a clean Slicer environment."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Unvalidated `zipfile.extractall` when loading zip payloads from hub events",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "WebSubInterface/image_display/lib/image_display_client_load.py",
+   "line": 138,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Unvalidated `zipfile.extractall` when loading zip payloads from hub events",
+     "file": "WebSubInterface/image_display/lib/image_display_client_load.py",
+     "line_start": 138,
+     "line_end": 143,
+     "evidence": "        if _is_zip_name(local_path):\n            extract_dir = os.path.join(temp_dir, f\"zip-{index}\")\n            os.makedirs(extract_dir, exist_ok=True)\n            with zipfile.ZipFile(local_path, \"r\") as archive:\n                archive.extractall(extract_dir)",
+     "explanation": "In `WebSubInterface/image_display/lib/image_display_client_load.py` (lines 142 and 163), zip archives received from a hub `imagingstudy-open` event are extracted using `archive.extractall(extract_dir)` without validating member paths against `..` or absolute paths (unlike `Lib/spa_download.py`, which uses `_safe_extract_zip`). On Python versions without PEP 706 enforcement or with crafted zip entries, a malicious publisher on the hub topic could write files outside `extract_dir`.",
+     "suggestion": "Validate zip member paths before extraction (reuse the `_safe_extract_zip` logic from `Lib/spa_download.py`) instead of calling `archive.extractall()` directly.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/image_display/lib/image_display_client_load.py",
+      "line": 138
+     }
+    }
+   ],
+   "id": "D7",
+   "outcome": "still disputed",
+   "positions": {
+    "gpt": {
+     "item": "D7",
+     "real": "no",
+     "severity": null,
+     "rating": null,
+     "reason": "WebSubInterface/image_display/lib/image_display_client_load.py:138-142 and 159-163 do use 'archive.extractall(extract_dir)' on incoming ZIPs, but the claimed traversal outside that directory is not established: Python's zipfile extraction removes absolute prefixes and '..' path components; PEP 706 concerns tarfile, not zipfile. The absence of an explicit path validation wrapper alone does not demonstrate the asserted file escape. not_checked: resource-exhaustion risks such as ZIP bombs, alternative Python implementations, and an actual runtime exploit."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/image_display/lib/image_display_client_load.py:138-143 and 159-163. When handling an imagingstudy-open event with a zip file payload or URL, _download_hub_file_entry calls archive.extractall(extract_dir) directly without validating member paths (unlike _safe_extract_zip in WebSubInterface/Lib/spa_download.py:109-121). A malicious or compromised publisher on the subscribed topic could supply a zip archive with path traversal entries to write arbitrary files outside the temporary directory."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "concern",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "concern"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "blocking",
+   "gpt": "blocking"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "blocking",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "needs fixes",
+  "gemini": "needs fixes",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 7,
+  "single": 7,
+  "unverified": 0,
+  "total": 10,
+  "open_disputes": 1
+ }
+}
