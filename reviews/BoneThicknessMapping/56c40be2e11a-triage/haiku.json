@@ -1,0 +1,149 @@
+{
+ "purpose": "Bone Thickness Mapping is a scripted 3D Slicer module (Shape Analysis category) that segments bone from a CT/CBCT volume with a threshold, casts a ray grid through the resulting surface, and renders a thickness and air-cell distance map on the 3D model. It is for researchers working with dental/skull CT data.",
+ "summary": "I read the catalog entry, top-level and module CMakeLists, the full BoneThicknessMapping.py, the README and the BSD-3 LICENSE. I found no network access, no package installation, no pickle/eval/exec, no telemetry, and no file deletion or overwriting. The module changes only UI state (layout, camera, slice rotation, scalar bar) and adds nodes to the scene. Issues are minor: a broken second screenshot URL in CMakeLists.txt, a branch-based scm_revision, no error handling in the long-running execute path, a debug print, and no clinical-use disclaimer. None block admission.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read CMakeLists.txt and BoneThicknessMapping.py in full. The code has no network calls, no subprocess or pip use, no pickle/eval/exec, and no file writes outside the scene. The only file access is reading bundled icons via inspect-based paths (lines 99, 248)."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "No pip installs, no package pins, no sys.path edits, no global logging changes, and no imports of Qt/VTK-bundling packages at import time. Import-time imports are standard Slicer modules (ctk, slicer, numpy, vtk, qt). Side effects are limited to the module's own UI (setLayout(16) and lookFromViewAxis in reset_view, lines 637-642)."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt line 12 gives a second screenshot URL under a repo name that doesn't match the actual source repo (Slicer-BoneThicknessMapping vs SlicerBoneThicknessMappingExtension), so that screenshot link is likely broken. scm_revision is 'master' (a branch), so the reviewed commit is not pinned; I could not resolve it. The module's Python file and icon resources listed in BoneThicknessMapping/CMakeLists.txt appear to match the file list."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is a standard BSD 3-Clause text with a copyright line for the Auditory Biophysics Lab. It permits redistribution. The module bundles no third-party models or data."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The execute path (lines 514-555) runs segmentation, ray casting and thickness calculation on the GUI thread, with no try/except (the author notes 'TODO add try and catch' at line 515), so failures leave the state machine stuck in EXECUTING. Line 912 has a leftover print. Each run adds segmentation, color-table and model nodes to the scene without cleanup (lines 667, 827, 898-907). It calls the private effect.self().onApply() (lines 688, 696, 704). Line 809 calls numpy.linalg.solve, which can raise on degenerate triangles, and that exception is unhandled."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README gives a tutorial with a sample dataset (CBCTDentalSurgery) and screenshots, which helps. There are no unit tests (the test registration on line 29 is commented out). The README has no clinical-use or research-only disclaimer. The README's menu path ('Shape Analysis>Thickness Mapping') doesn't match the module title 'Bone Thickness Mapping'. The helpText is stamped with a 2020 version."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Second screenshot URL points to a non-existent repository path",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_SCREENSHOTURLS \"https://raw.githubusercontent.com/Auditory-Biophysics-Lab/SlicerBoneThicknessMappingExtension/master/Images/general_screenshot.png https://raw.githubusercontent.com/Auditory-Biophysics-Lab/Slicer-BoneThicknessMapping/master/Images/complete.png\")",
+   "explanation": "EXTENSION_SCREENSHOTURLS mixes two repository names. The first URL uses SlicerBoneThicknessMappingExtension, but the second uses Slicer-BoneThicknessMapping, which does not match the declared source repo. The screenshot in the extension manager will likely fail to load. This is cosmetic and does not block loading.",
+   "suggestion": "Use the same repository name in both URLs, and ideally a commit SHA rather than master.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "scm_revision is a moving branch, not a pinned commit",
+   "file": "",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "\"scm_revision\": \"master\",",
+   "explanation": "The catalog entry tracks 'master', so the index will build whatever is on that branch at build time. The source reviewed here is a specific commit, but the catalog does not pin it. Upstream changes could alter what is built without review. Per policy, a branch reference is not by itself a security finding, but a pinned revision is preferable.",
+   "suggestion": "Pin scm_revision to the reviewed commit SHA (56c40be2e11af6534b84203f7977e2c6d0c9c8ad) or to a release tag.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Unhandled exceptions leave the widget stuck in EXECUTING state",
+   "file": "BoneThicknessMapping/BoneThicknessMapping.py",
+   "line_start": 514,
+   "line_end": 555,
+   "evidence": "    def click_execute(self):\n        # TODO add try and catch\n        if self.state is not BoneThicknessMappingState.READY: return\n        self.state = BoneThicknessMappingState.EXECUTING",
+   "explanation": "click_execute runs a long pipeline with no try/except. The author notes this in a TODO. If any step raises (for example, a missing segmentation result, a degenerate triangle in numpy.linalg.solve, or an empty hit list), the state remains EXECUTING. The Execute button stays hidden and the user gets only a Python console traceback, with no way back except reloading the module.",
+   "suggestion": "Wrap the pipeline in try/except/finally, reset state to READY on failure, report the error with qt.QMessageBox or slicer.util.errorDisplay, and consider running heavy work with progress events or a thread.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Singular-matrix solve in quad normal calculation can raise",
+   "file": "BoneThicknessMapping/BoneThicknessMapping.py",
+   "line_start": 809,
+   "line_end": 810,
+   "evidence": "rawNormal = numpy.linalg.solve(numpy.array([hitPoints[0].point, hitPoints[1].point, hitPoints[2].point]), [1, 1, 1])\nhitPointMatrix[i][j].normal = rawNormal / numpy.sqrt(numpy.sum(rawNormal**2))",
+   "explanation": "rawNormal is computed by numpy.linalg.solve on three hit points. If they are collinear or degenerate, numpy raises LinAlgError. That exception is not caught, so one bad quad aborts the whole run (see the previous finding).",
+   "suggestion": "Catch numpy.linalg.LinAlgError and skip that quad, or compute the normal with a cross product of two edge vectors.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Scene nodes accumulate on every execution",
+   "file": "BoneThicknessMapping/BoneThicknessMapping.py",
+   "line_start": 667,
+   "line_end": 668,
+   "evidence": "segmentationNode = slicer.mrmlScene.AddNewNodeByClass(\"vtkMRMLSegmentationNode\")\nsegmentationNode.CreateDefaultDisplayNodes()",
+   "explanation": "Each run adds a new segmentation node, a segment editor node (removed), a model node, and two color-table nodes to the MRML scene. Nothing removes the previous run's nodes, so repeated executions clutter the scene and waste memory. Clicking 'Finish' only resets the widget state.",
+   "suggestion": "Remove or reuse the previous run's nodes in click_finish or at the start of click_execute.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Debug print left in color-table builder",
+   "file": "BoneThicknessMapping/BoneThicknessMapping.py",
+   "line_start": 912,
+   "line_end": 912,
+   "evidence": "        print(minmax_air_cell)",
+   "explanation": "build_color_table_nodes prints the air-cell range to the Python console on every run. This is harmless but is leftover debug output.",
+   "suggestion": "Remove the print or route it through logging.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Relies on private segment-editor effect API",
+   "file": "BoneThicknessMapping/BoneThicknessMapping.py",
+   "line_start": 686,
+   "line_end": 688,
+   "evidence": "effect.setParameter(\"MinimumThreshold\", str(threshold_range[0]))  # 1460 #1160 # 223\neffect.setParameter(\"MaximumThreshold\", str(threshold_range[1]))\neffect.self().onApply()",
+   "explanation": "The code calls effect.self().onApply(), which is an internal Python method of the segment editor effects, not a public API. It may break in future Slicer versions without warning.",
+   "suggestion": "Use the public segment-editor parameter and apply path, or document the supported Slicer versions and test against them.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No clinical-use or research-only disclaimer",
+   "file": "README.md",
+   "line_start": 9,
+   "line_end": 10,
+   "evidence": "A [3D Slicer](https://www.slicer.org/) extension capable of rendering a clinical bone scan in 3D with an overlayed gradient colour map depicting the bone-thickness.",
+   "explanation": "The module outputs thickness maps from CT data that users may interpret clinically (for example, for surgical planning). Neither the README nor the module help text states that the output is research-only or not for diagnosis. The help text is also stamped with a 2020 version.",
+   "suggestion": "Add a research-use disclaimer to the README and module help text, and update the version stamp.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Menu path in README does not match module title",
+   "file": "README.md",
+   "line_start": 28,
+   "line_end": 28,
+   "evidence": "5. The module will now be accessible via Modules>Shape Analysis>Thickness Mapping",
+   "explanation": "The README says the module is at 'Modules>Shape Analysis>Thickness Mapping', but the module title is 'Bone Thickness Mapping'. Users may be confused when searching.",
+   "suggestion": "Correct the menu path to 'Bone Thickness Mapping'.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The pinned source revision 'master' was not resolved; I did not verify that the branch exists or that its contents match the provided files.",
+  "I did not run the extension or build it, and I did not load it in Slicer. Behavior on real CT data and the Slicer API calls (for example vtk.reference comparisons at line 883 and vtkModifiedBSPTree usage) are unverified.",
+  "The screenshot and icon files (PNG binaries) were not inspected beyond their listed sizes.",
+  "Icon resources under BoneThicknessMapping/Resources/Icons/ were listed but not read.",
+  "The remote CI or build reports and the Slicer version compatibility were not available to me."
+ ],
+ "questions_for_author": []
+}

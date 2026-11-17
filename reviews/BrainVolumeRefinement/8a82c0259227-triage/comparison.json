@@ -1,0 +1,764 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Convergence counters totalVolumeI/totalVolumeII are read uninitialized",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "BVeR/BVeR.cxx",
+   "line": 145,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Convergence counters totalVolumeI/totalVolumeII are read uninitialized",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 145,
+     "line_end": 150,
+     "evidence": "double totalVolumeI;",
+     "explanation": "totalVolumeI (line 145) and totalVolumeII (line 417) are declared without initialization and then incremented, so the first read is undefined behaviour. The stopping criterion c_i = ((totalVolumeI-totalVolumeII)/totalVolumeI) at line 428 therefore uses garbage: it can be negative, huge, or 0/0 = NaN when the stack slot happens to be 0. In practice the advertised convergence option (BVeR.xml 'convergence', default 0.01) may never trigger and the module silently runs all 20 iterations, or stops at an arbitrary point, giving results that do not match the documented behaviour.",
+     "suggestion": "Initialize both counters to 0 (e.g. 'double totalVolumeI = 0.0;') and guard the division against totalVolumeI == 0.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 145
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Volume accumulators are uninitialized before ++ (undefined behavior) and drive the convergence stop",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 145,
+     "line_end": 150,
+     "evidence": "double totalVolumeI;\n...\n if (itI.Get()!=static_cast<InputPixelType>(0)) {\n totalVolumeI++;",
+     "explanation": "totalVolumeI and totalVolumeII are declared as plain doubles with no initializer and then incremented in a loop. Reading an indeterminate value is undefined behavior. The result feeds c_i = (totalVolumeI-totalVolumeII)/totalVolumeI, which decides when the iteration stops (line 430). A garbage value can cause early or late convergence and a different output mask, with no error. Initializing both to 0 (and guarding against totalVolumeI == 0 at line 428) fixes it.",
+     "suggestion": "Initialize totalVolumeI = 0.0 and totalVolumeII = 0.0 at their declarations. Also guard the division at line 428 when totalVolumeI is zero.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 145
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Local-mode neighbourhood mean is summed in the input pixel type and overflows",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "BVeR/BVeR.cxx",
+   "line": 261,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Local-mode neighbourhood mean overflows for 8-bit input",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 261,
+     "line_end": 272,
+     "evidence": "wIntensity += imageIt.GetPixel(p);",
+     "explanation": "wIntensity is declared as InputPixelType (line 261). For unsigned char input with the default radius (3,3,3) N = 343, so summing 343 intensities of e.g. 100 wraps around in 8 bits and the 'local mean' is meaningless; the subsequent integer division by N further truncates. Users running the module on 8-bit data get an arbitrary threshold and therefore arbitrary voxel removal.",
+     "suggestion": "Accumulate in double (or float) and divide by N in floating point.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 270
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Local-mode neighbourhood mean is summed in the input pixel type and overflows",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 261,
+     "line_end": 272,
+     "evidence": "InputPixelType wIntensity;\n...\n wIntensity=0.0;\n for (unsigned int p = 0; p < N; p++) {\n wIntensity += imageIt.GetPixel(p);",
+     "explanation": "wIntensity is declared as InputPixelType (line 261). It is set to 0.0 and then accumulates N=27 or more neighbour values in that type (line 270). For unsigned char or unsigned short inputs, the sum wraps around modulo 256 or 65536, which gives a wrong local threshold and wrong voxel removal in the default Local mode. Signed types can also overflow. Accumulate in double and divide afterwards. The Global mode (line 170-171) has the same truncation: globalMean is an InputPixelType and is integer-divided by 2.",
+     "suggestion": "Declare wIntensity as double (and globalMean as double) and cast only the final comparison value. Add a test with an 8-bit or 16-bit input whose neighbourhood sums exceed the type range.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 261
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Output volume and mask are written as all zeros when the loop exits before the first mask copy",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "BVeR/BVeR.cxx",
+   "line": 238,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Output volume and mask are written as all zeros when the loop exits before the first mask copy",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 237,
+     "line_end": 240,
+     "evidence": "stoppedByConvergence=true;",
+     "explanation": "newBrainMask is allocated and filled with 0 (lines 108-112) and only receives data inside the loop body (lines 385-402). The convergence branch at lines 237-240 breaks out of the loop before that copy, and numberOfIterations can also be 0 (BVeR.xml has no minimum). In both cases the module writes an all-zero 'Updated Brain Mask' (line 444) and an all-zero 'Updated Volume' (line 466) and still returns EXIT_SUCCESS, so the user gets an empty image with no error message. The break condition (image size > window size in any dimension) is plausible for masks that span the whole field of view.",
+     "suggestion": "Initialize newBrainMask from the input mask before the loop, or report an error/return EXIT_FAILURE when the loop produced no mask; also add a minimum of 1 to numberOfIterations in BVeR.xml.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 238
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Bundled CLI test passes a parameter that does not exist (--sigma)",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "BVeR/Testing/Cxx/CMakeLists.txt",
+   "line": 25,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Bundled CLI test passes a parameter that does not exist (--sigma)",
+     "file": "BVeR/Testing/Cxx/CMakeLists.txt",
+     "line_start": 21,
+     "line_end": 26,
+     "evidence": "--sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nhdr",
+     "explanation": "BVeR.xml defines no 'sigma' parameter, so PARSE_ARGS in the test executable will reject the argument and the test can never pass; the baseline is also a CT head image rather than the brain MRI the method targets. The extension therefore ships a test that fails on every platform, which hides real regressions.",
+     "suggestion": "Replace --sigma with real BVeR parameters (e.g. --selectionMode Local --iterations 2) and regenerate the baseline.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BVeR/Testing/Cxx/CMakeLists.txt",
+      "line": 25
+     }
+    }
+   ]
+  },
+  {
+   "title": "Documentation states MIT and links another repository's LICENSE while the file is Apache-2.0",
+   "category": "license",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "docs/index.md",
+   "line": 57,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Documentation states MIT and links another repository's LICENSE while the file is Apache-2.0",
+     "file": "docs/index.md",
+     "line_start": 55,
+     "line_end": 57,
+     "evidence": "This project is under MIT license and following details are given at the [LICENSE](https://github.com/CSIM-Toolkits/SlicerDiffusionComplexityMap/blob/main/LICENSE) file in the project repository.",
+     "explanation": "The shipped LICENSE is Apache License 2.0 and README.md says Apache 2.0, but the published documentation page tells users the project is MIT and points at the LICENSE of a different extension. Both licenses permit distribution, so this is not a distribution blocker, but users and downstream packagers get contradictory terms.",
+     "suggestion": "State Apache-2.0 in docs/index.md and link to this repository's own LICENSE file.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "docs/index.md",
+      "line": 57
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Conflicting license statements across LICENSE, docs, and module XML",
+     "file": "docs/index.md",
+     "line_start": 55,
+     "line_end": 57,
+     "evidence": "This project is under MIT license and following details are given at the [LICENSE](https://github.com/CSIM-Toolkits/SlicerDiffusionComplexityMap/blob/main/LICENSE) file in the project repository.",
+     "explanation": "LICENSE and README.md (line 19) state Apache 2.0, while docs/index.md (line 57) says 'This project is under MIT license' and links to a different repository's LICENSE. BVeR.xml line 8 says '<license>Slicer</license>'. The distributed license is Apache 2.0, which permits redistribution, but users reading the docs get conflicting information.",
+     "suggestion": "Change the docs and the module XML license field to Apache-2.0 and link this repository's LICENSE.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "docs/index.md",
+      "line": 57
+     }
+    }
+   ]
+  },
+  {
+   "title": "Empty contour yields negative region size and an ITK exception instead of a clear message",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "BVeR/BVeR.cxx",
+   "line": 226,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Empty contour yields negative region size and an ITK exception instead of a clear message",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 187,
+     "line_end": 236,
+     "evidence": "windowSize[0] = (maxX - minX);",
+     "explanation": "If actualContour contains no foreground voxels (e.g. an all-zero or fully-zeroed input), minX/minY/minZ stay at NumericTraits<int>::max() while maxX/maxY/maxZ stay 0, so windowSize becomes a large negative number and searchingRegion is built with that size (lines 235-236). The following NeighborhoodIterator construction then throws; the user sees a raw ITK exception rather than a diagnostic such as 'input mask is empty'.",
+     "suggestion": "Detect the 'no contour voxels found' case (minX > maxX) and return EXIT_FAILURE with a clear message.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "BVeR/BVeR.cxx",
+      "line": 226
+     }
+    }
+   ]
+  },
+  {
+   "title": "Manual threshold is cast to the pixel type without range checks",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "BVeR/BVeR.cxx",
+   "line": 297,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Manual threshold is cast to the pixel type without range checks",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 297,
+     "line_end": 297,
+     "evidence": "if (imageIt.GetPixel(p) < static_cast<InputPixelType>(manualThreshold)){",
+     "explanation": "manualThreshold is an integer parameter that is cast to InputPixelType at comparison time (line 297). For an unsigned char input, a value such as 300 wraps to 44 silently, and a negative value wraps as well. The user gets a different threshold than the one they entered, with no warning.",
+     "suggestion": "Validate manualThreshold against the input type's range and report an error, or compare in double without casting.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 297
+     }
+    }
+   ]
+  },
+  {
+   "title": "Missing standard headers for std::sort and std::vector",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "BVeR/BVeR.cxx",
+   "line": 336,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Missing standard headers for std::sort and std::vector",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 336,
+     "line_end": 341,
+     "evidence": "std::vector<InputPixelType> innerValues;\n...\n std::sort(innerValues.begin(), innerValues.end());",
+     "explanation": "BVeR.cxx calls std::sort (line 341) and uses std::vector (line 336) but includes neither <algorithm> nor <vector>. It compiles only because ITK headers include them transitively, which can break with other ITK or compiler versions.",
+     "suggestion": "Add #include <algorithm> and #include <vector> at the top of BVeR.cxx.",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 336
+     }
+    }
+   ]
+  },
+  {
+   "title": "Placeholder text in the module description and branch-based source pin",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "BVeR/BVeR.xml",
+   "line": 5,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Placeholder DOI and wiki documentation URL in the CLI XML",
+     "file": "BVeR/BVeR.xml",
+     "line_start": 5,
+     "line_end": 7,
+     "evidence": "More details are given at the paper doi: ...",
+     "explanation": "The module description ends with an empty DOI placeholder and documentation-url points to a Slicer wiki page that is not maintained by this project, while the real paper DOI (10.1007/s42600-021-00168-x) and readthedocs site are known from README.md/docs. Users opening the module's Help get no usable reference.",
+     "suggestion": "Fill in the DOI and point documentation-url at https://slicerbrainvolumerefinement.readthedocs.io/.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BVeR/BVeR.xml",
+      "line": 5
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Placeholder text in the module description and branch-based source pin",
+     "file": "BVeR/BVeR.xml",
+     "line_start": 5,
+     "line_end": 5,
+     "evidence": "More details are given at the paper doi: ...]]></description>",
+     "explanation": "BVeR.xml line 5 ends with 'More details are given at the paper doi: ...', a placeholder that users will see in the Slicer module help. The catalog entry pins scm_revision to the branch 'main', so the built code can change without a catalog update. Pinning a reviewed commit would make the build reproducible.",
+     "suggestion": "Replace the placeholder with the real DOI (10.1007/s42600-021-00168-x), and consider pinning scm_revision to a tagged commit.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BVeR/BVeR.xml",
+      "line": 5
+     }
+    }
+   ]
+  },
+  {
+   "title": "Saved mask/volume use all connected components while the iteration keeps only the largest",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "BVeR/BVeR.cxx",
+   "line": 374,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Saved mask/volume use all connected components while the iteration keeps only the largest",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 367,
+     "line_end": 375,
+     "evidence": "maskInput->SetMaskImage(connectedMask->GetOutput());",
+     "explanation": "Each iteration masks updatedImage with connectedMask (largest component only, lines 367-375), but newBrainMask is filled from newMask (line 384/402), which is the plain binarization of auxImage and still contains every island. The final output at line 466 masks the input with newBrainMask, so spurious disconnected islands that the algorithm deliberately removed internally reappear in the delivered volume and mask.",
+     "suggestion": "Copy connectedMask (or the largest-component mask) into newBrainMask instead of newMask.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 374
+     }
+    }
+   ]
+  },
+  {
+   "title": "Dead code: unused neighbourhood iterator and hard-coded mean/2 heuristic",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "BVeR/BVeR.cxx",
+   "line": 248,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Dead code: unused neighbourhood iterator and hard-coded mean/2 heuristic",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 248,
+     "line_end": 257,
+     "evidence": "itk::NeighborhoodIterator<InputImageType, itk::ConstantBoundaryCondition<InputImageType> > updateIt(radius, auxImage,searchingRegion);",
+     "explanation": "updateIt is constructed and incremented (lines 248, 257, 309) but never read or written, and globalMean is computed as mean/2 with an author TODO at line 171. Neither is a safety problem, but the dead iterator wastes work per iteration and the unexplained /2 makes Global mode hard to reason about.",
+     "suggestion": "Remove updateIt and document or parameterize the global threshold factor.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 248
+     }
+    }
+   ]
+  },
+  {
+   "title": "Limited regression test coverage and documentation link",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "BVeR/BVeR.xml",
+   "line": 7,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Limited regression test coverage and documentation link",
+     "file": "BVeR/BVeR.xml",
+     "line_start": 7,
+     "line_end": 7,
+     "evidence": "<documentation-url>https://www.slicer.org/wiki/Documentation/Nightly/Modules/BVeR</documentation-url>",
+     "explanation": "There is one ExternalData test (BVeR/Testing/Cxx/CMakeLists.txt lines 21-26) using a single dataset with sigma 2.5, and it does not exercise the Local, Global, or Manual selection modes or the 8-bit overflow case. The documentation-url in BVeR.xml points to the Slicer wiki nightly page rather than the project's own documentation.",
+     "suggestion": "Add tests for each selection mode and integer input type, and point documentation-url to the project's ReadTheDocs page.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "BVeR/BVeR.xml",
+      "line": 7
+     }
+    }
+   ]
+  },
+  {
+   "title": "No clinical-use disclaimer for a tool that alters segmentation output",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "docs/index.md",
+   "line": 41,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "No clinical-use disclaimer for a tool that alters segmentation output",
+     "file": "docs/index.md",
+     "line_start": 40,
+     "line_end": 41,
+     "evidence": "The `BVeR` method is designed to correct oversegmentation masking.",
+     "explanation": "The documentation correctly warns that only oversegmentation is corrected, but nowhere states that results are for research use and must be visually verified before clinical or volumetric use. Given that the module silently rewrites brain masks, an explicit disclaimer would help users.",
+     "suggestion": "Add a short 'research use only, verify results' note to docs/index.md and the module description.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "docs/index.md",
+      "line": 41
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Convergence counters totalVolumeI/totalVolumeII are read uninitialized",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "BVeR/BVeR.cxx",
+   "line": 145,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Convergence counters totalVolumeI/totalVolumeII are read uninitialized",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 145,
+     "line_end": 150,
+     "evidence": "double totalVolumeI;",
+     "explanation": "totalVolumeI (line 145) and totalVolumeII (line 417) are declared without initialization and then incremented, so the first read is undefined behaviour. The stopping criterion c_i = ((totalVolumeI-totalVolumeII)/totalVolumeI) at line 428 therefore uses garbage: it can be negative, huge, or 0/0 = NaN when the stack slot happens to be 0. In practice the advertised convergence option (BVeR.xml 'convergence', default 0.01) may never trigger and the module silently runs all 20 iterations, or stops at an arbitrary point, giving results that do not match the documented behaviour.",
+     "suggestion": "Initialize both counters to 0 (e.g. 'double totalVolumeI = 0.0;') and guard the division against totalVolumeI == 0.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 145
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Volume accumulators are uninitialized before ++ (undefined behavior) and drive the convergence stop",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 145,
+     "line_end": 150,
+     "evidence": "double totalVolumeI;\n...\n if (itI.Get()!=static_cast<InputPixelType>(0)) {\n totalVolumeI++;",
+     "explanation": "totalVolumeI and totalVolumeII are declared as plain doubles with no initializer and then incremented in a loop. Reading an indeterminate value is undefined behavior. The result feeds c_i = (totalVolumeI-totalVolumeII)/totalVolumeI, which decides when the iteration stops (line 430). A garbage value can cause early or late convergence and a different output mask, with no error. Initializing both to 0 (and guarding against totalVolumeI == 0 at line 428) fixes it.",
+     "suggestion": "Initialize totalVolumeI = 0.0 and totalVolumeII = 0.0 at their declarations. Also guard the division at line 428 when totalVolumeI is zero.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 145
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Local-mode neighbourhood mean is summed in the input pixel type and overflows",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "BVeR/BVeR.cxx",
+   "line": 261,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Local-mode neighbourhood mean overflows for 8-bit input",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 261,
+     "line_end": 272,
+     "evidence": "wIntensity += imageIt.GetPixel(p);",
+     "explanation": "wIntensity is declared as InputPixelType (line 261). For unsigned char input with the default radius (3,3,3) N = 343, so summing 343 intensities of e.g. 100 wraps around in 8 bits and the 'local mean' is meaningless; the subsequent integer division by N further truncates. Users running the module on 8-bit data get an arbitrary threshold and therefore arbitrary voxel removal.",
+     "suggestion": "Accumulate in double (or float) and divide by N in floating point.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 270
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Local-mode neighbourhood mean is summed in the input pixel type and overflows",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 261,
+     "line_end": 272,
+     "evidence": "InputPixelType wIntensity;\n...\n wIntensity=0.0;\n for (unsigned int p = 0; p < N; p++) {\n wIntensity += imageIt.GetPixel(p);",
+     "explanation": "wIntensity is declared as InputPixelType (line 261). It is set to 0.0 and then accumulates N=27 or more neighbour values in that type (line 270). For unsigned char or unsigned short inputs, the sum wraps around modulo 256 or 65536, which gives a wrong local threshold and wrong voxel removal in the default Local mode. Signed types can also overflow. Accumulate in double and divide afterwards. The Global mode (line 170-171) has the same truncation: globalMean is an InputPixelType and is integer-divided by 2.",
+     "suggestion": "Declare wIntensity as double (and globalMean as double) and cast only the final comparison value. Add a test with an 8-bit or 16-bit input whose neighbourhood sums exceed the type range.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 261
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Output volume and mask are written as all zeros when the loop exits before the first mask copy",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "BVeR/BVeR.cxx",
+   "line": 238,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Output volume and mask are written as all zeros when the loop exits before the first mask copy",
+     "file": "BVeR/BVeR.cxx",
+     "line_start": 237,
+     "line_end": 240,
+     "evidence": "stoppedByConvergence=true;",
+     "explanation": "newBrainMask is allocated and filled with 0 (lines 108-112) and only receives data inside the loop body (lines 385-402). The convergence branch at lines 237-240 breaks out of the loop before that copy, and numberOfIterations can also be 0 (BVeR.xml has no minimum). In both cases the module writes an all-zero 'Updated Brain Mask' (line 444) and an all-zero 'Updated Volume' (line 466) and still returns EXIT_SUCCESS, so the user gets an empty image with no error message. The break condition (image size > window size in any dimension) is plausible for masks that span the whole field of view.",
+     "suggestion": "Initialize newBrainMask from the input mask before the loop, or report an error/return EXIT_FAILURE when the loop produced no mask; also add a minimum of 1 to numberOfIterations in BVeR.xml.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BVeR/BVeR.cxx",
+      "line": 238
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "environment": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "packaging": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 4,
+  "single": 9,
+  "unverified": 0,
+  "total": 13
+ }
+}

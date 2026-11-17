@@ -1,0 +1,181 @@
+{
+ "purpose": "BigImage is a 3D Slicer extension for viewing and analyzing gigapixel whole-slide histopathology images (pyramidal TIFF/SVS via tiffslide) plus color/stain deconvolution and nucleus segmentation CLIs, aimed at computational-pathology researchers. It also ships an experimental Zarr/NGFF reader-writer module.",
+ "summary": "No malice, telemetry or data exfiltration found; the CLIs work on user-selected files only. However, BigImageViewer imports `tiffslide` and calls `slicer.util.pip_install(\"tiffslide\")` at module level, so Slicer's shared Python environment is modified at startup for users who never open the module — a policy violation. Further unpinned runtime installs (`scikit-image`, `zarr`, `dask`, `xarray`) can move Slicer-bundled numpy/scipy, and the module also mutates `CUDA_VISIBLE_DEVICES` globally. Several ordinary bugs (undefined `attrs[key]`, undefined keras helpers, a test downloading an unregistered sample) and file provenance/licensing questions for the C++ kernels remain. 🔴 Do not merge yet: remove the import-time pip install and make remaining installs explicit, pinned and user-confirmed.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Reviewed BigImageViewer.py, NgffImageIO.py and the C++ CLI/lib sources: no network transmission of images or identifiers, no secrets, no eval/exec/pickle, no file deletion beyond the module's own temporary test directory. The concern is unconsented download-and-install of PyPI code (tiffslide, scikit-image, zarr, dask, xarray) into the user's Slicer environment."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "BigImageViewer.py lines 17-21 run `slicer.util.pip_install(\"tiffslide\")` at module import, i.e. when Slicer loads scripted modules, affecting users who never open the module; NgffImageIO.py lines 53-66 and BigImageViewer.py lines 1196-1199 install scikit-image/zarr/dask/xarray unpinned at runtime without confirmation; BigImageViewer.py line 1214 sets os.environ[\"CUDA_VISIBLE_DEVICES\"] globally."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Top-level CMakeLists.txt adds all four subdirectories, each module's CMakeLists installs its .py/.ui/.png resources, and EXTENSION_DEPENDS \"NA\" matches build_dependencies []. However `EXTENSION_SCREENSHOTURLS` points at Screenshots/1.png which does not appear in the repository listing (and is reported as ~12 MB, which would bloat the checkout), and the registered Python unittests fail (see soundness)."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "License.txt is the BSD-style 3D Slicer Contribution and Software License (Part B grants royalty-free use, reproduction and distribution), which permits distributing the extension. Provenance of the bundled C++ code is less clear: NucleusSegmentation/include/TypeUtils.h is marked 'Author: tcpan' and the stain-matrix code in ColorDecomposition/ColorDecomposition.cxx closely mirrors Landini's Colour Deconvolution plugin (GPL), whose code License.txt Part A §6 forbids; I could not verify derivation."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read BigImageViewer.py fully: undefined `attrs[key]` and `slicer.util.getNode` paths, NameError in gland/nuclei processing (`segment2DRGBImageRandomSampleDividePrior`, `self.kerasModelSegmentColonGland`), interactor observers added in the widget constructor and never removed, forced `lm.setLayout(6)` side effect, CLI parameters not declared in the XML, and a unittests that downloads an unregistered sample. C++ libs otherwise compute what they claim."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md documents installation, per-module usage with screenshots, links to public OpenSlide test data and a peer-reviewed citation (IEEE Access 2021). Missing: sample data registration (code commented out), working tests, and the advertised nucleus-segmentation/gland modules are only partly exposed."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "PyPI package installed into Slicer's shared Python at module import",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 17,
+   "line_end": 21,
+   "evidence": "try:\n    from tiffslide import TiffSlide\nexcept ImportError:\n    slicer.util.pip_install(\"tiffslide\")",
+   "explanation": "Slicer imports every scripted module at startup for discovery, so this `pip_install(\"tiffslide\")` runs for all users of the extension, including those who never open BigImageViewer, and installs an unpinned package (with its own dependencies) into Slicer's shared environment. This is the exact pattern the review policy blocks: installation at import/startup, without consent, that can perturb the interpreter for other modules.",
+   "suggestion": "Move the import into the functions that need it (`getSlideInfo`, `getRegionFromFileAsRGBNumpyArray`, `onWSILevelChanged`) and fail with a user-facing message instructing how to install tiffslide (or ship it as an extension dependency), never at module level.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Unpinned runtime pip installs of scikit-image/zarr/dask/xarray can move Slicer-bundled numpy/scipy",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 1191,
+   "line_end": 1201,
+   "evidence": "        slicer.util.pip_install(\"scikit-image\")",
+   "explanation": "`installPreRequisites()` runs on 'Load WSI' and the on-the-fly hematoxylin toggle, and NgffImageIO's `installRequiredPythonPackages()` runs on every Zarr read/write, both calling `slicer.util.pip_install` with bare package names and no confirmation. scikit-image, dask and xarray declare numpy/scipy requirements, so pip may upgrade or downgrade the numpy/scipy that Slicer itself is built against, breaking Slicer and other extensions for that user; nothing is shown to the user about what is being installed.",
+   "suggestion": "Ask the user explicitly (e.g. a dialog listing packages/versions), and constrain installs so bundled numpy/scipy are not changed; consider making these declared extension dependencies instead of runtime installs.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Global CUDA_VISIBLE_DEVICES mutation in a module's logic",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 1214,
+   "line_end": 1214,
+   "evidence": "os.environ[\"CUDA_VISIBLE_DEVICES\"] = \"0\"",
+   "explanation": "`installPreRequisites()` overwrites the process-wide CUDA_VISIBLE_DEVICES environment variable to \"0\". Any other component in the same Slicer process that later reads this variable (e.g. PyTorch-based extensions) sees a modified GPU selection caused by an unrelated module, and the value the user set is lost for the session.",
+   "suggestion": "Remove the assignment; the module performs no GPU work (tensorflow/keras installs are commented out).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "NameError `attrs[key]` when exporting a volume with attributes to Zarr",
+   "file": "NgffImageIO/NgffImageIO.py",
+   "line_start": 116,
+   "line_end": 117,
+   "evidence": "attrs[key] = volumeNode.GetAttribute(attributeName)",
+   "explanation": "In `xarrayFromVolume`, the loop variable is `attributeName` but the dict is assigned with the undefined name `key`, so any volume node that carries node attributes raises NameError at write time and the writer returns False after logging. Nodes created by other Slicer modules routinely carry attributes, so Zarr export fails silently for them.",
+   "suggestion": "Use `attrs[attributeName] = volumeNode.GetAttribute(attributeName)` and report the error to the user.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Widget constructor changes application layout and leaks VTK observers",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 119,
+   "line_end": 172,
+   "evidence": "    lm.setLayout(6)",
+   "explanation": "Every construction of BigImageViewerWidget forces the application layout to preset 6 and adds three permanent observers to the Red view's interactor. `cleanup()` only calls `removeObservers()` from VTKObservationMixin, so the interactor observers survive module destruction, keeping widget objects alive and firing callbacks (which touch `self.ui`) after the widget is gone; the layout change also persists even if the user never uses the module.",
+   "suggestion": "Move layout switching and interactor observer setup into `enter()`/`setup()` only after a WSI is loaded, store the observer tags, and remove them in `cleanup()`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Processing paths call undefined functions/attributes (NameError)",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 1327,
+   "line_end": 1329,
+   "evidence": "imgArray.astype(numpy.float)",
+   "explanation": "`processSegmentGland` calls `segment2DRGBImageRandomSampleDividePrior` and the gland/nuclei handlers use `self.kerasModelSegmentColonGland`, which is only referenced in commented-out code; the model kernels are therefore never defined. Also `imgArray.astype(numpy.float)` uses a type removed in NumPy 1.24+. Any invocation (e.g. by script, since the UI button is disabled) raises NameError/AttributeError instead of processing.",
+   "suggestion": "Remove the dead gland/nuclei keras paths or implement and guard them, and use `numpy.float64`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Registered Python unittest downloads a sample that is never registered",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 1474,
+   "line_end": 1476,
+   "evidence": "inputVolume = SampleData.downloadSample('BigImageViewer1')",
+   "explanation": "Both module CMakeLists register `slicer_add_python_unittest` for BigImageViewer.py and NgffImageIO.py, but `registerSampleData()` is entirely commented out, so `SampleData.downloadSample('BigImageViewer1')` fails and the BigImageViewer test cannot pass in CI or at runtime. This makes the declared test coverage ineffective.",
+   "suggestion": "Register the sample data source (or use an existing Slicer sample) and make the test exercise the actual WSI loading logic.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "CLI invoked with parameters that are not declared in the XML",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 1004,
+   "line_end": 1008,
+   "evidence": "parameters['outputEImage'] = volumeNode.GetID()",
+   "explanation": "`onSegmentNucleiButton` passes 'outputEImage' and 'outputHImage', but NucleusSegmentation.xml has those outputs commented out; only `inputfileName`, `outputImageName`, `threshold` and `mpp` exist. The extra keys are either ignored (masking a partially removed feature) or cause the CLI node to be created with unknown parameters, and the two outputs also write to the same gray node, so the intent of the code cannot be satisfied.",
+   "suggestion": "Drop the undeclared parameters and pass only the parameters the CLI actually declares.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Declared screenshot may not exist and is very large",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_SCREENSHOTURLS \"https://raw.githubusercontent.com/gaoyi/SlicerBigImage/main/Screenshots/1.png\")",
+   "explanation": "The extension metadata advertises `.../main/Screenshots/1.png`, but no Screenshots directory appears in the repository listing I inspected, while the scan hints report a 12 MB Screenshots/1.png. Either the URL 404s in the extension manager or a 12 MB binary is committed to a repository that every build checks out; binaries of that size belong in a release asset, not the source tree.",
+   "suggestion": "Point EXTENSION_SCREENSHOTURLS at a small committed screenshot (or a release asset) that is actually present on the branch.",
+   "confidence": "low"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Third-party provenance of bundled C++ kernels not documented",
+   "file": "ColorDecomposition/ColorDecomposition.cxx",
+   "line_start": 92,
+   "line_end": 106,
+   "evidence": "MODx[0]= 0.644211; //0.650;",
+   "explanation": "License.txt is the Slicer BSD-style license, under which Part A §6 requires that contributions contain no reciprocally licensed code. The stain-matrix tables and cosx/cosy/cosz deconvolution in ColorDecomposition/ColorDecomposition.cxx are the same code as Landini's Colour Deconvolution plugin (GPL v3+), and NucleusSegmentation/include/TypeUtils.h is marked 'Author: tcpan', apparently from the cci/Pathology project. I could not verify the derivation or its license, so redistribution permission for these files is unclear.",
+   "suggestion": "Add attribution/license notes for the third-party-derived deconvolution and segmentation code in the repository (e.g. a THIRD_PARTY file) and confirm the terms permit BSD-style redistribution.",
+   "confidence": "low"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "No data transmission, credentials or obfuscation found",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 17,
+   "line_end": 21,
+   "evidence": "    from tiffslide import TiffSlide",
+   "explanation": "Searches for requests/urllib/socket/curl/wget/subprocess/os.system/eval/exec/pickle found nothing outside commented-out sample-data URLs in BigImageViewer.py; slide data is read locally through tiffslide and all file paths come from user-selected widgets. The only network activity is PyPI installs via slicer.util.pip_install, covered separately. No text addressed to AI reviewers was present.",
+   "suggestion": "No action; recorded as context for the safety rating.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Most of the NucleusSegmentation C++ implementation (SFLSSegmentor2D.hxx/.h, MeanshiftClusteringFilter.hxx, HierarchicalMeanshiftClusteringFilter.hxx, BinaryMaskAnalysisFilter.cxx, HematoxylinImageSegmentationFilter.cxx, utilitiesImage.cxx) was only skimmed via searches; no full audit of numerics or",
+  "Whether Screenshots/1.png actually exists at the referenced revision and its size (binary file could not be read; the directory is absent from my listing).",
+  "The exact state of the repository at upstream main (the catalog entry pins scm_revision \"main\", not the commit hash given in the prompt); I reviewed the file contents provided, which may not equal the current tip.",
+  "Actual CI build/test results for the extension on any platform.",
+  "Which numpy/scipy versions pip would resolve for scikit-image/dask/xarray in a given Slicer release, i.e. whether a downgrade actually occurs in practice.",
+  "Licenses of the runtime-installed packages (tiffslide, zarr, dask, xarray, scikit-image) and whether their terms are compatible.",
+  "Catalog schema validity of the extension JSON entry (validated by the index scripts, which I could not run)."
+ ],
+ "questions_for_author": [
+  "Can you move the tiffslide import and install out of module scope so that loading Slicer never installs packages for users who do not use BigImageViewer?",
+  "Would you be willing to add explicit user confirmation and version constraints (not touching Slicer's bundled numpy/scipy) for scikit-image/zarr/dask/xarray, or declare them as build dependencies?",
+  "Where does the stain-matrix/deconvolution code in ColorDecomposition.cxx come from, and under what license? Same question for NucleusSegmentation/include/TypeUtils.h ('Author: tcpan') and the SFLS segmentor.",
+  "Should the dead keras gland/nuclei code and the undeclared CLI parameters (outputEImage/outputHImage) be removed or completed?",
+  "Can the sample data for the registered Python unittests be registered so the tests can run in CI?"
+ ]
+}

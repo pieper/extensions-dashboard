@@ -1,0 +1,1207 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Model weights downloaded with TLS verification disabled and loaded via torch.load without integrity check",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "major",
+    "minor"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 738,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "TLS certificate verification disabled for all downloads",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 738,
+     "line_end": 738,
+     "evidence": "    response = requests.get(url, stream=True, verify=False, headers=headers)",
+     "explanation": "downloadShowProgress() is used both for the model weights (line 768) and the sample volume (line 458) with verify=False, so a man-in-the-middle can substitute the payload. Combined with the torch.load path this makes the code-execution risk practical; for the sample data it silently replaces the intended sample file with whatever the attacker sends.",
+     "suggestion": "Use verify=True (the default) and pin the payload with a checksum.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 738
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "minor",
+     "title": "Disabled SSL verification in HTTP requests",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 738,
+     "line_end": 738,
+     "evidence": "    response = requests.get(url, stream=True, verify=False, headers=headers)",
+     "explanation": "The download logic disables SSL certificate verification (`verify=False`) when downloading model weights and sample data via `requests.get`. This exposes users to man-in-the-middle (MitM) attacks where an attacker could intercept or tamper with the downloaded deep learning model weights or sample data.",
+     "suggestion": "Remove `verify=False` or implement checksum verification (e.g., SHA256) for downloaded models and datasets.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 738
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "blocking",
+     "title": "Model weights downloaded with TLS verification disabled and loaded via torch.load without integrity check",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 738,
+     "line_end": 738,
+     "evidence": "response = requests.get(url, stream=True, verify=False, headers=headers)",
+     "explanation": "setupNet downloads net_weight_base.pth from a third-party Zoho host through downloadShowProgress, which calls requests.get with verify=False, so any network attacker can substitute the file. The file is then passed to torch.load, which unpickles by default in older PyTorch versions, giving arbitrary code execution as the user. No checksum or signature is verified, even though the commented-out sample-data code shows the author knows about checksums. The sample download uses the same unverified path.",
+     "suggestion": "Enable certificate verification, pin a SHA-256 checksum of the weight file and verify it before loading, and use torch.load(..., weights_only=True) or a safetensors format. Host the weights on a stable HTTPS source tied to a release.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 738
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Model weights fetched without integrity check are loaded with torch.load (unsafe deserialization of a remote file)",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 772,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "Model weights fetched without integrity check are loaded with torch.load (unsafe deserialization of a remote file)",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 762,
+     "line_end": 772,
+     "evidence": "      self.model_seg.load_state_dict(torch.load(self.weight_path_seg, map_location=torch.device(self.device)))",
+     "explanation": "On first use the module downloads net_weight_base.pth from files.zohopublic.com.cn into the extension's Resources folder (lines 762-768) and immediately unpickles it with torch.load (line 772), without weights_only, checksum or signature. Because the same download disables TLS verification (line 738), anyone able to intercept or compromise that host can deliver an arbitrary pickle that executes with the user's privileges the moment they click 'AI Automatically Segment and Diagnose'.",
+     "suggestion": "Host the weights with the extension (GitHub release) and verify a SHA-256 checksum, load with torch.load(..., weights_only=True) where available, and use certificate verification (remove verify=False).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 772
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Weight file loaded with torch.load from a download location without a safe-load flag",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 772,
+     "line_end": 772,
+     "evidence": "self.model_seg.load_state_dict(torch.load(self.weight_path_seg, map_location=torch.device(self.device)))",
+     "explanation": "The downloaded checkpoint is deserialized with torch.load. Because the file comes from an unverified source (see above), this is unsafe deserialization. Even with a good checksum, weights_only=True should be used.",
+     "suggestion": "Use torch.load(path, map_location=..., weights_only=True) after checksum verification.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 772
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Heavy inference runs on the GUI thread with a modal dialog but no event processing",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 939,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Heavy inference runs on the GUI thread with a modal dialog but no event processing",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 936,
+     "line_end": 940,
+     "evidence": "          result_img_temp[:, :, i] = np.squeeze(self.AIAssistedSegment(input_img[:, :, i])[0], axis=2)",
+     "explanation": "In 'Segment All' mode the module loops over every slice, running the full ConvFormer on each, synchronously in the button handler; progressDiag.setValue() is never followed by processEvents, so the window does not repaint and Slicer appears frozen for the 'several minutes' the UI warns about. The model is also constructed eagerly in BUS_DiagnosisLogic.__init__ (line 700), slowing the first module open.",
+     "suggestion": "Run the loop in a slicer.util.ProgressDialog/CLI-style worker (or at least call qt.QApplication.processEvents() per slice) and build/load the network lazily in setupNet().",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 939
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "No license or provenance terms for the downloaded weights and sample data",
+   "category": "license",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 57,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "No license or provenance terms for the downloaded weights and sample data",
+     "file": "README.md",
+     "line_start": 54,
+     "line_end": 57,
+     "evidence": "- [NetWeight (Zoho WorkDrive)](https://workdrive.zoho.com.cn/file/jy075dd560e5a2fe7475b8a02ebc889aca769)",
+     "explanation": "The Apache-2.0 LICENSE covers the repository code only. The net_weight_base.pth and BenignSample.nrrd payloads are distributed exclusively through third-party file-hosting links (also Zoho/Google Drive), with no license statement, no redistribution permission, and no information on how the sample ultrasound data was obtained or de-identified. The extension cannot be said to have clear distribution permission for the material it fetches.",
+     "suggestion": "Attach an explicit license/permission statement for the weights and sample data (ideally host them as GitHub release assets under the same terms) and document the sample data's provenance and de-identification.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 57
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Model weights and sample data have no stated license or redistribution terms",
+     "file": "README.md",
+     "line_start": 47,
+     "line_end": 57,
+     "evidence": "- [NetWeight (Google Drive)](https://drive.google.com/file/d/1lfYU8dPFIRQ4uWio_YlbG-31i35uttwA/view?usp=sharing)",
+     "explanation": "The repository license is Apache-2.0 for code, but the trained weight file and the sample NRRD are only referenced from Google Drive and Zoho links. No terms for those artifacts are given, so users cannot tell whether they may use or redistribute them, especially in a clinical-research setting.",
+     "suggestion": "State the license for the weights and sample data in the README, or add a LICENSE/NOTICE for those artifacts.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 56
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "PyTorchUtils result ignored and failures swallowed",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 34,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "PyTorchUtils result ignored and failures swallowed",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 32,
+     "line_end": 37,
+     "evidence": "      torch = torchLogic.installTorch(askConfirmation=True)",
+     "explanation": "Even when PyTorchUtils successfully installs a matching torch, the code then runs pip_install of the newest PyPI torch anyway (line 37); the return value of installTorch is discarded and the bare 'except: pass' (line 35) hides failures. Users get either a silently upgraded/duplicated torch or an obscure import error, with no explanation of what was installed.",
+     "suggestion": "Check the value returned by installTorch (and torchLogic.ensureTorch / version list), and report failure to the user instead of continuing into pip_install.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 34
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Button handler installs torch via pip without using the PyTorch extension",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 445,
+     "line_end": 448,
+     "evidence": "slicer.util.pip_install('torch torchvision torchaudio')\n      import torch",
+     "explanation": "onInstallPytorchButton installs torch, torchvision and torchaudio directly from PyPI, with no CUDA selection and no use of PyTorchUtils. This bypasses the extension's logic and can break the shared environment for other extensions.",
+     "suggestion": "Route the button through PyTorchUtils.PyTorchUtilsLogic().installTorch(askConfirmation=True).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 37
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Sample-data download over unverified TLS with no checksum",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 453,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Sample-data download over unverified TLS with no checksum",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 453,
+     "line_end": 461,
+     "evidence": "url = \"https://files.zohopublic.com.cn/public/workdrive-public/download/jy075c6237954580e4ccf98fca3fd55bacf66?x-cli-msg=%7B%22isFileOwner%22%3Afalse%2C%22version%22%3A%221.0%22%7D\"",
+     "explanation": "The sample NRRD is fetched from a third-party URL with verify=False and no checksum, then loaded into the scene. A MITM could substitute crafted image data. The file is then parsed by Slicer's loader, so the impact is limited, but the download is still unauthenticated.",
+     "suggestion": "Verify TLS and check a SHA-256 digest of the sample file before loading it.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 453
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "PyTorch installed with pip_install at module import, bypassing the PyTorch extension",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "consensus",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "blocking",
+    "major"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 37,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "PyTorch installed with pip_install at module import, bypassing the PyTorch extension",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 37,
+     "line_end": 37,
+     "evidence": "    slicer.util.pip_install('torch torchvision torchaudio')",
+     "explanation": "The module-level try/except ends in an unconditional pip_install of torch/torchvision/torchaudio, so importing the script (which happens when Slicer scans the qt-scripted-modules folder at startup, before the module is ever opened) installs PyPI torch into Slicer's shared Python, together with its own numpy/pillow pins. This affects users who never open the module and can break Slicer and other extensions; README.md:33 confirms the intent ('This module will install them automatically when you restart 3D Slicer for the first time'). The catalog declares PyTorch in build_dependencies/EXTENSION_DEPENDS, which is the supported route.",
+     "suggestion": "Remove the pip_install fallback (and the duplicate one in onInstallPytorchButton, line 446); require torch via PyTorchUtils.installTorch/ensureTorch with a version list and let the PyTorch extension provide it, showing a clear error if unavailable.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 37
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "major",
+     "title": "Direct PyTorch installation via pip at import time violates PyTorch extension policy",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 37,
+     "line_end": 37,
+     "evidence": "    slicer.util.pip_install('torch torchvision torchaudio')",
+     "explanation": "The extension attempts to pip-install `torch torchvision torchaudio` directly via `slicer.util.pip_install` at module import time (and again on demand). Per Extensions Index review policy, PyTorch must not be installed via `pip_install` from PyPI, but rather through the Slicer PyTorch extension (`PyTorchUtils`, listed in `build_dependencies` and `EXTENSION_DEPENDS`). Installing PyTorch directly from PyPI can break Slicer's environment, CUDA compatibility, or bundle integrity.",
+     "suggestion": "Remove the top-level `pip_install('torch torchvision torchaudio')` block from `BUS_Diagnosis.py`, rely on `PyTorchUtils` in `build_dependencies` / `EXTENSION_DEPENDS`, and prompt or guide users appropriately through `PyTorchUtilsLogic().installTorch()` without unpinned pip installs from PyPI.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 37
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "blocking",
+     "title": "PyTorch installed from PyPI at import time, not via the PyTorch extension",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 26,
+     "line_end": 37,
+     "evidence": "    slicer.util.pip_install('torch torchvision torchaudio')",
+     "explanation": "At module import (the except branch), the code calls slicer.util.pip_install('torch torchvision torchaudio') after a failed PyTorchUtils attempt. This runs during Slicer startup for every user who has the module loaded, and installs unpinned PyPI torch into Slicer's shared Python environment. AGENTS.md requires requesting changes for this. The README (line 33) describes the automatic install as expected behavior.",
+     "suggestion": "Remove the direct pip install. Rely on PyTorchUtils (listed in build_dependencies) and its user-confirmed installTorch, and do not install at import time. If the try-import fails, show a message asking the user to install PyTorch through the PyTorch extension.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 37
+     }
+    }
+   ]
+  },
+  {
+   "title": "Download error handling is broken; retry settings are ineffective",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 741,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Download error handling is broken; retry settings are ineffective",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 733,
+     "line_end": 741,
+     "evidence": "    content_size = int(response.headers['content-length'])",
+     "explanation": "The content-length read is outside the try block, so a missing header raises KeyError that escapes the 'except: QMessageBox ... Download failed' path and surfaces as a generic 'Failed to compute results' (or nothing). requests.DEFAULT_RETRIES does not exist in requests and the created session 's' is unused, so the intended retry behaviour never happens; verify=False is also applied here.",
+     "suggestion": "Move all network/file operations into the try block, drop or implement retries properly, and report the exception text to the user.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 741
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Download helper crashes on missing content-length and ignores HTTP errors",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 741,
+     "line_end": 741,
+     "evidence": "content_size = int(response.headers['content-length'])",
+     "explanation": "content_size is read from response.headers['content-length'] outside the try block, so a missing header raises an unhandled KeyError and the user sees no message. Non-200 responses fall through silently and the 'success' path still runs when showsuccess is set.",
+     "suggestion": "Move the request inside the try, check response.status_code and raise_for_status, and handle a missing content-length.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 741
+     }
+    }
+   ]
+  },
+  {
+   "title": "Model weights are written into the Slicer installation tree",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 763,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Model weights are written into the Slicer installation tree",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 763,
+     "line_end": 764,
+     "evidence": "      path = os.path.join(os.path.dirname(__file__), 'Resources')",
+     "explanation": "The downloaded weight file is stored in the extension's own installed Resources directory. On system-wide or read-only Slicer installations this fails (and the failure is reported only as 'Download failed'), and it modifies installed program files rather than user or temporary data.",
+     "suggestion": "Download to the Slicer user settings/cache directory (e.g. under slicer.app.userSettingsPath()) or a temporary folder.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 763
+     }
+    }
+   ]
+  },
+  {
+   "title": "No functional tests; test scaffold is empty",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "BUS_Diagnosis/Testing/Python/CMakeLists.txt",
+   "line": 2,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "No functional tests; test scaffold is empty",
+     "file": "BUS_Diagnosis/Testing/Python/CMakeLists.txt",
+     "line_start": 1,
+     "line_end": 2,
+     "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+     "explanation": "The only test method body is a stub, and the CTest registration is commented out. Logic such as fromCurrentOffsettoCurrentSlice, the classifier output mapping, and the save routines is untested, so regressions would not be caught.",
+     "suggestion": "Add a small unit test that exercises the logic with a dummy or synthetic model and enable the CTest registration.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/Testing/Python/CMakeLists.txt",
+      "line": 2
+     }
+    }
+   ]
+  },
+  {
+   "title": "No model provenance, training data description or validation metrics",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 27,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No model provenance, training data description or validation metrics",
+     "file": "README.md",
+     "line_start": 25,
+     "line_end": 27,
+     "evidence": "**Caution! The AI prediction results are not absolutely accurate, and are only for physicians' reference in diagnosis.**",
+     "explanation": "The README cites the JBHI paper but the module itself gives no information about training data, intended population, reported sensitivity/specificity, or whether the shipped weights correspond to the published model. Clinicians cannot judge when the benign/malignant output is trustworthy.",
+     "suggestion": "State the weights' version/date, the training cohort, and published performance, and repeat the caution inside the module help text.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 27
+     }
+    }
+   ]
+  },
+  {
+   "title": "Result-folder name built by string surgery on the last character",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 543,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Result-folder name built by string surgery on the last character",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 603,
+     "line_end": 606,
+     "evidence": "          savePath = savePath[:-1] + f\"{int(savePath[-1]) + 1}\"",
+     "explanation": "The 'next free folder' logic assumes the last character is a single digit of the counter; after '_9' the next candidate becomes '_11' and the pattern only works by accident, and the while loop can spin on names it cannot parse. It also silently creates new folders instead of asking, which can scatter patient results across the chosen directory.",
+     "suggestion": "Use an integer counter (e.g. itertools.count or an int variable) with os.path.exists on the formatted name.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 543
+     }
+    }
+   ]
+  },
+  {
+   "title": "Test class contains no assertions",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 30,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Test class contains no assertions",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 1537,
+     "line_end": 1548,
+     "evidence": "    pass",
+     "explanation": "BUS_DiagnosisTest.test_BUS_Diagnosis1 only contains 'pass', so the registered ctest (BUS_Diagnosis/CMakeLists.txt:28) can never catch a regression such as a renamed UI widget or a broken torch API, even though the module depends on fast-moving third-party packages.",
+     "suggestion": "Add at least a smoke test that instantiates the logic, checks parameter-node defaults, and (if a small test volume is shipped) runs process() on it.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 30
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unpinned branch reference in catalog entry",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Unpinned branch reference in catalog entry",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "\"scm_revision\": \"master\",",
+     "explanation": "scm_revision is 'master', a moving branch. The code the index builds may change without review, so the approved source is not fixed.",
+     "suggestion": "Pin scm_revision to a reviewed commit SHA or a release tag.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Use of eval in the Conformer forward pass",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 1250,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "eval() used for module lookup in the network forward pass",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 1250,
+     "line_end": 1250,
+     "evidence": "            x, x_t = eval('self.conv_trans_' + str(i))(x, x_t)",
+     "explanation": "The evaluated string is built only from an integer loop counter over self.add_module names, so there is no injection path from user input; flagged only as a style/robustness note (getattr would be equivalent and safer).",
+     "suggestion": "Replace with getattr(self, 'conv_trans_' + str(i))(x, x_t).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 1250
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Use of eval in the Conformer forward pass",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 1250,
+     "line_end": 1250,
+     "evidence": "x, x_t = eval('self.conv_trans_' + str(i))(x, x_t)",
+     "explanation": "eval builds attribute names from a constant prefix and integer. Current inputs are safe, but it is an unnecessary eval and hides the module graph from tooling.",
+     "suggestion": "Use getattr(self, 'conv_trans_' + str(i))(x, x_t).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 1250
+     }
+    }
+   ]
+  },
+  {
+   "title": "Patient identifiers written to a plain-text file in a user-chosen folder",
+   "category": "safety",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 550,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Patient identifiers written to a plain-text file in a user-chosen folder",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 549,
+     "line_end": 553,
+     "evidence": "      f.write(f\"Patient Name       :  {patientName}\\n\")",
+     "explanation": "Saving results writes name, ID, birth date and sex into Classification_Result.txt next to the images. This is user-initiated and to a user-chosen directory, so it is expected behaviour, but the identifiers are unencrypted and the patient name is also used as part of the folder name; worth a note in the documentation.",
+     "suggestion": "Document that saved results contain PHI, and consider offering a de-identified option.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 550
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Model weights downloaded with TLS verification disabled and loaded via torch.load without integrity check",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "major",
+    "minor"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 738,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "TLS certificate verification disabled for all downloads",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 738,
+     "line_end": 738,
+     "evidence": "    response = requests.get(url, stream=True, verify=False, headers=headers)",
+     "explanation": "downloadShowProgress() is used both for the model weights (line 768) and the sample volume (line 458) with verify=False, so a man-in-the-middle can substitute the payload. Combined with the torch.load path this makes the code-execution risk practical; for the sample data it silently replaces the intended sample file with whatever the attacker sends.",
+     "suggestion": "Use verify=True (the default) and pin the payload with a checksum.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 738
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "minor",
+     "title": "Disabled SSL verification in HTTP requests",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 738,
+     "line_end": 738,
+     "evidence": "    response = requests.get(url, stream=True, verify=False, headers=headers)",
+     "explanation": "The download logic disables SSL certificate verification (`verify=False`) when downloading model weights and sample data via `requests.get`. This exposes users to man-in-the-middle (MitM) attacks where an attacker could intercept or tamper with the downloaded deep learning model weights or sample data.",
+     "suggestion": "Remove `verify=False` or implement checksum verification (e.g., SHA256) for downloaded models and datasets.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 738
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "blocking",
+     "title": "Model weights downloaded with TLS verification disabled and loaded via torch.load without integrity check",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 738,
+     "line_end": 738,
+     "evidence": "response = requests.get(url, stream=True, verify=False, headers=headers)",
+     "explanation": "setupNet downloads net_weight_base.pth from a third-party Zoho host through downloadShowProgress, which calls requests.get with verify=False, so any network attacker can substitute the file. The file is then passed to torch.load, which unpickles by default in older PyTorch versions, giving arbitrary code execution as the user. No checksum or signature is verified, even though the commented-out sample-data code shows the author knows about checksums. The sample download uses the same unverified path.",
+     "suggestion": "Enable certificate verification, pin a SHA-256 checksum of the weight file and verify it before loading, and use torch.load(..., weights_only=True) or a safetensors format. Host the weights on a stable HTTPS source tied to a release.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 738
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Model weights fetched without integrity check are loaded with torch.load (unsafe deserialization of a remote file)",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 772,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "Model weights fetched without integrity check are loaded with torch.load (unsafe deserialization of a remote file)",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 762,
+     "line_end": 772,
+     "evidence": "      self.model_seg.load_state_dict(torch.load(self.weight_path_seg, map_location=torch.device(self.device)))",
+     "explanation": "On first use the module downloads net_weight_base.pth from files.zohopublic.com.cn into the extension's Resources folder (lines 762-768) and immediately unpickles it with torch.load (line 772), without weights_only, checksum or signature. Because the same download disables TLS verification (line 738), anyone able to intercept or compromise that host can deliver an arbitrary pickle that executes with the user's privileges the moment they click 'AI Automatically Segment and Diagnose'.",
+     "suggestion": "Host the weights with the extension (GitHub release) and verify a SHA-256 checksum, load with torch.load(..., weights_only=True) where available, and use certificate verification (remove verify=False).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 772
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Weight file loaded with torch.load from a download location without a safe-load flag",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 772,
+     "line_end": 772,
+     "evidence": "self.model_seg.load_state_dict(torch.load(self.weight_path_seg, map_location=torch.device(self.device)))",
+     "explanation": "The downloaded checkpoint is deserialized with torch.load. Because the file comes from an unverified source (see above), this is unsafe deserialization. Even with a good checksum, weights_only=True should be used.",
+     "suggestion": "Use torch.load(path, map_location=..., weights_only=True) after checksum verification.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 772
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Heavy inference runs on the GUI thread with a modal dialog but no event processing",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 939,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Heavy inference runs on the GUI thread with a modal dialog but no event processing",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 936,
+     "line_end": 940,
+     "evidence": "          result_img_temp[:, :, i] = np.squeeze(self.AIAssistedSegment(input_img[:, :, i])[0], axis=2)",
+     "explanation": "In 'Segment All' mode the module loops over every slice, running the full ConvFormer on each, synchronously in the button handler; progressDiag.setValue() is never followed by processEvents, so the window does not repaint and Slicer appears frozen for the 'several minutes' the UI warns about. The model is also constructed eagerly in BUS_DiagnosisLogic.__init__ (line 700), slowing the first module open.",
+     "suggestion": "Run the loop in a slicer.util.ProgressDialog/CLI-style worker (or at least call qt.QApplication.processEvents() per slice) and build/load the network lazily in setupNet().",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 939
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "No license or provenance terms for the downloaded weights and sample data",
+   "category": "license",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 57,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "No license or provenance terms for the downloaded weights and sample data",
+     "file": "README.md",
+     "line_start": 54,
+     "line_end": 57,
+     "evidence": "- [NetWeight (Zoho WorkDrive)](https://workdrive.zoho.com.cn/file/jy075dd560e5a2fe7475b8a02ebc889aca769)",
+     "explanation": "The Apache-2.0 LICENSE covers the repository code only. The net_weight_base.pth and BenignSample.nrrd payloads are distributed exclusively through third-party file-hosting links (also Zoho/Google Drive), with no license statement, no redistribution permission, and no information on how the sample ultrasound data was obtained or de-identified. The extension cannot be said to have clear distribution permission for the material it fetches.",
+     "suggestion": "Attach an explicit license/permission statement for the weights and sample data (ideally host them as GitHub release assets under the same terms) and document the sample data's provenance and de-identification.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 57
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Model weights and sample data have no stated license or redistribution terms",
+     "file": "README.md",
+     "line_start": 47,
+     "line_end": 57,
+     "evidence": "- [NetWeight (Google Drive)](https://drive.google.com/file/d/1lfYU8dPFIRQ4uWio_YlbG-31i35uttwA/view?usp=sharing)",
+     "explanation": "The repository license is Apache-2.0 for code, but the trained weight file and the sample NRRD are only referenced from Google Drive and Zoho links. No terms for those artifacts are given, so users cannot tell whether they may use or redistribute them, especially in a clinical-research setting.",
+     "suggestion": "State the license for the weights and sample data in the README, or add a LICENSE/NOTICE for those artifacts.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 56
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "PyTorchUtils result ignored and failures swallowed",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 34,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "PyTorchUtils result ignored and failures swallowed",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 32,
+     "line_end": 37,
+     "evidence": "      torch = torchLogic.installTorch(askConfirmation=True)",
+     "explanation": "Even when PyTorchUtils successfully installs a matching torch, the code then runs pip_install of the newest PyPI torch anyway (line 37); the return value of installTorch is discarded and the bare 'except: pass' (line 35) hides failures. Users get either a silently upgraded/duplicated torch or an obscure import error, with no explanation of what was installed.",
+     "suggestion": "Check the value returned by installTorch (and torchLogic.ensureTorch / version list), and report failure to the user instead of continuing into pip_install.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 34
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Button handler installs torch via pip without using the PyTorch extension",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 445,
+     "line_end": 448,
+     "evidence": "slicer.util.pip_install('torch torchvision torchaudio')\n      import torch",
+     "explanation": "onInstallPytorchButton installs torch, torchvision and torchaudio directly from PyPI, with no CUDA selection and no use of PyTorchUtils. This bypasses the extension's logic and can break the shared environment for other extensions.",
+     "suggestion": "Route the button through PyTorchUtils.PyTorchUtilsLogic().installTorch(askConfirmation=True).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 37
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Sample-data download over unverified TLS with no checksum",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line": 453,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Sample-data download over unverified TLS with no checksum",
+     "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+     "line_start": 453,
+     "line_end": 461,
+     "evidence": "url = \"https://files.zohopublic.com.cn/public/workdrive-public/download/jy075c6237954580e4ccf98fca3fd55bacf66?x-cli-msg=%7B%22isFileOwner%22%3Afalse%2C%22version%22%3A%221.0%22%7D\"",
+     "explanation": "The sample NRRD is fetched from a third-party URL with verify=False and no checksum, then loaded into the scene. A MITM could substitute crafted image data. The file is then parsed by Slicer's loader, so the impact is limited, but the download is still unauthenticated.",
+     "suggestion": "Verify TLS and check a SHA-256 digest of the sample file before loading it.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+      "line": 453
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "deepseek": "blocking",
+    "flash-lite": "minor",
+    "haiku": "blocking"
+   }
+  },
+  {
+   "title": "Rating of license",
+   "category": "license",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D8",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D9",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of utility",
+   "category": "utility",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D10",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8",
+  "D9",
+  "D10"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "blocking",
+   "flash-lite": "minor",
+   "haiku": "blocking"
+  },
+  "environment": {
+   "deepseek": "blocking",
+   "flash-lite": "concern",
+   "haiku": "blocking"
+  },
+  "packaging": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "needs fixes",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 1,
+  "disputed": 10,
+  "single": 9,
+  "unverified": 1,
+  "total": 16
+ }
+}

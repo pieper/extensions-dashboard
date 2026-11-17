@@ -1,0 +1,173 @@
+{
+ "purpose": "BigImage is a 3D Slicer extension for viewing and analyzing very large whole-slide microscopy images (BigImageViewer, tiled via tiffslide), with CLI modules for H&E/stain color decomposition and nucleus segmentation, plus an experimental Zarr/OME-NGFF reader/writer (NgffImageIO). It is aimed at computational pathology researchers.",
+ "summary": "No malicious or data-exfiltrating behavior found in the files read; no network servers, credentials, or deserialization of untrusted data. The main problems are soundness: several code paths reference undefined names or removed APIs (Gland detection and the Keras-based nucleus path will fail), NgffImageIO's attribute export has a NameError, and the viewer's test relies on sample data whose registration is commented out. Environment hygiene is weak: tiffslide is pip-installed at module import, and CUDA_VISIBLE_DEVICES is set globally. The catalog entry is mechanically consistent (no build deps, EXTENSION_DEPENDS \"NA\"). Overall: needs fixes, not a security block.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Read BigImageViewer.py, NgffImageIO.py, CMakeLists and README; no exfiltration, credentials, or download-and-execute found. Concerns are runtime pip installs and a global environment variable write (BigImageViewer.py:20, 1199, 1214), not malicious behavior."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "tiffslide is installed by pip_install at module level (BigImageViewer.py:17-21) so it runs when the module file is imported; scikit-image and zarr/dask/xarray are installed unpinned on first use (1197-1199, NgffImageIO.py:55-66). os.environ[\"CUDA_VISIBLE_DEVICES\"] = \"0\" is set globally (line 1214). No PyTorch or Qt/VTK-bundling package found."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMake lists match existing scripts (BigImageViewer.py, NgffImageIO.py, UI/Icons); EXTENSION_DEPENDS \"NA\" matches build_dependencies []. A 12 MB Screenshots/1.png is referenced and committed; ColorDecomposition.xml documentation-url is a placeholder."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "License.txt is the 3D Slicer contribution/BSD-style license, which permits distribution. Its Part B clause 4 states the software is for research purposes only and not for clinical use, which users should know about."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Multiple undefined-name and API defects: self.kerasModelSegmentColonGland is commented out (BigImageViewer.py:116) but used at 981; segment2DRGBImageRandomSampleDividePrior is never defined (1329, 1383); numpy.float is removed in modern numpy (1329, 1383); NgffImageIO.py:117 assigns attrs[key] with undefined key."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents the viewer and ColorDecomposition with screenshots and cites a paper. Nucleus segmentation and the gland/Keras paths are not functional, and the BigImageViewer test downloads 'BigImageViewer1' while its registration is commented out (BigImageViewer.py:50-93, 1476), so the test cannot run as written."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Gland detection button calls an attribute that is never defined",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 979,
+   "line_end": 981,
+   "evidence": "  def onDetectGlandButton(self):\n    self.logic.installPreRequisites()\n    self.logic.processSegmentGland(self.patchVolumeNode, self.patchGrayVolumeNode, self.kerasModelSegmentColonGland)",
+   "explanation": "The gland-detection path reads self.kerasModelSegmentColonGland, but the only assignment is commented out, so clicking 'detectGlandButton' raises AttributeError. Downstream, processSegmentGland also calls an undefined method, so this feature cannot work as shipped.",
+   "suggestion": "Remove or hide the button until a model is loaded, or load the model explicitly and handle its absence with a user-visible error.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Keras-based logic calls an undefined method and uses removed numpy.float",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 1383,
+   "line_end": 1383,
+   "evidence": "      testImgSeg = self.segment2DRGBImageRandomSampleDividePrior(model = kerasModel, imageArray = imgArray.astype(numpy.float), patchSideLen = 64, numPatchSampleFactor = 5, batch_size = 10)",
+   "explanation": "processSegmentGland and processSegmentNuclei call self.segment2DRGBImageRandomSampleDividePrior, which is not defined anywhere in the file, and use numpy.float (removed in NumPy 1.24). processSegmentNuclei also references an undefined kerasModel. The nucleus path is a dead end on any current Slicer.",
+   "suggestion": "Delete the dead Keras code paths or implement them completely; replace numpy.float with float or numpy.float64.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "NgffImageIO attribute export raises NameError",
+   "file": "NgffImageIO/NgffImageIO.py",
+   "line_start": 116,
+   "line_end": 117,
+   "evidence": "        for attributeName in volumeNode.GetAttributeNames():\n            attrs[key] = volumeNode.GetAttribute(attributeName)",
+   "explanation": "The loop iterates over attributeName but assigns to key, which is undefined in that scope. Any volume with at least one attribute will make xarrayFromVolume raise NameError, so the Zarr writer's export fails for such volumes (the writer catches the exception and returns False).",
+   "suggestion": "Use attrs[attributeName] = volumeNode.GetAttribute(attributeName).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "BigImageViewer self-test depends on sample data that is not registered",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 1474,
+   "line_end": 1477,
+   "evidence": "      import SampleData\n      #registerSampleData()\n      inputVolume = SampleData.downloadSample('BigImageViewer1')",
+   "explanation": "The sample-data registration function is commented out, yet the test calls SampleData.downloadSample('BigImageViewer1'). The test fails before any assertion runs, so the 'generic tests' do not validate the viewer.",
+   "suggestion": "Restore the sample-data registration (with a checksum) or rewrite the test to use a small generated image.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "tiffslide is pip-installed at module import time",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 17,
+   "line_end": 21,
+   "evidence": "try:\n    from tiffslide import TiffSlide\nexcept ImportError:\n    slicer.util.pip_install(\"tiffslide\")",
+   "explanation": "The try/except at module level runs slicer.util.pip_install whenever BigImageViewer.py is imported and tiffslide is missing. This happens at module load, not on explicit user action. The package is also unpinned, and its dependencies may change packages Slicer bundles.",
+   "suggestion": "Move the import into a function that runs after an explicit user action (for example, when a WSI is selected), and show a confirmation before installing.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Global process environment variable set as a side effect",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 1214,
+   "line_end": 1214,
+   "evidence": "      os.environ[\"CUDA_VISIBLE_DEVICES\"] = \"0\"",
+   "explanation": "installPreRequisites writes CUDA_VISIBLE_DEVICES into the Slicer process environment. This affects every other module and library that uses CUDA, and it is unrelated to the viewer's TiffSlide-based functionality.",
+   "suggestion": "Remove this line, or limit the change to a subprocess environment for the code that needs it.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Unpinned runtime pip installs for scikit-image and zarr stack",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 1196,
+   "line_end": 1199,
+   "evidence": "      try:\n          import skimage\n      except ImportError:\n          slicer.util.pip_install(\"scikit-image\")",
+   "explanation": "Packages are installed without version constraints on first use. Upgrades of transitive dependencies (for example numpy or scipy pulled in by scikit-image) can break other extensions in the same Slicer install.",
+   "suggestion": "Pin tested versions, and check that installs do not downgrade Slicer-bundled packages.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Redundant or ill-placed Red-view layout change at widget construction",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 119,
+   "line_end": 121,
+   "evidence": "    # set to Red view only\n    lm = slicer.app.layoutManager()\n    lm.setLayout(6)",
+   "explanation": "The widget forces the layout to the single Red-view layout (id 6) in __init__, before the UI exists, and it binds mouse observers to the Red view at construction. This alters the user's layout as a side effect of creating the widget.",
+   "suggestion": "Apply the layout in the user-triggered load action rather than in __init__.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Placeholder documentation URL in CLI descriptor",
+   "file": "ColorDecomposition/ColorDecomposition.xml",
+   "line_start": 7,
+   "line_end": 7,
+   "evidence": "    <documentation-url>https://github.com/username/project</documentation-url>",
+   "explanation": "The CLI descriptor for ColorDecomposition points to the template URL, so the in-app documentation link is wrong.",
+   "suggestion": "Point it to the real documentation (README or Slicerscope page).",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Large screenshot committed to the repository",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_SCREENSHOTURLS \"https://raw.githubusercontent.com/gaoyi/SlicerBigImage/main/Screenshots/1.png\")",
+   "explanation": "The catalog references Screenshots/1.png, which is about 12 MB. It is committed rather than hosted separately, which increases clone size. It was not inspected here because the file was not available to read.",
+   "suggestion": "Downscale the image or move it to a release asset.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "Research-only license clause should be surfaced to users",
+   "file": "License.txt",
+   "line_start": 147,
+   "line_end": 150,
+   "evidence": "4. The Software has been designed for research purposes only and has\n   not been reviewed or approved by the Food and Drug Administration\n   or by any other agency. YOU ACKNOWLEDGE AND AGREE THAT CLINICAL",
+   "explanation": "License.txt Part B clause 4 says the software is for research purposes only and clinical applications are not recommended. The extension UI and README contain no clinical-use disclaimer, which matters for histopathology viewing.",
+   "suggestion": "Add a research-use disclaimer to the module help text and README.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The C++ sources under NucleusSegmentation/lib and include, and ColorDecomposition/ColorDecomposition.cxx, were not read, so their correctness and memory safety are unverified.",
+  "The Screenshots/1.png binary and the BigImageViewer icon and UI (.ui) files were not inspected.",
+  "The source revision 15af77d3 was not resolved against the remote repository; the review relies on the files supplied in the prompt.",
+  "No build, load, or test run was done; Slicer-version compatibility and behavior of pip_install on the user's platform are unverified.",
+  "The NgffImageIO test and the ColorDecomposition/NucleusSegmentation CTest data (ExternalData) were not checked for availability."
+ ],
+ "questions_for_author": []
+}
