@@ -1,0 +1,802 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "AAD module exposes a 'Homogeneity Level' parameter that is never applied",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AADImageFilter/AADImageFilter.xml",
+   "line": 131,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "AAD module exposes a 'Homogeneity Level' parameter that is never applied",
+     "file": "AADImageFilter/AADImageFilter.xml",
+     "line_start": 131,
+     "line_end": 135,
+     "evidence": "      <name>homoLevel</name>\n      <longflag>--homogeneity</longflag>\n      <label>Homogeneity Level</label>",
+     "explanation": "AADImageFilter.cxx (read in full, 194 lines) never references `homoLevel` and never calls `filter->SetH(...)`, so the value stays at the class default m_H = 0.98 (itkAnisotropicAnomalousDiffusionImageFilter.hxx line 28). A user who moves the slider for the Logistic edge function sees no change in the result, which is misleading for a parameter documented as controlling smoothing of homogeneous regions.",
+     "suggestion": "Add `filter->SetH(homoLevel);` in AADImageFilter.cxx, or remove the parameter from the XML.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/AADImageFilter.xml",
+      "line": 131
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "AADEPIData is hard-wired to 4D input but its test feeds a 3D volume",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AADEPIData/AADEPIData.cxx",
+   "line": 34,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "AADEPIData is hard-wired to 4D input but its test feeds a 3D volume",
+     "file": "AADEPIData/AADEPIData.cxx",
+     "line_start": 34,
+     "line_end": 34,
+     "evidence": "    const unsigned int Dimension = 4;",
+     "explanation": "The reader is `itk::ImageFileReader<itk::Image<float,4>>` and `numberOfImages = size[3]`, so a 3D input either throws in the reader or yields an undefined volume count. The test (AADEPIData/Testing/Cxx/CMakeLists.txt line 20) passes `CTHeadAxial.nhdr`, a 3D scalar volume, so this test cannot succeed. The XML also never tells the user that a 4D (multi-volume) input is required, so a user selecting a normal T1 volume gets an opaque ITK exception.",
+     "suggestion": "Ship a 4D EPI test volume for this module, and state the 4D input requirement in AADEPIData.xml (or handle 3D input gracefully).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADEPIData/AADEPIData.cxx",
+      "line": 34
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "All four bundled tests pass a --sigma argument that no module XML declares",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+   "line": 20,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "All four bundled tests pass a --sigma argument that no module XML declares",
+     "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+     "line_start": 20,
+     "line_end": 20,
+     "evidence": "  --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nhdr",
+     "explanation": "The identical line appears in AADImageFilter, IADImageFilter, AADDiffusionWeightedData and AADEPIData Testing/Cxx/CMakeLists.txt. None of the four .xml files defines a `sigma` parameter (AADImageFilter.xml has iterations/q/timeStep/conductance/optFunction/edgeFunction/homoLevel; IADImageFilter.xml has D/iterations/timeStep/q). SlicerExecutionModel's generated PARSE_ARGS rejects unknown long flags, so every test exits with a parse error and the extension's test suite fails on every platform, giving no regression protection at all.",
+     "suggestion": "Replace `--sigma 2.5` with parameters that actually exist for each module (e.g. `--iterations 1 --anomalousparameter 1.2`), and give each module its own appropriate input/baseline.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+      "line": 20
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Test invocation passes an argument the modules do not define",
+     "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+     "line_start": 16,
+     "line_end": 21,
+     "evidence": "--compare DATA{${BASELINE}/${CLP}Test.nhdr,${CLP}Test.raw}\n    ${TEMP}/${CLP}Test.nhdr\n    ModuleEntryPoint\n    --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nhdr",
+     "explanation": "The ExternalData test command passes '--sigma 2.5' to ModuleEntryPoint, but none of the module XML files define a 'sigma' parameter, so the CLI parser will likely reject the argument and the test will fail. Tests for all four modules appear to be copied from a template without adjustment. I did not run the tests, so this is inferred from reading the XML and CMake.",
+     "suggestion": "Verify the test runs under ctest; if it fails, replace '--sigma 2.5' with a parameter that exists (e.g. '--iterations' / '--conductance') and regenerate the baseline, or drop the stale test. Apply the same fix to the IAD, AADEPIData, and AADDiffusionWeightedData test CMake files.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+      "line": 17
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "DWI module reuses one rescaler for all volumes, so every output volume is the last filtered volume",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+   "line": 214,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "DWI module reuses one rescaler for all volumes, so every output volume is the last filtered volume",
+     "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+     "line_start": 214,
+     "line_end": 219,
+     "evidence": "        rescaler->SetInput(filter->GetOutput());\n        rescaler->SetOutputMaximum(imgValues->GetMaximum());\n        rescaler->SetOutputMinimum(imgValues->GetMinimum());\n        rescaler->Update();\n\n        scalar2vector->SetInput(vol, rescaler->GetOutput());",
+     "explanation": "The same `rescaler` object is created once per loop iteration but `scalar2vector->SetInput(vol, rescaler->GetOutput())` stores a pointer to that one filter's output image for every `vol`. When `scalar2vector->Update()` runs after the loop, all N inputs resolve to the rescaler's current output, i.e. the last filtered volume. A user filtering a DWI dataset silently gets an output where every gradient volume is a copy of the last one, which destroys the diffusion information while reporting success. The sibling module AADEPIData.cxx handles exactly this case correctly with `aux->DisconnectPipeline();` (lines 147-149), which shows the intended pattern.",
+     "suggestion": "Call `rescaler->GetOutput()->DisconnectPipeline()` (or allocate a fresh rescaler per volume) before passing the image to `scalar2vector->SetInput(vol, ...)`, as AADEPIData.cxx does.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+      "line": 214
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "DWI module test uses a non-diffusion input and always returns failure",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+   "line": 131,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "DWI module test uses a non-diffusion input and always returns failure",
+     "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+     "line_start": 131,
+     "line_end": 135,
+     "evidence": "    if(!readb0)\n    {\n        std::cerr << \"BValue not specified in header file\" << std::endl;\n        return EXIT_FAILURE;\n    }",
+     "explanation": "The test for this module also uses `CTHeadAxial.nhdr`, which has no `DWMRI_b-value`/`DWMRI_gradient` metadata, so the module exits with EXIT_FAILURE before doing any work. The test therefore fails by construction and never exercises the filter.",
+     "suggestion": "Provide a small DWI NRRD with DWMRI_b-value and DWMRI_gradient headers as test input and a matching baseline.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+      "line": 131
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Clinical-adjacent use cases documented without a research-use disclaimer",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "docs/index.md",
+   "line": 35,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Clinical-adjacent use cases documented without a research-use disclaimer",
+     "file": "docs/index.md",
+     "line_start": 35,
+     "line_end": 37,
+     "evidence": "  - **Use Case 3:** Noise reduction as part of image processing pipeline\n      \n      - Could offer a better segmentation and classification on specific brain image analysis such as in Multiple Sclerosis lesion segmentation",
+     "explanation": "The documentation markets the filters for downstream diagnostic-adjacent tasks (MS lesion segmentation, tissue classification) but neither README.md nor docs/index.md states that the output is for research use and not validated for clinical decision making. Users may treat the denoised volume as a validated preprocessing step.",
+     "suggestion": "Add a short research-use-only / not-for-clinical-diagnosis statement to README.md and docs/index.md.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "docs/index.md",
+      "line": 35
+     }
+    }
+   ]
+  },
+  {
+   "title": "Conductance of 0 divides by zero in the edge-weight function",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+   "line": 172,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Conductance of 0 divides by zero in the edge-weight function",
+     "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+     "line_start": 172,
+     "line_end": 172,
+     "evidence": "        return  GeneralizedDiffCurve()*exp((-1.0)*pow(static_cast<InputPixelType>(abs((idxValue - centerValue)))/static_cast<InputPixelType>(m_Conductance),  2.0));",
+     "explanation": "`conductance` is declared in AADImageFilter.xml (lines 75-82) as a plain float with no `<constraints>` minimum, so a user can enter 0 (or a negative value). m_Conductance is then used as a divisor, producing inf/NaN that propagate into the output volume and are written to disk without any warning.",
+     "suggestion": "Add a minimum constraint (e.g. 0.001) to the conductance parameter and/or guard against non-positive conductance in the filter.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+      "line": 172
+     }
+    }
+   ]
+  },
+  {
+   "title": "Dead duplicated branch in AADEPIData automatic-conductance handling",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AADEPIData/AADEPIData.cxx",
+   "line": 129,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Dead duplicated branch in AADEPIData automatic-conductance handling",
+     "file": "AADEPIData/AADEPIData.cxx",
+     "line_start": 129,
+     "line_end": 135,
+     "evidence": "            if (q!=1.0) {\n                filter->SetConductance(optKappa->GetKappa());\n                std::cout<<\"Optimum kappa value estimate: \"<<optKappa->GetKappa()<<std::endl;\n            }else {\n                filter->SetConductance(optKappa->GetKappa());",
+     "explanation": "Both branches do exactly the same thing, so the q-dependent conductance scaling that the DWI module applies (AADDiffusionWeightedData.cxx lines 201-207) is missing here. Either the branch is a leftover or the intended q-scaling was lost; in the latter case EPI results differ from the documented behaviour.",
+     "suggestion": "Remove the redundant branch or restore the intended q-dependent scaling.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADEPIData/AADEPIData.cxx",
+      "line": 129
+     }
+    }
+   ]
+  },
+  {
+   "title": "README describes the modules inconsistently with the extension description and DWI module",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 3,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "README describes the modules inconsistently with the extension description and DWI module",
+     "file": "README.md",
+     "line_start": 3,
+     "line_end": 3,
+     "evidence": "At the moment, the Modules available are suppose to be used on scalar volumes, mainly MRI strucutral images namely T1 and T2 weighted images. Future developments will add new functionalities in order to attenuate image noise in other imaging modalities, such as diffusion weighted images (DWI and DTI).",
+     "explanation": "README says the modules are for scalar MRI volumes and that DWI/DTI support is future work, but the CMake extension description and the AADDiffusionWeightedData module state DWI/DTI is already supported. Users may pick the wrong module or assume DWI support is absent.",
+     "suggestion": "Align README, docs/index.md, and the CMake EXTENSION_DESCRIPTION on which modalities are supported and state validation status for DWI.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 3
+     }
+    }
+   ]
+  },
+  {
+   "title": "Uninitialized gradient components if sscanf fails on malformed DWMRI_gradient metadata",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+   "line": 101,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Uninitialized gradient components if sscanf fails on malformed DWMRI_gradient metadata",
+     "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+     "line_start": 101,
+     "line_end": 107,
+     "evidence": "        double x,y,z;\n        itk::ExposeMetaData<std::string> (imgMetaDictionary, *itKey, metaString);\n        if (itKey->find(\"DWMRI_gradient\") != std::string::npos)\n        {\n            std::cout << *itKey << \" ---> \" << metaString << std::endl;\n            sscanf(metaString.c_str(), \"%lf %lf %lf\\n\", &x, &y, &z);",
+     "explanation": "`x`, `y`, `z` are not initialized and the sscanf return value is ignored. A DWI file with a truncated or differently formatted gradient string yields undefined gradient directions that are then written back into the output NRRD header, silently corrupting the diffusion geometry of the result.",
+     "suggestion": "Initialize x=y=z=0 and check that sscanf returns 3, reporting an error otherwise.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+      "line": 101
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Unchecked sscanf results in DWI header parsing",
+     "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+     "line_start": 101,
+     "line_end": 107,
+     "evidence": "sscanf(metaString.c_str(), \"%lf %lf %lf\\n\", &x, &y, &z);\n            vect3d[0] = x; vect3d[1] = y; vect3d[2] = z;",
+     "explanation": "The gradient parser uses sscanf without checking the return value; malformed DWMRI_gradient metadata leaves x, y, z uninitialized and feeds garbage directions into the reconstruction. Only affects malformed input files, with no safety impact.",
+     "suggestion": "Check sscanf returns 3 and report an error otherwise.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+      "line": 106
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unsupported pixel type reported as success without writing output",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AADImageFilter/AADImageFilter.cxx",
+   "line": 180,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Unsupported pixel type reported as success without writing output",
+     "file": "AADImageFilter/AADImageFilter.cxx",
+     "line_start": 180,
+     "line_end": 184,
+     "evidence": "        case itk::ImageIOBase::UNKNOWNCOMPONENTTYPE:\n        default:\n            std::cout << \"unknown component type\" << std::endl;\n            break;",
+     "explanation": "After the switch falls through, `main` returns EXIT_SUCCESS (line 193) even though no output file was produced. The same pattern is in IADImageFilter.cxx (lines 146-150) and AADDiffusionWeightedData.cxx (lines 290-294). Slicer will show the CLI as completed successfully while the output node stays empty, which is confusing rather than an error message.",
+     "suggestion": "Return EXIT_FAILURE (and print to stderr) in the default case.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/AADImageFilter.cxx",
+      "line": 180
+     }
+    }
+   ]
+  },
+  {
+   "title": "CLI XML declares <license>Slicer</license> while the project is Apache-2.0",
+   "category": "license",
+   "severity": "info",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "info",
+    "info"
+   ],
+   "file": "AADImageFilter/AADImageFilter.xml",
+   "line": 8,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "CLI XML declares <license>Slicer</license> while the project is Apache-2.0",
+     "file": "AADImageFilter/AADImageFilter.xml",
+     "line_start": 8,
+     "line_end": 8,
+     "evidence": "    <license>Slicer</license>",
+     "explanation": "All four module XMLs use the generic Slicer CLI placeholder even though the repository LICENSE is Apache 2.0. This is a common Slicer convention and does not restrict distribution, but it is inconsistent with the actual terms shown to users in the module panel.",
+     "suggestion": "Use `Apache-2.0` (or the full license name) in the <license> element of each module XML.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/AADImageFilter.xml",
+      "line": 8
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Module XML license tag does not match the Apache-2.0 LICENSE file",
+     "file": "AADImageFilter/AADImageFilter.xml",
+     "line_start": 8,
+     "line_end": 8,
+     "evidence": "<license>Slicer</license>",
+     "explanation": "Each CLI XML declares the license as 'Slicer' while the repository LICENSE and source headers are Apache-2.0. This is descriptive metadata only and does not block distribution, but it is inconsistent.",
+     "suggestion": "Change the per-module <license> to Apache-2.0 (or the license actually intended) to match LICENSE.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/AADImageFilter.xml",
+      "line": 8
+     }
+    }
+   ]
+  },
+  {
+   "title": "Catalog pins a moving branch rather than a commit",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "AnomalousFiltersExtension.json",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Catalog pins a moving branch rather than a commit",
+     "file": "AnomalousFiltersExtension.json",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "\"scm_revision\": \"main\",",
+     "explanation": "scm_revision is 'main', so the built code can change without a catalog update. This is permitted by index policy but means the reviewed source cannot be tied to a fixed revision; I did not resolve the branch to a commit.",
+     "suggestion": "Consider pinning scm_revision to a reviewed commit hash for reproducible builds.",
+     "confidence": "medium",
+     "verification": {
+      "status": "file not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "AAD module exposes a 'Homogeneity Level' parameter that is never applied",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AADImageFilter/AADImageFilter.xml",
+   "line": 131,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "AAD module exposes a 'Homogeneity Level' parameter that is never applied",
+     "file": "AADImageFilter/AADImageFilter.xml",
+     "line_start": 131,
+     "line_end": 135,
+     "evidence": "      <name>homoLevel</name>\n      <longflag>--homogeneity</longflag>\n      <label>Homogeneity Level</label>",
+     "explanation": "AADImageFilter.cxx (read in full, 194 lines) never references `homoLevel` and never calls `filter->SetH(...)`, so the value stays at the class default m_H = 0.98 (itkAnisotropicAnomalousDiffusionImageFilter.hxx line 28). A user who moves the slider for the Logistic edge function sees no change in the result, which is misleading for a parameter documented as controlling smoothing of homogeneous regions.",
+     "suggestion": "Add `filter->SetH(homoLevel);` in AADImageFilter.cxx, or remove the parameter from the XML.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/AADImageFilter.xml",
+      "line": 131
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "AADEPIData is hard-wired to 4D input but its test feeds a 3D volume",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AADEPIData/AADEPIData.cxx",
+   "line": 34,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "AADEPIData is hard-wired to 4D input but its test feeds a 3D volume",
+     "file": "AADEPIData/AADEPIData.cxx",
+     "line_start": 34,
+     "line_end": 34,
+     "evidence": "    const unsigned int Dimension = 4;",
+     "explanation": "The reader is `itk::ImageFileReader<itk::Image<float,4>>` and `numberOfImages = size[3]`, so a 3D input either throws in the reader or yields an undefined volume count. The test (AADEPIData/Testing/Cxx/CMakeLists.txt line 20) passes `CTHeadAxial.nhdr`, a 3D scalar volume, so this test cannot succeed. The XML also never tells the user that a 4D (multi-volume) input is required, so a user selecting a normal T1 volume gets an opaque ITK exception.",
+     "suggestion": "Ship a 4D EPI test volume for this module, and state the 4D input requirement in AADEPIData.xml (or handle 3D input gracefully).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADEPIData/AADEPIData.cxx",
+      "line": 34
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "All four bundled tests pass a --sigma argument that no module XML declares",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+   "line": 20,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "All four bundled tests pass a --sigma argument that no module XML declares",
+     "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+     "line_start": 20,
+     "line_end": 20,
+     "evidence": "  --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nhdr",
+     "explanation": "The identical line appears in AADImageFilter, IADImageFilter, AADDiffusionWeightedData and AADEPIData Testing/Cxx/CMakeLists.txt. None of the four .xml files defines a `sigma` parameter (AADImageFilter.xml has iterations/q/timeStep/conductance/optFunction/edgeFunction/homoLevel; IADImageFilter.xml has D/iterations/timeStep/q). SlicerExecutionModel's generated PARSE_ARGS rejects unknown long flags, so every test exits with a parse error and the extension's test suite fails on every platform, giving no regression protection at all.",
+     "suggestion": "Replace `--sigma 2.5` with parameters that actually exist for each module (e.g. `--iterations 1 --anomalousparameter 1.2`), and give each module its own appropriate input/baseline.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+      "line": 20
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Test invocation passes an argument the modules do not define",
+     "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+     "line_start": 16,
+     "line_end": 21,
+     "evidence": "--compare DATA{${BASELINE}/${CLP}Test.nhdr,${CLP}Test.raw}\n    ${TEMP}/${CLP}Test.nhdr\n    ModuleEntryPoint\n    --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nhdr",
+     "explanation": "The ExternalData test command passes '--sigma 2.5' to ModuleEntryPoint, but none of the module XML files define a 'sigma' parameter, so the CLI parser will likely reject the argument and the test will fail. Tests for all four modules appear to be copied from a template without adjustment. I did not run the tests, so this is inferred from reading the XML and CMake.",
+     "suggestion": "Verify the test runs under ctest; if it fails, replace '--sigma 2.5' with a parameter that exists (e.g. '--iterations' / '--conductance') and regenerate the baseline, or drop the stale test. Apply the same fix to the IAD, AADEPIData, and AADDiffusionWeightedData test CMake files.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+      "line": 17
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "DWI module reuses one rescaler for all volumes, so every output volume is the last filtered volume",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+   "line": 214,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "DWI module reuses one rescaler for all volumes, so every output volume is the last filtered volume",
+     "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+     "line_start": 214,
+     "line_end": 219,
+     "evidence": "        rescaler->SetInput(filter->GetOutput());\n        rescaler->SetOutputMaximum(imgValues->GetMaximum());\n        rescaler->SetOutputMinimum(imgValues->GetMinimum());\n        rescaler->Update();\n\n        scalar2vector->SetInput(vol, rescaler->GetOutput());",
+     "explanation": "The same `rescaler` object is created once per loop iteration but `scalar2vector->SetInput(vol, rescaler->GetOutput())` stores a pointer to that one filter's output image for every `vol`. When `scalar2vector->Update()` runs after the loop, all N inputs resolve to the rescaler's current output, i.e. the last filtered volume. A user filtering a DWI dataset silently gets an output where every gradient volume is a copy of the last one, which destroys the diffusion information while reporting success. The sibling module AADEPIData.cxx handles exactly this case correctly with `aux->DisconnectPipeline();` (lines 147-149), which shows the intended pattern.",
+     "suggestion": "Call `rescaler->GetOutput()->DisconnectPipeline()` (or allocate a fresh rescaler per volume) before passing the image to `scalar2vector->SetInput(vol, ...)`, as AADEPIData.cxx does.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+      "line": 214
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "DWI module test uses a non-diffusion input and always returns failure",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+   "line": 131,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "DWI module test uses a non-diffusion input and always returns failure",
+     "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+     "line_start": 131,
+     "line_end": 135,
+     "evidence": "    if(!readb0)\n    {\n        std::cerr << \"BValue not specified in header file\" << std::endl;\n        return EXIT_FAILURE;\n    }",
+     "explanation": "The test for this module also uses `CTHeadAxial.nhdr`, which has no `DWMRI_b-value`/`DWMRI_gradient` metadata, so the module exits with EXIT_FAILURE before doing any work. The test therefore fails by construction and never exercises the filter.",
+     "suggestion": "Provide a small DWI NRRD with DWMRI_b-value and DWMRI_gradient headers as test input and a matching baseline.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+      "line": 131
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D6",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "environment": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "packaging": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "minor issues"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 6,
+  "single": 10,
+  "unverified": 1,
+  "total": 13
+ }
+}

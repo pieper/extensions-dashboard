@@ -1,0 +1,88 @@
+{
+ "purpose": "DICOMCBCTRecon reconstructs rotational C-arm XA/XRF DICOM projections into cone-beam CT volumes using FDK or SART. It is intended for Slicer users loading and inspecting these acquisitions through the DICOM browser.",
+ "summary": "The inspected code uses the PyTorch extension with confirmation and includes synthetic tests and usage documentation. Several non-blocking correctness issues affect cached CPU reconstructions, rotated projections, subtraction matching, and failed reruns. The source snapshot and MIT license were provided, but I could not independently resolve the catalog’s moving main revision or verify the terms of the cited reused SPECT code. 🔴 Do not merge yet: Review incomplete; verify the selected revision and distribution terms for the reused code.",
+ "overall": "incomplete",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected the module, reconstruction and DICOM readers, preview fallback, dependency installation, and repository-wide searches for network and dangerous execution APIs. The preview fallback writes image slices to a temporary directory and normally cleans it up; no unconsented transmission or execution path was found in the inspected source."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "DICOMCBCTRecon.py adds its module directory to sys.path at import. Torch installation is deferred until load, requires confirmation, and uses PyTorchUtils."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "Both CMake files list the helper modules and the PyTorch dependency consistently with the supplied entry, and the listed icon exists. I could not independently resolve the repository or determine what commit the catalog’s main branch currently selects."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "The repository has an MIT license, but display.py describes its implementation as taken from the SPECT reconstruction plugin; the upstream source and its distribution terms were not available to verify."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected the DICOM geometry and frame readers, reconstruction pipeline, dialog state, and synthetic tests. CPU SART can mutate cached input, rotated nonsquare frames are inconsistent with geometry, and subtraction candidate matching and failed-run handling have correctness gaps."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md gives a workflow and method references, and the repository includes synthetic unit tests and a Slicer self-test. The tests were not run and clinical validation on independent acquisitions was not established from the inspected material."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "CPU SART refinement modifies cached projection data",
+   "file": "DICOMCBCTRecon/DICOMCBCTReconLib/reconstruction.py",
+   "line_start": 565,
+   "line_end": 572,
+   "evidence": "    import torch\n    device = device or torchDevice()\n    measured = torch.as_tensor(p, dtype=torch.float32, device=device)\n    volume = (torch.as_tensor(initial, dtype=torch.float32, device=device).clone() if initial is not None\n              else torch.zeros(grid.shape, dtype=torch.float32, device=device))\n    if initial is not None and consistencySigmaMm:\n        offset = removeLowFrequencyInconsistency(measured, volume, geometry, grid, consistencySigmaMm,",
+   "explanation": "On CPU, as_tensor shares the float32 NumPy input buffer; removeLowFrequencyInconsistency changes measured in place at line 554. The dialog caches that input, so another reconstruction with unchanged preprocessing can use altered projections and yield different results; a stopped refinement can also leave a partially altered cache.",
+   "suggestion": "Clone measured before in-place consistency correction, and add a CPU regression test checking input preservation and repeatability.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Quarter-turn frame correction leaves detector dimensions unchanged",
+   "file": "DICOMCBCTRecon/DICOMCBCTReconLib/xadata.py",
+   "line_start": 518,
+   "line_end": 523,
+   "evidence": "    if flipped:\n        frames = frames[:, :, ::-1]\n    quarterTurns = int(round(rotationDeg / 90.0)) % 4\n    if quarterTurns:\n        # np.rot90 with k>0 rotates counter-clockwise, which undoes a clockwise rotation\n        frames = np.rot90(frames, k=quarterTurns, axes=(1, 2))",
+   "explanation": "For a nonsquare frame with a 90- or 270-degree field-of-view rotation, the returned array has swapped rows and columns while readGeometry and ProjectionGeometry retain the original dimensions and pixel spacing. Filtering combines arrays sized from the rotated pixels with weights and detector coordinates sized from the unchanged geometry, which can fail or misrepresent the detector.",
+   "suggestion": "Transform detector dimensions, spacing and collimator coordinates consistently with the pixels, and test nonsquare rotated acquisitions.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Subtraction candidates are matched on primary angle alone",
+   "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+   "line_start": 196,
+   "line_end": 203,
+   "evidence": "                    candidate = xadata.sweepGeometry(otherGeometry, k)\n                    if (candidate[\"nFrames\"] != target[\"nFrames\"] or candidate[\"rows\"] != target[\"rows\"]\n                            or candidate[\"columns\"] != target[\"columns\"]):\n                        continue\n                    if np.abs(candidate[\"primaryDeg\"] - target[\"primaryDeg\"]).max() > 2.0:\n                        continue\n                    matches.append({\"file\": other, \"sweep\": k,\n                                    \"label\": self._sweepName(other, otherGeometry, k)})",
+   "explanation": "Runs with the same dimensions and primary angles but different secondary angles, source distances or detector spacing are offered as having the same trajectory. The subtraction path checks shape and primary angle again but then subtracts the projections directly, so such a selection can produce misregistered subtraction artifacts.",
+   "suggestion": "Compare the full per-frame geometry and detector configuration, or explicitly warn and require registration when these differ.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Failed rerun can leave the previous result loadable",
+   "file": "DICOMCBCTRecon/DICOMCBCTReconLib/dialog.py",
+   "line_start": 593,
+   "line_end": 599,
+   "evidence": "        upToDate = self._isUpToDate()\n        self.loadButton.setEnabled(upToDate and not self.busy)\n        if self.busy:\n            text = \"\"\n        elif self.lastRunFailed:\n            text = (\"<span style='color:#d04040'>&#9888; The last reconstruction did not finish (see the log) - \"\n                    \"press <b>Reconstruct</b> again before loading.</span>\")",
+   "explanation": "If a user reruns unchanged settings after a successful preview and the rerun fails or is stopped, the old image and applied parameters remain. The button is enabled because they still match, despite the warning saying to reconstruct again; the user can load the previous result rather than a completed rerun.",
+   "suggestion": "Include lastRunFailed in the load eligibility check or invalidate the stored result at the start of a rerun.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Independent network resolution of the catalog repository and main branch, and verification that the supplied source snapshot corresponds to commit fdc8d856a39562bd282e1d204896297b070ec05f.",
+  "Upstream SPECT plugin source and license/attribution requirements for the implementation described as taken from it in display.py.",
+  "Build, Slicer loading, automated tests, GPU/CPU execution, and validation against real acquisitions; tools permit inspection only.",
+  "Catalog submission checklist, CI results, prior catalog/source baseline, and maintenance history were not supplied."
+ ],
+ "questions_for_author": []
+}

@@ -1,0 +1,108 @@
+{
+ "purpose": "Provides a Slicer module (ArduinoConnect) that opens a serial connection to an Arduino board, sends and receives messages, and plots or monitors incoming data. Two companion modules (ArduinoMotionSensor and ArduinoPedalBoard) map Arduino gesture or pedal messages to slice-view navigation, for researchers and developers who want hardware input in Slicer.",
+ "summary": "No malicious or network behavior found in the Python sources. The main concern is that ArduinoConnect.py calls slicer.util.pip_install(\"pyserial\") at module import, which changes the shared Slicer environment without user consent. Also, the connect-button guard compares a bound method to \"\" and so never catches an empty port list. Tests are unmodified template stubs that would fail. The catalog entry uses a branch (\"master\") rather than a fixed commit. MIT license is present. I could not read the large .mrb example file or the .ui files, so those are unverified.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Read all three module .py files and the Arduino sketches' listing. No network transmission, obfuscation, or credential handling found. subprocess.Popen (ArduinoConnect.py:330) only launches a user-selected IDE path. Concern is limited to automatic package installation at import and file-write behavior of writeConfig into the install directory."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "ArduinoConnect.py lines 8-15 run slicer.util.pip_install('pyserial') at import time with no user confirmation, which affects Slicer's shared Python environment for users who never open the module."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMake lists each module's .py, UI, icon and config files via slicerMacroBuildScriptedModule. EXTENSION_DEPENDS 'NA' and build_dependencies [] agree. Listed resources appear in the file tree. scm_revision is 'master', a branch reference, so the reviewed commit is not pinned."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is a full MIT text (Copyright (c) 2020 Andras Lasso). It permits distribution. Bundled icons and the .mrb example were not checked for separate terms."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "ArduinoConnect.py line 284 uses 'self.ui.portSelectorComboBox.currentText != \"\"' without calling the method, so the check is always true. Test files (e.g. ArduinoConnect.py lines 511-522) call a nonexistent logic.hasImageData and download FA.nrrd, so they are copy-paste template stubs. Serial reads happen on the GUI thread via QTimer polling."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README and docs describe setup and gesture mapping, and the docs include a Python example. Tests are non-functional templates, and the README says the ArduinoPedalBoard example has no working test. A clinical-use disclaimer is absent but not required for a hardware-control tool."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "pyserial is installed at module import without user consent",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 8,
+   "line_end": 15,
+   "evidence": "try:\n  import serial\n  import serial.tools.list_ports\nexcept ModuleNotFoundError:\n  slicer.util.pip_install(\"pyserial\")",
+   "explanation": "On import of ArduinoConnect.py, if pyserial is missing, slicer.util.pip_install runs immediately. This changes the shared Slicer Python environment for all users, including those who never open the module. Installation should be deferred to an explicit user action (or the package should be declared and installed through a confirmed prompt).",
+   "suggestion": "Move the serial import into the functions that need it, and ask the user to confirm before calling pip_install, with a clear message.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Connect guard for empty port list never triggers",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 284,
+   "line_end": 297,
+   "evidence": "if toggle and self.ui.portSelectorComboBox.currentText != \"\":",
+   "explanation": "currentText is a Qt method, but the code compares the method object to \"\" without calling it. The comparison is always True, so the 'no device selected' branch is never reached. The code then attempts serial.Serial('') and reports a misleading 'Impossible to connect' error.",
+   "suggestion": "Use self.ui.portSelectorComboBox.currentText() (with parentheses) in both places, or better, check currentText() once and use the result.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Automated tests are unmodified template stubs that would fail",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 519,
+   "line_end": 521,
+   "evidence": "volumeNode = slicer.util.getNode(pattern=\"FA\")\n      logic = ArduinoConnectLogic()\n      self.assertIsNotNone( logic.hasImageData(volumeNode) )",
+   "explanation": "Test classes call logic.hasImageData(), a method that does not exist in these modules, and download an unrelated FA.nrrd volume. The test in ArduinoPedalBoard is named test_ArduinoPedalBoard11, so runTest does not run it. There is no real test coverage of serial handling or slice-offset logic, so CI gives no assurance.",
+   "suggestion": "Replace with tests that exercise the logic (e.g. processMessage, sendMessage without a port) or remove the template stubs.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Catalog revision is a moving branch",
+   "file": "ArduinoController.json",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "\"scm_revision\": \"master\",",
+   "explanation": "scm_revision is 'master', so the built extension can change without a catalog update. The reviewed commit (229f4074...) is not pinned in the entry. This is a maintainability and reproducibility concern, not a defect in the code.",
+   "suggestion": "Pin scm_revision to a tagged or specific commit for each release.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Config written back into the installed extension directory",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 250,
+   "line_end": 252,
+   "evidence": "def writeConfig(self):\n      with open(self.configFileName, 'w') as json_file:\n        json.dump(self.config, json_file)",
+   "explanation": "writeConfig() writes to __file__-relative Resources/ArduinoConnectConfig.json. Inside a managed Slicer installation this location may be read-only or replaced on update, so the IDE path can be lost or the write can fail without the user being told.",
+   "suggestion": "Store user settings in QSettings or a user-writable config directory.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "docs/extra/SlicerArduino_US_probe_example.mrb (2 MB), which the text scan flagged; it was not readable and its contents were not checked.",
+  "The .ui files, icons and PNG screenshots, which were not read as text.",
+  "The Arduino sketches (.ino) under ArduinoCode/, which were not read.",
+  "The full ArduinoPedalBoard.py handler logic and ArduinoMotionSensor.py beyond the included listing.",
+  "The pinned source commit 229f4074 was not fetched; I reviewed only the file contents supplied in the prompt, so the exact revision reviewed is unverified.",
+  "No tests were run, and no network or Slicer runtime checks were performed."
+ ],
+ "questions_for_author": [
+  "Why is pyserial installed automatically at import instead of with user confirmation?",
+  "Can scm_revision be pinned to a release tag or commit rather than 'master'?",
+  "Can the connect button's empty-port check be fixed to call currentText()?",
+  "Can the template tests be replaced with tests of the real logic?",
+  "Is the docs/extra .mrb example file redistributable, and does it carry any license terms?"
+ ]
+}

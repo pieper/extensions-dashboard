@@ -1,0 +1,1260 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Cancelling export can delete or overwrite files in the current directory",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "minor"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 1038,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Canceling directory dialog in CardinalSim export writes to current working directory",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 1038,
+     "line_end": 1039,
+     "evidence": "        target = qt.QFileDialog.getExistingDirectory(None, \"Choose an output directory *MUST BE EMPTY*\")\n        ABLTemporalBoneSegmentationModuleLogic.export_for_cardinalsim(self.movingSelector.currentNode(), self.exportSelector.currentNode(), target)",
+     "explanation": "If the user cancels the `QFileDialog.getExistingDirectory` dialog, `target` is an empty string `\"\"`. `export_for_cardinalsim` then calls `os.path.abspath(\"\")`, which resolves to the current working directory, and proceeds to write files and `shutil.rmtree(os.path.join(directory, volume.GetName() + \"_dicom\"))` in the current working directory instead of aborting.",
+     "suggestion": "Check `if not target: return` before calling `export_for_cardinalsim`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 1038
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Cancelling export can delete or overwrite files in the current directory",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 1038,
+     "line_end": 1039,
+     "evidence": "        target = qt.QFileDialog.getExistingDirectory(None, \"Choose an output directory *MUST BE EMPTY*\")\n        ABLTemporalBoneSegmentationModuleLogic.export_for_cardinalsim(self.movingSelector.currentNode(), self.exportSelector.currentNode(), target)",
+     "explanation": "Cancelling the directory dialog returns an empty path, but the export proceeds. Lines 1390–1396 turn it into the process working directory and recursively remove an existing volume-named DICOM folder; lines 1449–1453 can overwrite label files there. The empty-directory warning does not protect a user who cancels.",
+     "suggestion": "Return immediately on cancellation, validate that the selected directory is empty, and refuse to remove or overwrite existing files without explicit confirmation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 1038
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Lines 1038-1039 pass the dialog result to export_for_cardinalsim without checking for an empty string. A cancelled dialog returns \"\". Line 1390 `os.path.abspath(\"\")` then gives the working directory. Lines 1394-1395 rmtree `<volume>_dicom` there if it exists, and lines 1449-1453 overwrite `<volume>_<name>-label.nrrd` files there. The damage is limited to paths named after the volume, so I rate it major, not blocking. Even a deliberately chosen directory has its `<volume>_dicom` subfolder deleted."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:1038-1039 passes the dialog result without a cancellation check: 'target = qt.QFileDialog.getExistingDirectory(None, \"Choose an output directory *MUST BE EMPTY*\")'. Lines 1390-1395 then execute 'directory = os.path.abspath(directory)' and 'shutil.rmtree(dicom_dir)' when the volume-named directory exists. Cancellation thus targets the current working directory and can delete an existing folder; lines 1449-1453 can overwrite matching output files. This is a concrete unintended data-loss path."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:1038-1039 and 1390-1396, 1449-1453. If the user cancels QFileDialog.getExistingDirectory, target is \"\", os.path.abspath(\"\") resolves to the current working directory, shutil.rmtree removes {volume.GetName()}_dicom if present, and segment .nrrd files are written into the current working directory. However, because it only deletes a folder literally named \"<volume_name>_dicom\" and writes \"<volume_name>_<segment>-label.nrrd\" rather than wiping the directory itself, the risk of destructive data loss is limited, making it a major issue rather than blocking."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Remote inference disables certificate verification",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 932,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Disabled TLS verification and plaintext password storage/display for remote inference server",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 932,
+     "line_end": 938,
+     "evidence": "            ## Setup the session\n            s = requests.Session()\n            s.verify = False\n            if username:\n                s.auth = (username, password)\n                settings.setValue(\"ablinfer_server_username\", username) \n                settings.setValue(\"ablinfer_server_password\", password)",
+     "explanation": "When using remote inference, TLS certificate verification is unconditionally disabled (`s.verify = False`), and the user's password is saved in plaintext in Slicer's `QSettings` (`ablinfer_server_password`), while `self.inferServerPassword` is also a plain `qt.QLineEdit()` without `Password` echo mode. Disabling TLS verification exposes credentials and medical image payloads to man-in-the-middle interception, and storing passwords in plaintext settings exposes them on disk.",
+     "suggestion": "Enable TLS verification by default (or provide an explicit opt-in checkbox for self-signed certificates), set `self.inferServerPassword.setEchoMode(qt.QLineEdit.Password)`, and avoid persisting plaintext passwords in `QSettings`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 932
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Remote inference disables certificate verification",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 932,
+     "line_end": 936,
+     "evidence": "            ## Setup the session\n            s = requests.Session()\n            s.verify = False\n            if username:\n                s.auth = (username, password)",
+     "explanation": "When users run remote inference over HTTPS, an on-path attacker can impersonate the configured server, intercept credentials and scan data, and alter responses. The UI also gives an HTTP URL as an example, permitting unencrypted use.",
+     "suggestion": "Require HTTPS and certificate verification, allow a user-provided CA for private servers, and reject insecure endpoints.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 932
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Line 934 sets `s.verify = False` unconditionally, and line 935 sends the basic-auth credentials over that session. This allows man-in-the-middle interception of credentials and scan data, and there is no user option to turn verification on. It affects only the optional remote-inference path, so I rate it major."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:932-941 sets 's.verify = False', adds credentials with 's.auth = (username, password)', and passes that session to the remote dispatcher. Lines 959-963 supply the selected volume for inference; lines 354-355 also give an HTTP example. A network attacker can impersonate an HTTPS server or intercept HTTP traffic and expose credentials and medical data. The external ablinfer implementation was not available to inspect, so the exact wire payload was not independently verified."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:355, 932-938. In click_infer_apply, s = requests.Session(); s.verify = False unconditionally disables TLS certificate verification when communicating with the remote inference server, and line 355 gives an http:// URL example. Disabling TLS verification exposes medical image data and user credentials to MitM interception. Because remote server mode is an optional user-configured feature (local Docker is default), this is a major safety concern (or blocking under strict TLS verification standards, rated major here as user-configured server)."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Unconditional pip_install(\"ablinfer\") executed at module import / Slicer startup",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 23,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Unconditional pip_install(\"ablinfer\") executed at module import / Slicer startup",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 23,
+     "line_end": 26,
+     "evidence": "try:\n    import ablinfer\nexcept ModuleNotFoundError:\n    slicer.util.pip_install(\"ablinfer\")",
+     "explanation": "When Slicer starts up and imports scripted modules, `ABLTemporalBoneSegmentationModule.py` runs `slicer.util.pip_install(\"ablinfer\")` at top-level module import time without user confirmation. This modifies Slicer's shared Python environment and triggers network downloads during Slicer startup even for users who never open the module.",
+     "suggestion": "Defer importing and installing `ablinfer` (and `docker`) until the user enters the module or clicks 'Run Inference', and prompt the user for confirmation before running `slicer.util.pip_install(\"ablinfer\")`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 23
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Unprompted package installation occurs at module import",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 23,
+     "line_end": 26,
+     "evidence": "try:\n    import ablinfer\nexcept ModuleNotFoundError:\n    slicer.util.pip_install(\"ablinfer\")",
+     "explanation": "When ablinfer is absent, importing the module downloads and installs an unpinned package and dependencies into Slicer's shared Python environment without asking. This can affect other extensions or users who did not request inference.",
+     "suggestion": "Install dependencies only after explicit user confirmation, and inspect their requirements for compatibility with Slicer's bundled packages.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 23
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Lines 23-26 run `slicer.util.pip_install(\"ablinfer\")` at module import, unpinned and without confirmation. This is the install-at-import behavior the policy says to request changes for. Line 28 and following lines also import ablinfer submodules and `docker` at top level, so a failed install breaks module loading."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:23-26 runs 'import ablinfer' and, on 'except ModuleNotFoundError:', calls 'slicer.util.pip_install(\"ablinfer\")' at module top level, with no confirmation or version pin. When the import fails during scripted-module discovery, this can change the shared environment even for users who never open the module. It is conditional on the import failing, not literally unconditional. The package's external dependency metadata was not inspected."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:23-26. At top-level module import (which runs during Slicer startup/module discovery), the module catches ModuleNotFoundError for ablinfer and immediately executes slicer.util.pip_install(\"ablinfer\") without user confirmation. Per the review policy, package installation at module import or Slicer startup without user confirmation is a blocking environment issue."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Export assigns fixed anatomy names by label number rather than segment identity",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 1418,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Export assigns fixed anatomy names by label number rather than segment identity",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 1418,
+     "line_end": 1425,
+     "evidence": "        if labels is None:\n            labels = {\n                1: \"Sigmoid Sinus\",\n                2: \"Facial Nerve\",\n                3: \"Bony Inner Ear\",\n                4: \"Malleus\",\n                5: \"Incus\",",
+     "explanation": "The UI permits selection of any segmentation, and the exporter converts its segments in their current order before assigning these fixed names to label values. A reordered or different segmentation can therefore be exported under incorrect anatomical filenames without warning.",
+     "suggestion": "Map labels using verified segment names or IDs, reject unexpected or missing structures, and test reordered segments.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 1418
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 1408-1429 export all segments in their current order and assign fixed names to label values 1-9. Nothing checks segment names. A reordered or different segmentation would get wrong filenames. The export is designed for this module's own output, so I rate it minor."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:400-401 permits a segmentation node selection: 'self.exportSelector.nodeTypes = [\"vtkMRMLSegmentationNode\"]'. Lines 1412-1416 export segment IDs in their current order, while lines 1418-1429 assign fixed anatomical names to numeric values and lines 1434-1453 save by those names. A different or reordered segmentation can therefore be mislabeled. This is a serious ordinary correctness issue, not a blocking admission safety finding."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:400-408 and 1408-1453. exportSelector allows selecting any vtkMRMLSegmentationNode, and export_for_cardinalsim exports all segments in index order to a labelmap and then maps integer label values 1..9 to hardcoded temporal bone structure names regardless of the actual segment names or IDs."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Fragile build-time unpinned download of ABLTempSeg.json in SuperBuild INSTALL_COMMAND",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SuperBuild.cmake",
+   "line": 38,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Fragile build-time unpinned download of ABLTempSeg.json in SuperBuild INSTALL_COMMAND",
+     "file": "SuperBuild.cmake",
+     "line_start": 38,
+     "line_end": 42,
+     "evidence": "## Pull the latest model JSON file on build\nset(_download_model COMMAND ${CMAKE_COMMAND}\n  -E env\n  ${PYTHON_EXECUTABLE} -c \"import urllib.request $<SEMICOLON> urllib.request.urlretrieve('https://raw.githubusercontent.com/Auditory-Biophysics-Lab/temporal-bone-segmentation/master/ABLTempSeg.json', '${CMAKE_CURRENT_SOURCE_DIR}/ABLTemporalBoneSegmentationModule/Resources/Models/ABLTempSeg.json')\"\n  )",
+     "explanation": "During the SuperBuild `INSTALL_COMMAND`, CMake downloads `ABLTempSeg.json` from the `master` branch of an external repository (`Auditory-Biophysics-Lab/temporal-bone-segmentation`) and overwrites the placeholder file in the source tree. Because `INSTALL_COMMAND` runs after the inner project's configure/build/install steps (and replaces the default install command), the inner build may package the placeholder file (`you shouldn't see this, this file should be retrieved during build`) before `_download_model` runs, causing `json.load(f)` in `click_infer_apply` to fail with a `JSONDecodeError`. Furthermore, commits to `.idea/` IDE configuration files are tracked in the repository.",
+     "suggestion": "Commit a valid `ABLTempSeg.json` directly in the repository (or fetch it before configuring the inner build, pinned to a specific commit/release with a SHA256 checksum).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SuperBuild.cmake",
+      "line": 38
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "still disputed",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "unsure",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SuperBuild.cmake lines 38-42 do download the JSON from the `master` branch at build time, unpinned and writing into the source tree. That is fragile and unreproducible. The claimed ordering failure is speculative. The outer INSTALL_COMMAND is not the inner project's install, which runs at packaging time and uses the source file. I did not verify the build order, so I rate this minor."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "unsure",
+     "severity": null,
+     "rating": "unknown",
+     "reason": "SuperBuild.cmake:38-48 downloads the moving-branch JSON during the external project's install step: 'INSTALL_COMMAND ${CMAKE_COMMAND} -E echo_append \"\"' followed by '${_download_model}'. ABLTemporalBoneSegmentationModule/Resources/Models/ABLTempSeg.json:1 contains 'you shouldn't see this, this file should be retrieved during build', and ABLTemporalBoneSegmentationModule/CMakeLists.txt:20,24-27 lists it as a scripted-module resource. A build-tree copy could be stale, but the available files do not establish when the Slicer macro copies resources or when CPack installs them relative to the download; therefore a broken packaged artifact is not verified. No build was run."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked SuperBuild.cmake:38-49, ABLTemporalBoneSegmentationModule/CMakeLists.txt:20-29, and ABLTemporalBoneSegmentationModule/Resources/Models/ABLTempSeg.json:1. In SuperBuild.cmake, _download_model is attached to INSTALL_COMMAND of the inner ExternalProject, which runs after the inner project's build step where slicerMacroBuildScriptedModule copies Resources/Models/ABLTempSeg.json into the build tree, and also fetches an unpinned file from master during build."
+    }
+   }
+  },
+  {
+   "title": "Insecure-request warnings are disabled process-wide",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 37,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Global suppression of urllib3 InsecureRequestWarning at module import time",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 37,
+     "line_end": 37,
+     "evidence": "urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)",
+     "explanation": "Calling `urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)` at the top level of the module globally silences TLS certificate verification warnings across the entire Slicer Python process at startup, affecting all other modules and extensions.",
+     "suggestion": "Avoid globally disabling `InsecureRequestWarning` at module import time; scope warning suppression locally if unverified HTTPS requests are explicitly requested by the user.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 37
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Insecure-request warnings are disabled process-wide",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 37,
+     "line_end": 37,
+     "evidence": "urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)",
+     "explanation": "Importing the module suppresses urllib3 warnings for the whole Slicer process, hiding insecure HTTPS use by this and other extensions.",
+     "suggestion": "Remove the global suppression and use verified connections.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 37
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Line 37 calls `urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)` at import. This silences that warning process-wide for all extensions and is a global side effect. It is narrow in scope, but it hides the insecure TLS use at line 934."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": "concern",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:37 runs 'urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)' at import, installing a process-wide warning filter for that warning category. This can hide warnings about unverified HTTPS in this module and other code using the same urllib3 warning class. It does not itself disable certificate verification in other sessions."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:37. At top-level import time, urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning) is called, which globally suppresses InsecureRequestWarning across the entire Slicer Python process for all modules. This is a real global side effect at import time, though minor in severity compared to pip_install at import."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Remote credentials are displayed and persisted in application settings",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 935,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Remote credentials are displayed and persisted in application settings",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 935,
+     "line_end": 938,
+     "evidence": "            if username:\n                s.auth = (username, password)\n                settings.setValue(\"ablinfer_server_username\", username) \n                settings.setValue(\"ablinfer_server_password\", password)",
+     "explanation": "Remote server passwords are stored as ordinary Slicer settings and are restored into a normal QLineEdit at lines 357–364, exposing them to anyone who can read the settings or see the screen.",
+     "suggestion": "Mask the password field and avoid persisting credentials, or use an operating-system credential store with explicit consent.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 935
+     }
+    }
+   ],
+   "id": "D7",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 936-938 save the username and password to QSettings in plaintext. Line 363 restores the password into a plain `qt.QLineEdit()` created at line 357, and a search found no EchoMode setting. The password is therefore shown on screen and stored unencrypted, but the save only happens when the user fills in a username and runs remote inference. This is a credential-hygiene weakness, not exfiltration."
+    },
+    "gpt": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:935-938 stores the password with 'settings.setValue(\"ablinfer_server_password\", password)' when a username is entered. Lines 357-364 create an ordinary QLineEdit and restore the setting: 'self.inferServerPassword.text = settings.value(\"ablinfer_server_password\") or \"\"'. No password echo mode is configured in the inspected source, exposing it on screen and as an ordinary application setting; exact on-disk permissions depend on the platform."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:357-364 and 935-938. self.inferServerPassword is a standard qt.QLineEdit() without Password echo mode, displaying the password in cleartext in the UI, and settings.setValue(\"ablinfer_server_password\", password) persists it in cleartext in Slicer's QSettings file."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Use of removed Slicer 4 AnnotationROI and legacy MarkupsFiducial APIs",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 824,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Use of removed Slicer 4 AnnotationROI and legacy MarkupsFiducial APIs",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 824,
+     "line_end": 824,
+     "evidence": "        self.roiNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLAnnotationROINode')",
+     "explanation": "`vtkMRMLAnnotationROINode` was deprecated and removed in Slicer 5 in favor of `vtkMRMLMarkupsROINode`, and `Fiducial_L.fcsv` / `Fiducial_R.fcsv` use legacy markups format along with removed `vtkMRMLMarkupsFiducialNode` APIs (`GetNumberOfFiducials`, `GetNthFiducialLabel`, `GetNthFiducialPosition`). In Slicer 5, Step 1 (Fiducial Registration) and Step 3 (ROI cropping) will fail with attribute/class errors.",
+     "suggestion": "Migrate from `vtkMRMLAnnotationROINode` to `vtkMRMLMarkupsROINode` and update `vtkMRMLMarkupsFiducialNode` calls to the Slicer 5 control point API (`GetNumberOfControlPoints`, `GetNthControlPointLabel`, `GetNthControlPointPosition`).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 824
+     }
+    }
+   ],
+   "id": "D8",
+   "outcome": "still disputed",
+   "positions": {
+    "claude": {
+     "item": "D8",
+     "real": "unsure",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Line 824 does use `vtkMRMLAnnotationROINode`, which newer Slicer versions no longer provide. Crop Volume expects a Markups ROI, so this likely breaks cropping on current Slicer. I did not verify the target Slicer version. The claim about the fiducial APIs is wrong, because `GetNumberOfFiducials`, `GetNthFiducialLabel` and `GetNthFiducialPosition` (lines 746-768, 1181-1271) still exist on vtkMRMLMarkupsFiducialNode in Slicer 5. The legacy `.fcsv` format is also still readable. This is an ordinary compatibility bug limited to the ROI crop step."
+    },
+    "gpt": {
+     "item": "D8",
+     "real": "unsure",
+     "severity": null,
+     "rating": "unknown",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:824 does request 'vtkMRMLAnnotationROINode', and lines 745-747 and 765-768 use legacy fiducial methods. ABLTemporalBoneSegmentationModule/Resources/Atlases/Fiducial_L.fcsv:1 says '# Markups fiducial file version = 4.10'. These establish use of old APIs and data format, but not that the node class or compatibility methods are absent in the target Slicer 5 build, nor that the old file format cannot load. Slicer source/runtime was unavailable, so the claimed failures cannot be verified."
+    },
+    "gemini": {
+     "item": "D8",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:753-768, 824, 1181-1183, 1266-1276, and Resources/Atlases/Fiducial_L.fcsv:1-8. Line 824 calls slicer.mrmlScene.AddNewNodeByClass('vtkMRMLAnnotationROINode'), which was removed in Slicer 5 (replaced by vtkMRMLMarkupsROINode), causing Step 3 cropping to fail in Slicer 5. Lines 753-768, 1181-1183, 1266-1276 also use removed Slicer 4 MarkupsFiducial methods (GetNumberOfFiducials, GetNthFiducialLabel, GetNthFiducialPosition, AddFiducialFromArray, SetNthFiducialVisibility)."
+    }
+   }
+  },
+  {
+   "title": "ElastixLogic instantiated at class definition (import) time",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "IntraSampleRegistration/IntraSampleRegistration.py",
+   "line": 99,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "ElastixLogic instantiated at class definition (import) time",
+     "file": "IntraSampleRegistration/IntraSampleRegistration.py",
+     "line_start": 99,
+     "line_end": 101,
+     "evidence": "    # Registration logic nodes\n    elastixLogic = Elastix.ElastixLogic()\n    brainsCliLogic = None",
+     "explanation": "Both `IntraSampleRegistrationWidget` (line 100) and `ABLTemporalBoneSegmentationModuleWidget` (line 151) instantiate `Elastix.ElastixLogic()` in the class body rather than inside `__init__` or `setup()`. This executes `ElastixLogic()` at module import time during Slicer startup, slowing startup and risking initialization order issues if `Elastix` is not yet loaded.",
+     "suggestion": "Instantiate `Elastix.ElastixLogic()` inside `__init__` or lazily when registration is run rather than at class definition time.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "IntraSampleRegistration/IntraSampleRegistration.py",
+      "line": 99
+     }
+    }
+   ]
+  },
+  {
+   "title": "Remote model retrieval error handler references an unimported name",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 1366,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Remote model retrieval error handler references an unimported name",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 1366,
+     "line_end": 1370,
+     "evidence": "        if get_model and isinstance(dispatch, DispatchRemote): ## Try to retrieve the model from the remote server\n            try:\n                model = dispatch.get_model(model[\"id\"])\n            except Exception as e:\n                logging.warning(\"Encountered an error retrieving model from remote: \" + str(e))",
+     "explanation": "The module does not import logging, so a failed remote model lookup raises NameError instead of logging the failure and continuing with the local model as intended.",
+     "suggestion": "Import logging and test the remote lookup failure path.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 1366
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Cancelling export can delete or overwrite files in the current directory",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "minor"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 1038,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Canceling directory dialog in CardinalSim export writes to current working directory",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 1038,
+     "line_end": 1039,
+     "evidence": "        target = qt.QFileDialog.getExistingDirectory(None, \"Choose an output directory *MUST BE EMPTY*\")\n        ABLTemporalBoneSegmentationModuleLogic.export_for_cardinalsim(self.movingSelector.currentNode(), self.exportSelector.currentNode(), target)",
+     "explanation": "If the user cancels the `QFileDialog.getExistingDirectory` dialog, `target` is an empty string `\"\"`. `export_for_cardinalsim` then calls `os.path.abspath(\"\")`, which resolves to the current working directory, and proceeds to write files and `shutil.rmtree(os.path.join(directory, volume.GetName() + \"_dicom\"))` in the current working directory instead of aborting.",
+     "suggestion": "Check `if not target: return` before calling `export_for_cardinalsim`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 1038
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Cancelling export can delete or overwrite files in the current directory",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 1038,
+     "line_end": 1039,
+     "evidence": "        target = qt.QFileDialog.getExistingDirectory(None, \"Choose an output directory *MUST BE EMPTY*\")\n        ABLTemporalBoneSegmentationModuleLogic.export_for_cardinalsim(self.movingSelector.currentNode(), self.exportSelector.currentNode(), target)",
+     "explanation": "Cancelling the directory dialog returns an empty path, but the export proceeds. Lines 1390–1396 turn it into the process working directory and recursively remove an existing volume-named DICOM folder; lines 1449–1453 can overwrite label files there. The empty-directory warning does not protect a user who cancels.",
+     "suggestion": "Return immediately on cancellation, validate that the selected directory is empty, and refuse to remove or overwrite existing files without explicit confirmation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 1038
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Lines 1038-1039 pass the dialog result to export_for_cardinalsim without checking for an empty string. A cancelled dialog returns \"\". Line 1390 `os.path.abspath(\"\")` then gives the working directory. Lines 1394-1395 rmtree `<volume>_dicom` there if it exists, and lines 1449-1453 overwrite `<volume>_<name>-label.nrrd` files there. The damage is limited to paths named after the volume, so I rate it major, not blocking. Even a deliberately chosen directory has its `<volume>_dicom` subfolder deleted."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:1038-1039 passes the dialog result without a cancellation check: 'target = qt.QFileDialog.getExistingDirectory(None, \"Choose an output directory *MUST BE EMPTY*\")'. Lines 1390-1395 then execute 'directory = os.path.abspath(directory)' and 'shutil.rmtree(dicom_dir)' when the volume-named directory exists. Cancellation thus targets the current working directory and can delete an existing folder; lines 1449-1453 can overwrite matching output files. This is a concrete unintended data-loss path."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:1038-1039 and 1390-1396, 1449-1453. If the user cancels QFileDialog.getExistingDirectory, target is \"\", os.path.abspath(\"\") resolves to the current working directory, shutil.rmtree removes {volume.GetName()}_dicom if present, and segment .nrrd files are written into the current working directory. However, because it only deletes a folder literally named \"<volume_name>_dicom\" and writes \"<volume_name>_<segment>-label.nrrd\" rather than wiping the directory itself, the risk of destructive data loss is limited, making it a major issue rather than blocking."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Remote inference disables certificate verification",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 932,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Disabled TLS verification and plaintext password storage/display for remote inference server",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 932,
+     "line_end": 938,
+     "evidence": "            ## Setup the session\n            s = requests.Session()\n            s.verify = False\n            if username:\n                s.auth = (username, password)\n                settings.setValue(\"ablinfer_server_username\", username) \n                settings.setValue(\"ablinfer_server_password\", password)",
+     "explanation": "When using remote inference, TLS certificate verification is unconditionally disabled (`s.verify = False`), and the user's password is saved in plaintext in Slicer's `QSettings` (`ablinfer_server_password`), while `self.inferServerPassword` is also a plain `qt.QLineEdit()` without `Password` echo mode. Disabling TLS verification exposes credentials and medical image payloads to man-in-the-middle interception, and storing passwords in plaintext settings exposes them on disk.",
+     "suggestion": "Enable TLS verification by default (or provide an explicit opt-in checkbox for self-signed certificates), set `self.inferServerPassword.setEchoMode(qt.QLineEdit.Password)`, and avoid persisting plaintext passwords in `QSettings`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 932
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Remote inference disables certificate verification",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 932,
+     "line_end": 936,
+     "evidence": "            ## Setup the session\n            s = requests.Session()\n            s.verify = False\n            if username:\n                s.auth = (username, password)",
+     "explanation": "When users run remote inference over HTTPS, an on-path attacker can impersonate the configured server, intercept credentials and scan data, and alter responses. The UI also gives an HTTP URL as an example, permitting unencrypted use.",
+     "suggestion": "Require HTTPS and certificate verification, allow a user-provided CA for private servers, and reject insecure endpoints.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 932
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Line 934 sets `s.verify = False` unconditionally, and line 935 sends the basic-auth credentials over that session. This allows man-in-the-middle interception of credentials and scan data, and there is no user option to turn verification on. It affects only the optional remote-inference path, so I rate it major."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:932-941 sets 's.verify = False', adds credentials with 's.auth = (username, password)', and passes that session to the remote dispatcher. Lines 959-963 supply the selected volume for inference; lines 354-355 also give an HTTP example. A network attacker can impersonate an HTTPS server or intercept HTTP traffic and expose credentials and medical data. The external ablinfer implementation was not available to inspect, so the exact wire payload was not independently verified."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:355, 932-938. In click_infer_apply, s = requests.Session(); s.verify = False unconditionally disables TLS certificate verification when communicating with the remote inference server, and line 355 gives an http:// URL example. Disabling TLS verification exposes medical image data and user credentials to MitM interception. Because remote server mode is an optional user-configured feature (local Docker is default), this is a major safety concern (or blocking under strict TLS verification standards, rated major here as user-configured server)."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Unconditional pip_install(\"ablinfer\") executed at module import / Slicer startup",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 23,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Unconditional pip_install(\"ablinfer\") executed at module import / Slicer startup",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 23,
+     "line_end": 26,
+     "evidence": "try:\n    import ablinfer\nexcept ModuleNotFoundError:\n    slicer.util.pip_install(\"ablinfer\")",
+     "explanation": "When Slicer starts up and imports scripted modules, `ABLTemporalBoneSegmentationModule.py` runs `slicer.util.pip_install(\"ablinfer\")` at top-level module import time without user confirmation. This modifies Slicer's shared Python environment and triggers network downloads during Slicer startup even for users who never open the module.",
+     "suggestion": "Defer importing and installing `ablinfer` (and `docker`) until the user enters the module or clicks 'Run Inference', and prompt the user for confirmation before running `slicer.util.pip_install(\"ablinfer\")`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 23
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Unprompted package installation occurs at module import",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 23,
+     "line_end": 26,
+     "evidence": "try:\n    import ablinfer\nexcept ModuleNotFoundError:\n    slicer.util.pip_install(\"ablinfer\")",
+     "explanation": "When ablinfer is absent, importing the module downloads and installs an unpinned package and dependencies into Slicer's shared Python environment without asking. This can affect other extensions or users who did not request inference.",
+     "suggestion": "Install dependencies only after explicit user confirmation, and inspect their requirements for compatibility with Slicer's bundled packages.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 23
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Lines 23-26 run `slicer.util.pip_install(\"ablinfer\")` at module import, unpinned and without confirmation. This is the install-at-import behavior the policy says to request changes for. Line 28 and following lines also import ablinfer submodules and `docker` at top level, so a failed install breaks module loading."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:23-26 runs 'import ablinfer' and, on 'except ModuleNotFoundError:', calls 'slicer.util.pip_install(\"ablinfer\")' at module top level, with no confirmation or version pin. When the import fails during scripted-module discovery, this can change the shared environment even for users who never open the module. It is conditional on the import failing, not literally unconditional. The package's external dependency metadata was not inspected."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:23-26. At top-level module import (which runs during Slicer startup/module discovery), the module catches ModuleNotFoundError for ablinfer and immediately executes slicer.util.pip_install(\"ablinfer\") without user confirmation. Per the review policy, package installation at module import or Slicer startup without user confirmation is a blocking environment issue."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Export assigns fixed anatomy names by label number rather than segment identity",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 1418,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Export assigns fixed anatomy names by label number rather than segment identity",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 1418,
+     "line_end": 1425,
+     "evidence": "        if labels is None:\n            labels = {\n                1: \"Sigmoid Sinus\",\n                2: \"Facial Nerve\",\n                3: \"Bony Inner Ear\",\n                4: \"Malleus\",\n                5: \"Incus\",",
+     "explanation": "The UI permits selection of any segmentation, and the exporter converts its segments in their current order before assigning these fixed names to label values. A reordered or different segmentation can therefore be exported under incorrect anatomical filenames without warning.",
+     "suggestion": "Map labels using verified segment names or IDs, reject unexpected or missing structures, and test reordered segments.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 1418
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 1408-1429 export all segments in their current order and assign fixed names to label values 1-9. Nothing checks segment names. A reordered or different segmentation would get wrong filenames. The export is designed for this module's own output, so I rate it minor."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:400-401 permits a segmentation node selection: 'self.exportSelector.nodeTypes = [\"vtkMRMLSegmentationNode\"]'. Lines 1412-1416 export segment IDs in their current order, while lines 1418-1429 assign fixed anatomical names to numeric values and lines 1434-1453 save by those names. A different or reordered segmentation can therefore be mislabeled. This is a serious ordinary correctness issue, not a blocking admission safety finding."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:400-408 and 1408-1453. exportSelector allows selecting any vtkMRMLSegmentationNode, and export_for_cardinalsim exports all segments in index order to a labelmap and then maps integer label values 1..9 to hardcoded temporal bone structure names regardless of the actual segment names or IDs."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Fragile build-time unpinned download of ABLTempSeg.json in SuperBuild INSTALL_COMMAND",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SuperBuild.cmake",
+   "line": 38,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Fragile build-time unpinned download of ABLTempSeg.json in SuperBuild INSTALL_COMMAND",
+     "file": "SuperBuild.cmake",
+     "line_start": 38,
+     "line_end": 42,
+     "evidence": "## Pull the latest model JSON file on build\nset(_download_model COMMAND ${CMAKE_COMMAND}\n  -E env\n  ${PYTHON_EXECUTABLE} -c \"import urllib.request $<SEMICOLON> urllib.request.urlretrieve('https://raw.githubusercontent.com/Auditory-Biophysics-Lab/temporal-bone-segmentation/master/ABLTempSeg.json', '${CMAKE_CURRENT_SOURCE_DIR}/ABLTemporalBoneSegmentationModule/Resources/Models/ABLTempSeg.json')\"\n  )",
+     "explanation": "During the SuperBuild `INSTALL_COMMAND`, CMake downloads `ABLTempSeg.json` from the `master` branch of an external repository (`Auditory-Biophysics-Lab/temporal-bone-segmentation`) and overwrites the placeholder file in the source tree. Because `INSTALL_COMMAND` runs after the inner project's configure/build/install steps (and replaces the default install command), the inner build may package the placeholder file (`you shouldn't see this, this file should be retrieved during build`) before `_download_model` runs, causing `json.load(f)` in `click_infer_apply` to fail with a `JSONDecodeError`. Furthermore, commits to `.idea/` IDE configuration files are tracked in the repository.",
+     "suggestion": "Commit a valid `ABLTempSeg.json` directly in the repository (or fetch it before configuring the inner build, pinned to a specific commit/release with a SHA256 checksum).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SuperBuild.cmake",
+      "line": 38
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "still disputed",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "unsure",
+     "severity": "minor",
+     "rating": null,
+     "reason": "SuperBuild.cmake lines 38-42 do download the JSON from the `master` branch at build time, unpinned and writing into the source tree. That is fragile and unreproducible. The claimed ordering failure is speculative. The outer INSTALL_COMMAND is not the inner project's install, which runs at packaging time and uses the source file. I did not verify the build order, so I rate this minor."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "unsure",
+     "severity": null,
+     "rating": "unknown",
+     "reason": "SuperBuild.cmake:38-48 downloads the moving-branch JSON during the external project's install step: 'INSTALL_COMMAND ${CMAKE_COMMAND} -E echo_append \"\"' followed by '${_download_model}'. ABLTemporalBoneSegmentationModule/Resources/Models/ABLTempSeg.json:1 contains 'you shouldn't see this, this file should be retrieved during build', and ABLTemporalBoneSegmentationModule/CMakeLists.txt:20,24-27 lists it as a scripted-module resource. A build-tree copy could be stale, but the available files do not establish when the Slicer macro copies resources or when CPack installs them relative to the download; therefore a broken packaged artifact is not verified. No build was run."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked SuperBuild.cmake:38-49, ABLTemporalBoneSegmentationModule/CMakeLists.txt:20-29, and ABLTemporalBoneSegmentationModule/Resources/Models/ABLTempSeg.json:1. In SuperBuild.cmake, _download_model is attached to INSTALL_COMMAND of the inner ExternalProject, which runs after the inner project's build step where slicerMacroBuildScriptedModule copies Resources/Models/ABLTempSeg.json into the build tree, and also fetches an unpinned file from master during build."
+    }
+   }
+  },
+  {
+   "title": "Insecure-request warnings are disabled process-wide",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 37,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Global suppression of urllib3 InsecureRequestWarning at module import time",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 37,
+     "line_end": 37,
+     "evidence": "urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)",
+     "explanation": "Calling `urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)` at the top level of the module globally silences TLS certificate verification warnings across the entire Slicer Python process at startup, affecting all other modules and extensions.",
+     "suggestion": "Avoid globally disabling `InsecureRequestWarning` at module import time; scope warning suppression locally if unverified HTTPS requests are explicitly requested by the user.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 37
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Insecure-request warnings are disabled process-wide",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 37,
+     "line_end": 37,
+     "evidence": "urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)",
+     "explanation": "Importing the module suppresses urllib3 warnings for the whole Slicer process, hiding insecure HTTPS use by this and other extensions.",
+     "suggestion": "Remove the global suppression and use verified connections.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 37
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Line 37 calls `urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)` at import. This silences that warning process-wide for all extensions and is a global side effect. It is narrow in scope, but it hides the insecure TLS use at line 934."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": "concern",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:37 runs 'urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)' at import, installing a process-wide warning filter for that warning category. This can hide warnings about unverified HTTPS in this module and other code using the same urllib3 warning class. It does not itself disable certificate verification in other sessions."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:37. At top-level import time, urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning) is called, which globally suppresses InsecureRequestWarning across the entire Slicer Python process for all modules. This is a real global side effect at import time, though minor in severity compared to pip_install at import."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Remote credentials are displayed and persisted in application settings",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 935,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Remote credentials are displayed and persisted in application settings",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 935,
+     "line_end": 938,
+     "evidence": "            if username:\n                s.auth = (username, password)\n                settings.setValue(\"ablinfer_server_username\", username) \n                settings.setValue(\"ablinfer_server_password\", password)",
+     "explanation": "Remote server passwords are stored as ordinary Slicer settings and are restored into a normal QLineEdit at lines 357–364, exposing them to anyone who can read the settings or see the screen.",
+     "suggestion": "Mask the password field and avoid persisting credentials, or use an operating-system credential store with explicit consent.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 935
+     }
+    }
+   ],
+   "id": "D7",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 936-938 save the username and password to QSettings in plaintext. Line 363 restores the password into a plain `qt.QLineEdit()` created at line 357, and a search found no EchoMode setting. The password is therefore shown on screen and stored unencrypted, but the save only happens when the user fills in a username and runs remote inference. This is a credential-hygiene weakness, not exfiltration."
+    },
+    "gpt": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:935-938 stores the password with 'settings.setValue(\"ablinfer_server_password\", password)' when a username is entered. Lines 357-364 create an ordinary QLineEdit and restore the setting: 'self.inferServerPassword.text = settings.value(\"ablinfer_server_password\") or \"\"'. No password echo mode is configured in the inspected source, exposing it on screen and as an ordinary application setting; exact on-disk permissions depend on the platform."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:357-364 and 935-938. self.inferServerPassword is a standard qt.QLineEdit() without Password echo mode, displaying the password in cleartext in the UI, and settings.setValue(\"ablinfer_server_password\", password) persists it in cleartext in Slicer's QSettings file."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Use of removed Slicer 4 AnnotationROI and legacy MarkupsFiducial APIs",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line": 824,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Use of removed Slicer 4 AnnotationROI and legacy MarkupsFiducial APIs",
+     "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+     "line_start": 824,
+     "line_end": 824,
+     "evidence": "        self.roiNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLAnnotationROINode')",
+     "explanation": "`vtkMRMLAnnotationROINode` was deprecated and removed in Slicer 5 in favor of `vtkMRMLMarkupsROINode`, and `Fiducial_L.fcsv` / `Fiducial_R.fcsv` use legacy markups format along with removed `vtkMRMLMarkupsFiducialNode` APIs (`GetNumberOfFiducials`, `GetNthFiducialLabel`, `GetNthFiducialPosition`). In Slicer 5, Step 1 (Fiducial Registration) and Step 3 (ROI cropping) will fail with attribute/class errors.",
+     "suggestion": "Migrate from `vtkMRMLAnnotationROINode` to `vtkMRMLMarkupsROINode` and update `vtkMRMLMarkupsFiducialNode` calls to the Slicer 5 control point API (`GetNumberOfControlPoints`, `GetNthControlPointLabel`, `GetNthControlPointPosition`).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+      "line": 824
+     }
+    }
+   ],
+   "id": "D8",
+   "outcome": "still disputed",
+   "positions": {
+    "claude": {
+     "item": "D8",
+     "real": "unsure",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Line 824 does use `vtkMRMLAnnotationROINode`, which newer Slicer versions no longer provide. Crop Volume expects a Markups ROI, so this likely breaks cropping on current Slicer. I did not verify the target Slicer version. The claim about the fiducial APIs is wrong, because `GetNumberOfFiducials`, `GetNthFiducialLabel` and `GetNthFiducialPosition` (lines 746-768, 1181-1271) still exist on vtkMRMLMarkupsFiducialNode in Slicer 5. The legacy `.fcsv` format is also still readable. This is an ordinary compatibility bug limited to the ROI crop step."
+    },
+    "gpt": {
+     "item": "D8",
+     "real": "unsure",
+     "severity": null,
+     "rating": "unknown",
+     "reason": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:824 does request 'vtkMRMLAnnotationROINode', and lines 745-747 and 765-768 use legacy fiducial methods. ABLTemporalBoneSegmentationModule/Resources/Atlases/Fiducial_L.fcsv:1 says '# Markups fiducial file version = 4.10'. These establish use of old APIs and data format, but not that the node class or compatibility methods are absent in the target Slicer 5 build, nor that the old file format cannot load. Slicer source/runtime was unavailable, so the claimed failures cannot be verified."
+    },
+    "gemini": {
+     "item": "D8",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py:753-768, 824, 1181-1183, 1266-1276, and Resources/Atlases/Fiducial_L.fcsv:1-8. Line 824 calls slicer.mrmlScene.AddNewNodeByClass('vtkMRMLAnnotationROINode'), which was removed in Slicer 5 (replaced by vtkMRMLMarkupsROINode), causing Step 3 cropping to fail in Slicer 5. Lines 753-768, 1181-1183, 1266-1276 also use removed Slicer 4 MarkupsFiducial methods (GetNumberOfFiducials, GetNthFiducialLabel, GetNthFiducialPosition, AddFiducialFromArray, SetNthFiducialVisibility)."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "concern",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "blocking",
+   "gpt": "blocking"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "concern",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "concern",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "needs fixes",
+  "gemini": "needs fixes",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 8,
+  "single": 6,
+  "unverified": 0,
+  "total": 10,
+  "open_disputes": 2
+ }
+}

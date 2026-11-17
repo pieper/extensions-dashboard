@@ -1,0 +1,138 @@
+{
+ "purpose": "DBSCoalignment is a 3D Slicer extension for Deep Brain Stimulation (DBS) surgery planning and intraoperative electrode localization, providing subthalamic nucleus (STN) segmentation from T1/T2 MRI, atlas mapping, and brain-shift / trajectory optimization from microelectrode recordings (MER) integrated with SlicerNetstim (Lead-OR).",
+ "summary": "🔴 Do not merge yet. While `DBSCoalignment` provides useful tools for STN segmentation and MER-guided DBS electrode coalignment under a clear MIT license, it has three blocking issues under the Extensions Index review policy: (1) `STNSegmenter.py` and `DBSShiftPrediction.py` run `slicer.util.pip_install` at top-level module import (Slicer startup) without user confirmation; (2) PyTorch is installed via `pip_install('torch')` rather than `PyTorchUtils` (`SlicerPyTorch`); (3) on Linux Python 3.12, `STNSegmenter.py` downloads and installs a binary wheel from an unverified Box link without checksum verification or consent; and (4) the catalog entry's `build_dependencies: []` does not match `EXTENSION_DEPENDS \"SlicerElastix;SlicerNetstim\"` in `CMakeLists.txt`.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected all Python, CMake, and Snakemake files in the repository. `STNSegmenter/STNSegmenter.py` downloads a binary wheel (`antspyx-0.6.2-cp312-cp312-linux_x86_64.whl`) from an unverified Box shared link (`https://app.box.com/shared/static/...`) at module import time on Linux Python 3.12 without checksum verification or user consent and installs it. No data exfiltration or prompt-injection attempts were found (`AGENTS.md` only contains local developer notes)."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "Inspected `STNSegmenter/STNSegmenter.py`, `DBS_STN/DBSShiftPrediction.py`, and `AtlasMapping/AtlasMapping.py`. Both `STNSegmenter.py` and `DBSShiftPrediction.py` execute `slicer.util.pip_install` at module import time (during Slicer startup) for multiple heavy packages including `torch`, `antspyx`, `git+https://github.com/ANTsX/ANTsTorch.git`, `dbs-pure-lib`, `intensity-normalization`, and `pandas`, and install `torch` directly via `pip_install` instead of through `PyTorchUtils` (`SlicerPyTorch`)."
+  },
+  "packaging": {
+   "rating": "blocking",
+   "rationale": "Inspected root `CMakeLists.txt`, all module `CMakeLists.txt` files, and the catalog entry. Root `CMakeLists.txt` declares `EXTENSION_DEPENDS \"SlicerElastix;SlicerNetstim\"`, whereas the catalog entry has `\"build_dependencies\": []`. Additionally, `STNSegmenter/CMakeLists.txt` omits `Resources/elastix/rigid_mri.txt` and `Resources/nets/shp_pred.pt` from `MODULE_PYTHON_RESOURCES`, and several large binary `.pt` and `.nii.gz` files are committed directly to the git repository."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE.txt` and `README.md`. The repository is licensed under the MIT License (Copyright 2025 Czech Technical University in Prague), permitting distribution."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected all 6 modules. Found several bugs that break core workflows: `STNSegmenterLogic.coregistration_t2_t1` calls `slicer_preprocessing.elastix_registration` which is missing from `STNSegmenter/segm_lib/slicer_preprocessing.py`; `STNSegmenterLogic.process` references `self.processing_folder.cleanup()` when `self.processing_folder` is `None`; and `DBSShiftPrediction.py` has a toggle-like early `return` when removing previous nodes in `on_calculate_shift`."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "Inspected `README.md` and module UI/code. The extension addresses a clear neurosurgical research workflow (STN segmentation and MER-based brain-shift compensation with Lead-OR) and includes usage instructions in `README.md`, though module help texts, tests, and `ShiftCLI` are still unmodified Slicer templates."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Packages installed via pip_install at module import / Slicer startup",
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line_start": 19,
+   "line_end": 23,
+   "evidence": "try:\n    from dbs_image_utils.mask import SubcorticalMask\nexcept ImportError:\n    slicer.util.pip_install('dbs-pure-lib')\n    from dbs_image_utils.mask import SubcorticalMask",
+   "explanation": "`STNSegmenter.py` and `DBSShiftPrediction.py` call `slicer.util.pip_install` at the top level of the module during module import (when 3D Slicer starts up and discovers scripted modules), installing `dbs-pure-lib`, `antspyx`, `git+https://github.com/ANTsX/ANTsTorch.git`, `torch`, `intensity-normalization`, and `pandas` without user interaction or confirmation. Installing heavy packages and git repositories at Slicer startup blocks application launch and modifies the shared Slicer Python environment for all users, even those who never open these modules.",
+   "suggestion": "Move all third-party imports (`dbs_image_utils`, `ants`, `antstorch`, `torch`, `intensity_normalization`, `pandas`) and any dependency installation logic out of module-top-level scope and into `Logic` methods or widget actions, after prompting the user for confirmation (e.g., via `slicer.util.confirmOkCancelDisplay`).",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Direct pip_install('torch') instead of using SlicerPyTorch (PyTorchUtils)",
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line_start": 67,
+   "line_end": 71,
+   "evidence": "try:\n    import torch\nexcept ImportError:\n    slicer.util.pip_install('torch')\n    import torch",
+   "explanation": "Both `STNSegmenter/STNSegmenter.py` (lines 67-71) and `DBS_STN/DBSShiftPrediction.py` (lines 17-25 and 1742-1746) install PyTorch directly via `slicer.util.pip_install('torch')` (and also pull `torch` as a dependency of `dbs-pure-lib`, `torchio`, and `ANTsTorch`). Direct `pip_install('torch')` in Slicer's Python environment bypasses `PyTorchUtils` from the `SlicerPyTorch` extension, can install CPU-only or incompatible CUDA wheels, and can break other PyTorch-based extensions in Slicer.",
+   "suggestion": "Add `PyTorch` to `EXTENSION_DEPENDS` in `CMakeLists.txt` and `build_dependencies` in the catalog entry, and use `PyTorchUtils.PyTorchUtilsLogic()` to check for and install PyTorch on demand rather than calling `slicer.util.pip_install('torch')`.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Unverified binary wheel downloaded from Box shared link and installed at startup",
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line_start": 35,
+   "line_end": 40,
+   "evidence": "        download_url = \"https://app.box.com/shared/static/mu1gy26t80oopbtv3mndl5yveb6s4431.whl\"\n        whl_filename = \"antspyx-0.6.2-cp312-cp312-linux_x86_64.whl\"\n        whl_path = Path(tempfile.gettempdir()) / whl_filename\n\n        logging.info(\"Downloading antspyx wheel from %s\", download_url)\n        urllib.request.urlretrieve(download_url, str(whl_path))",
+   "explanation": "On Linux x86_64 with Python 3.12 (Slicer 5.9/5.10), `_install_antspyx()`—which is called automatically at Slicer startup if `ants` is not yet installed—downloads a binary wheel (`antspyx-0.6.2-cp312-cp312-linux_x86_64.whl`) from an unverified personal/shared Box URL (`https://app.box.com/shared/static/mu1gy26t80oopbtv3mndl5yveb6s4431.whl`) into the shared system temp directory without any cryptographic hash verification or user consent, and immediately executes/installs it via `pip_install`. Downloading and executing unverified binary wheels from opaque file-sharing links without checksum validation poses a severe supply-chain and code-execution risk.",
+   "suggestion": "Install official releases from PyPI (`slicer.util.pip_install(\"antspyx\")`) or, if a custom wheel is strictly required, host it on a controlled release page with mandatory SHA-256 checksum verification before installation and only after explicit user consent.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "blocking",
+   "title": "Catalog build_dependencies does not match CMakeLists.txt EXTENSION_DEPENDS",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_DEPENDS \"SlicerElastix;SlicerNetstim\") # AtlasMapping uses Elastix, DBS workflow integrates with Netstim/Lead-OR",
+   "explanation": "`CMakeLists.txt` declares `set(EXTENSION_DEPENDS \"SlicerElastix;SlicerNetstim\")`, and the modules rely on `Elastix` and `SlicerNetstim` (and should also depend on `PyTorch`). However, the Extensions Index catalog entry specifies `\"build_dependencies\": []`. The catalog entry's `build_dependencies` must match `EXTENSION_DEPENDS`.",
+   "suggestion": "Update `build_dependencies` in `DBSCoalignment.json` to `[\"SlicerElastix\", \"SlicerNetstim\", \"PyTorch\"]` (and include `PyTorch` in `EXTENSION_DEPENDS` in `CMakeLists.txt`).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Broken T2-to-T1 coregistration in STNSegmenter due to missing function and uninstalled resource",
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line_start": 873,
+   "line_end": 877,
+   "evidence": "        slicer_preprocessing.elastix_registration(\n            ref_image=t1_path,\n            flo_image=t2_path,\n            elastix_parameters=self.resourcePath('elastix/rigid_mri.txt'),\n            out_folder=out_folder)",
+   "explanation": "`STNSegmenterLogic.coregistration_t2_t1` calls `slicer_preprocessing.elastix_registration(...)`, which exists in `DBS_STN/Lib/slicer_preprocessing.py` (where it calls `subprocess.check_output([\"elastix\", ...])` assuming `elastix` is on the system PATH), but does NOT exist in `STNSegmenter/segm_lib/slicer_preprocessing.py` (which only defines `elastix_registration_cmd`). Because `_import_segm_support()` imports `segm_lib.slicer_preprocessing` first, calling `coregistration_t2_t1` raises `AttributeError: module 'segm_lib.slicer_preprocessing' has no attribute 'elastix_registration'`. Furthermore, `STNSegmenter/CMakeLists.txt` does not install `Resources/elastix/rigid_mri.txt` in `MODULE_PYTHON_RESOURCES`, so `self.resourcePath('elastix/rigid_mri.txt')` will not exist in a packaged installation.",
+   "suggestion": "Use `Elastix.ElastixLogic()` from `SlicerElastix` (as done in `AtlasMapping`) to run Elastix registration, and add `Resources/elastix/rigid_mri.txt` to `MODULE_PYTHON_RESOURCES` in `STNSegmenter/CMakeLists.txt`.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Model weights committed to git or downloaded into potentially read-only Resources folder",
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line_start": 125,
+   "line_end": 130,
+   "evidence": "        shape_weights_path = Path(self.resourcePath('nets/shp_pred.pt'))\n        cd_state_dict = _load_torch_state_dict(\n            shape_weights_path,\n            download_url=\"https://github.com/IVarha/SlicerDBSCoalignment/releases/download/0.0.1/shp_pred.pt\",\n            model_name=\"shape predictor\",\n        )",
+   "explanation": "The repository commits several multi-megabyte binary model weight and template files (`DBS_STN/Resources/MNI/MNI152_T1_1mm_brain.nii.gz`, `DBS_STN/Resources/nets/cent_pred.pt`, `DBS_STN/Resources/nets/shp_pred.pt`, `STNSegmenter/Resources/nets/shp_pred.pt`), while `STNSegmenter/CMakeLists.txt` omits `Resources/nets/shp_pred.pt` from `MODULE_PYTHON_RESOURCES` and downloads it at runtime into the installed module's `Resources/nets` directory (which may be read-only in system-wide installations). Large weights should not be committed to git and should be downloaded on demand to a user-writable cache directory (such as `slicer.app.cachePath`).",
+   "suggestion": "Store downloaded weights in a user-writable cache directory (e.g., under `slicer.app.cachePath`) rather than writing into the installed `Resources/nets` folder, and verify downloaded files with a SHA-256 checksum.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Unused template ShiftCLI module and placeholder metadata included in build",
+   "file": "CMakeLists.txt",
+   "line_start": 21,
+   "line_end": 26,
+   "evidence": "add_subdirectory(STNSegmenter)\nadd_subdirectory(LabelConversion)\nadd_subdirectory(TextToMarkups)\nadd_subdirectory(ShiftCLI)\nadd_subdirectory(DBS_STN)\nadd_subdirectory(AtlasMapping)",
+   "explanation": "`ShiftCLI` is a leftover boilerplate Gaussian blur CLI module (`Apply a Gaussian blur to an image`, contributor `Andras Lasso (PerkLab)`) that is not used anywhere in the extension and is registered under the `Examples` category. Similarly, `AtlasMapping`, `STNSegmenter`, `DBSShiftPrediction`, `LabelConversion`, and `TextToMarkups` retain template `John Doe (AnyWare Corp.)` contributor metadata, template help text, and broken template `SampleData` / `ScriptedLoadableModuleTest` classes.",
+   "suggestion": "Remove the unused `ShiftCLI` module from `CMakeLists.txt` (or hide/remove template boilerplate), and update module metadata (`contributors`, `helpText`, `categories`) in the remaining modules.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Duplicate DBSShiftPredictionWidget class definition and early return on second run in on_calculate_shift",
+   "file": "DBS_STN/DBSShiftPrediction.py",
+   "line_start": 1128,
+   "line_end": 1131,
+   "evidence": "class DBSShiftPredictionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):\n    \"\"\"Uses ScriptedLoadableModuleWidget base class, available at:\n    https://github.com/Slicer/Slicer/blob/main/Base/Python/slicer/ScriptedLoadableModule.py\n    \"\"\"",
+   "explanation": "`DBS_STN/DBSShiftPrediction.py` defines `class DBSShiftPredictionWidget` twice (first at line 959 as an incomplete stub, and again at line 1128 with the actual implementation). In addition, `on_calculate_shift` (lines 1574-1586) contains a `try` block that removes existing `shift` and `scale_mesh` nodes and immediately executes `return`, so clicking the button a second time only deletes the previous output and returns without recalculating the shift unless the user clicks a third time.",
+   "suggestion": "Remove the duplicate `DBSShiftPredictionWidget` stub at lines 959-1005 and remove the premature `return` in `on_calculate_shift` at line 1584.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Contents of binary .pt and .pkl files in Resources/nets/ and NIfTI files in Resources/MNI/ and Resources/eparams/",
+  "Contents of the external PyPI package dbs-pure-lib and Box-hosted antspyx wheel"
+ ],
+ "questions_for_author": [
+  "Can `PyTorchUtils` from the `SlicerPyTorch` extension be used for installing/importing PyTorch instead of calling `pip_install('torch')` directly?",
+  "Why is `antspyx` downloaded from a custom Box link on Linux Python 3.12 instead of PyPI, and can a checksum or official PyPI wheel be used?",
+  "Is `ShiftCLI` needed by the extension, or is it leftover template code that can be removed?"
+ ]
+}

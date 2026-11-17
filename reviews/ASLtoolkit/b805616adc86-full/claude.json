@@ -1,0 +1,105 @@
+{
+ "purpose": "ASLtoolkit adds two scripted CLI modules to 3D Slicer for Arterial Spin Labeling MRI. One computes CBF and ATT maps, and the other computes a multi-echo T1 blood-GM map. Both wrap the third-party `asltk` PyPI package and are meant for neuroimaging researchers.",
+ "summary": "I read the full source: both CLI scripts, their XML files, the CMake files, the license and the docs. I found no malicious behavior, no network use beyond pip, and no data exfiltration. The license is MIT and the catalog entry is consistent with the CMake settings. The main concern is that `asltk==1.1.3` is pip-installed silently into Slicer's shared Python the first time a module runs, from inside the CLI subprocess. This is undocumented in the UI and has no confirmation. It also depends on `slicer.util` being importable in `python-real`, and I could not verify that `asltk`'s dependency pins are compatible with Slicer's bundled packages. There are also ordinary bugs: unused T2 parameters, and validation that never triggers in the CBF module. Overall: needs fixes (non-blocking under the admission policy).",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "I read both scripts and found no network calls other than the pip install, no eval/exec/pickle, no shell commands and no telemetry. File access is limited to user-supplied input paths and the output paths Slicer supplies."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "On first run, `slicer.util.pip_install(\"asltk==1.1.3\")` installs a package with transitive dependencies into Slicer's shared Python without confirmation. Whether asltk pins or downgrades numpy, scipy, SimpleITK or pydicom, or pulls in other heavy packages, was not verified. The install runs inside a `python-real` CLI subprocess rather than the GUI, and the user is not asked first."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "`EXTENSION_DEPENDS` is NA and `build_dependencies` is empty, so they match. Both modules are built with `SlicerMacroBuildScriptedCLI`, and the .py and .xml files exist. `scm_revision` is the branch `main`, which is allowed but means the reviewed code can change. Minor: the README icon URL points at the `develop` branch."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "The repository has an MIT LICENSE and the source files carry matching MIT headers. The asltk dependency's license was not checked."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The multi-echo T2 blood and T2 GM inputs are parsed but never passed to the reconstruction. The CBF smoothing validation compares lowercase strings against the capitalized enumeration, so it never fires. There is no GUI-thread or try/except error handling around the processing, and `pip_install` depends on `slicer.util` working in `python-real`. The docs and `requirements.txt` disagree on the asltk version (1.1.0 vs 1.1.3)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "There is documentation, example output images and a tutorial whose sample data is on Google Drive. The extension is useful for ASL researchers. It has no automated tests and no research-use or clinical disclaimer, and the quantitative parameters are not validated."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "asltk is pip-installed silently at first module run, without user confirmation",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 28,
+   "line_end": 37,
+   "evidence": "except ModuleNotFoundError:\n    import slicer.util\n    slicer.util.pip_install(\"asltk==1.1.3\")",
+   "explanation": "If `asltk` is missing, the CLI script calls `slicer.util.pip_install(\"asltk==1.1.3\")` straight away. This installs asltk and all its transitive dependencies into Slicer's shared Python with no prompt, even though the download may be large. Those dependencies may pin or replace packages Slicer bundles (numpy, scipy, SimpleITK, pydicom), and I did not verify them. The install happens inside a `python-real` subprocess, so the user sees nothing in the UI. The README mentions it only in a note. The `slicer` package may also not be fully usable from `python-real`, so the fallback may simply fail.",
+   "suggestion": "Add a scripted module with a GUI that tells the user which packages will be installed and asks for confirmation before calling `pip_install`. Check that asltk's dependency requirements do not pin or downgrade Slicer-bundled packages. Apply the same change to the Multi_Echo_ASL script.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Same silent pip install in the Multi_Echo_ASL module",
+   "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+   "line_start": 28,
+   "line_end": 37,
+   "evidence": "    import slicer.util\n    slicer.util.pip_install(\"asltk==1.1.3\")",
+   "explanation": "The identical pattern is repeated, so either module can trigger a silent installation into the shared environment.",
+   "suggestion": "Centralize and gate the installation behind a user confirmation.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "T2 blood / T2 GM parameters are accepted but never used",
+   "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+   "line_start": 127,
+   "line_end": 134,
+   "evidence": "recon = MultiTE_ASLMapping(data)\n  recon.set_brain_mask(mask_img)\n  \n  # This is the long-running operation\n  maps = recon.create_map(",
+   "explanation": "`t2b` and `t2gm` are exposed in the GUI with defaults and ranges, but they are only printed in verbose output. They are not passed to `MultiTE_ASLMapping` or `create_map`. Changing them therefore has no effect on the result, which misleads users.",
+   "suggestion": "Pass the T2 values to asltk, for example via its setter or constructor options, or remove the parameters from the XML.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Smoothing-parameter validation in CBF module compares wrong case and never triggers",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 187,
+   "line_end": 192,
+   "evidence": "if args.smoothMethod == 'gaussian' and args.smoothParameter <= 0:",
+   "explanation": "Valid methods are 'Gaussian' and 'Median', but the checks compare against lowercase 'gaussian' and 'median'. Invalid sigma or kernel sizes, such as an even median size, therefore pass validation and fail later inside asltk or give wrong results. The Multi_Echo module uses the correct case.",
+   "suggestion": "Compare against 'Gaussian' and 'Median', matching the Multi_Echo module.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No tests, no research-use disclaimer; docs and requirements inconsistent; sample data on Google Drive",
+   "file": "requirements.txt",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "asltk==1.1.0",
+   "explanation": "The repository has no automated tests. `requirements.txt` pins asltk==1.1.0 while the scripts install 1.1.3. The tutorial sample data is on a personal Google Drive link. There is no statement that the maps are for research use only. The catalog entry tracks the moving branch `main`.",
+   "suggestion": "Align the versions, add a research-use note, host the sample data in a stable location, and consider pinning `scm_revision` to a commit or tag.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Contents and dependency pins of the asltk 1.1.3 PyPI package (no network access)",
+  "Runtime behavior in Slicer, including whether pip_install works from python-real",
+  "Whether the `main` branch tip still matches the reviewed code",
+  "Google Drive sample data",
+  "Correctness of the ASL quantification itself"
+ ],
+ "questions_for_author": [
+  "What are the declared dependencies of asltk 1.1.3, and do they pin or downgrade numpy, scipy, SimpleITK or pydicom in Slicer's Python?",
+  "Does `import slicer.util` and `pip_install` actually work inside a `python-real` CLI subprocess? Have you tested a clean install?",
+  "Why are the T2 blood and T2 GM parameters not passed to the reconstruction?"
+ ]
+}

@@ -1,0 +1,101 @@
+{
+ "purpose": "Provides four ITK/SlicerExecutionModel command-line filters (Anisotropic and Isotropic Anomalous Diffusion, applied to MRI, EPI fMRI/ASL, and diffusion-weighted volumes) for denoising medical images, aimed at Slicer users in the Filtering category. Source is an Apache-2.0 licensed CMake/C++ project with per-module CLI XML, a shared automatic-conductance calculator, and ExternalData-based tests.",
+ "summary": "I found no malicious, network, or environment-changing behavior. The code is pure ITK CLI filtering with file reads and writes only to user-chosen paths, no pip installs, no Python, and no downloads at runtime. The main concerns are soundness and documentation: the CLI test invocation passes a `--sigma` argument that the module XML does not define, the README contradicts the extension description about DWI support, and the module XML license tag says \"Slicer\" while the repo is Apache-2.0. I did not compile or run anything; the review covers the CMake files, CLI XMLs, and the main .cxx files, not the full .hxx implementations or test data.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all four module .cxx entry points and CLI XML: only ITK ImageFileReader/Writer on user-selected paths, no network, no telemetry, no exec, no deserialization. The DWI module parses header metadata with sscanf, a minor robustness issue, not a harm path."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "No Python code, no pip, no PyTorch, no sys.path or global logging changes in the CMakeLists.txt files or sources inspected; the extension only builds C++ CLI executables."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Top-level CMakeLists.txt adds four subdirectories that each call SEMMacroBuildCLI with headers listed; catalog has empty build_dependencies and no EXTENSION_DEPENDS, which is consistent with ITK-only usage. The scm_revision is the branch 'main', so the exact revision is not pinned; I did not resolve it."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is the full Apache License 2.0 text (LICENSE lines 1-10) and README.md lines 21-23 state Apache 2.0. Module XMLs say '<license>Slicer</license>', which is a descriptive metadata inconsistency, not a distribution barrier."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected the CLI CMake test definitions and the main .cxx files. The test invocation passes '--sigma 2.5' which no module XML defines, so the ctest entries may fail to parse arguments; the DWI and EPI modules also ignore the GUI-thread/progress conventions beyond PluginFilterWatcher. The .hxx implementations were only partially read."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README and docs describe scalar MRI volumes only while the extension description and DWI module claim DWI/DTI support. Test data exists (Data/Input, Data/Baseline), but there is no clinical-use disclaimer and no tutorial beyond docs/index.md, which I did not read."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Test invocation passes an argument the modules do not define",
+   "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+   "line_start": 16,
+   "line_end": 21,
+   "evidence": "--compare DATA{${BASELINE}/${CLP}Test.nhdr,${CLP}Test.raw}\n    ${TEMP}/${CLP}Test.nhdr\n    ModuleEntryPoint\n    --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nhdr",
+   "explanation": "The ExternalData test command passes '--sigma 2.5' to ModuleEntryPoint, but none of the module XML files define a 'sigma' parameter, so the CLI parser will likely reject the argument and the test will fail. Tests for all four modules appear to be copied from a template without adjustment. I did not run the tests, so this is inferred from reading the XML and CMake.",
+   "suggestion": "Verify the test runs under ctest; if it fails, replace '--sigma 2.5' with a parameter that exists (e.g. '--iterations' / '--conductance') and regenerate the baseline, or drop the stale test. Apply the same fix to the IAD, AADEPIData, and AADDiffusionWeightedData test CMake files.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "README describes the modules inconsistently with the extension description and DWI module",
+   "file": "README.md",
+   "line_start": 3,
+   "line_end": 3,
+   "evidence": "At the moment, the Modules available are suppose to be used on scalar volumes, mainly MRI strucutral images namely T1 and T2 weighted images. Future developments will add new functionalities in order to attenuate image noise in other imaging modalities, such as diffusion weighted images (DWI and DTI).",
+   "explanation": "README says the modules are for scalar MRI volumes and that DWI/DTI support is future work, but the CMake extension description and the AADDiffusionWeightedData module state DWI/DTI is already supported. Users may pick the wrong module or assume DWI support is absent.",
+   "suggestion": "Align README, docs/index.md, and the CMake EXTENSION_DESCRIPTION on which modalities are supported and state validation status for DWI.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Module XML license tag does not match the Apache-2.0 LICENSE file",
+   "file": "AADImageFilter/AADImageFilter.xml",
+   "line_start": 8,
+   "line_end": 8,
+   "evidence": "<license>Slicer</license>",
+   "explanation": "Each CLI XML declares the license as 'Slicer' while the repository LICENSE and source headers are Apache-2.0. This is descriptive metadata only and does not block distribution, but it is inconsistent.",
+   "suggestion": "Change the per-module <license> to Apache-2.0 (or the license actually intended) to match LICENSE.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Catalog pins a moving branch rather than a commit",
+   "file": "AnomalousFiltersExtension.json",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "\"scm_revision\": \"main\",",
+   "explanation": "scm_revision is 'main', so the built code can change without a catalog update. This is permitted by index policy but means the reviewed source cannot be tied to a fixed revision; I did not resolve the branch to a commit.",
+   "suggestion": "Consider pinning scm_revision to a reviewed commit hash for reproducible builds.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Unchecked sscanf results in DWI header parsing",
+   "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+   "line_start": 101,
+   "line_end": 107,
+   "evidence": "sscanf(metaString.c_str(), \"%lf %lf %lf\\n\", &x, &y, &z);\n            vect3d[0] = x; vect3d[1] = y; vect3d[2] = z;",
+   "explanation": "The gradient parser uses sscanf without checking the return value; malformed DWMRI_gradient metadata leaves x, y, z uninitialized and feeds garbage directions into the reconstruction. Only affects malformed input files, with no safety impact.",
+   "suggestion": "Check sscanf returns 3 and report an error otherwise.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Did not read the full .hxx implementations (AADImageFilter, AADDiffusionWeightedData, AADEPIData, IADImageFilter) beyond the first 60 lines of one file, so numerical correctness and loop bounds were not verified.",
+  "Did not read the Testing/Cxx *Test.cxx files other than the test main stubs, nor the Data/Input and Data/Baseline content (.sha512 or ExternalData hashes), so test data provenance and whether tests pass were not verified.",
+  "Did not resolve scm_url or scm_revision; the exact commit reviewed is unknown.",
+  "Did not read docs/index.md, mkdocs.yml, .github/FUNDING.yml, or .readthedocs.yaml beyond what was included.",
+  "Did not verify the ITK component list (e.g. whether itkDiffusionTensor3DReconstructionImageFilter needs an extra ITK module in AADDiffusionWeightedData) or compile anything."
+ ],
+ "questions_for_author": []
+}

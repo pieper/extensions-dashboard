@@ -1,0 +1,1248 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "A conversion deletes any existing scene node named Electrodes",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "TextToMarkups/TextToMarkups.py",
+   "line": 294,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "A conversion deletes any existing scene node named Electrodes",
+     "file": "TextToMarkups/TextToMarkups.py",
+     "line_start": 294,
+     "line_end": 301,
+     "evidence": "        logic = DBSShiftPrediction.MRI_MERLogic()\n        # remove previous markup node with name electrodes\n\n        try:\n            slicer.mrmlScene.RemoveNode(slicer.mrmlScene.GetFirstNodeByName(\"Electrodes\"))",
+     "explanation": "Clicking Apply removes the first node with this name without checking its type, provenance, or whether it contains unsaved user data; it can even remove a selected input before parsing. An unrelated or manually edited node may be lost without warning.",
+     "suggestion": "Track only nodes created by this module, preserve existing nodes by default, and confirm any destructive replacement.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "TextToMarkups/TextToMarkups.py",
+      "line": 294
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "TextToMarkups/TextToMarkups.py:298 calls RemoveNode(GetFirstNodeByName(\"Electrodes\")) with no type check, and the output is later renamed \"Electrodes\" (line 306). So it is a replace-previous-output pattern on a name the module itself assigns. The input is a text node, so it is only removed in the odd case where the user named it \"Electrodes\", and then read_leadOR_txt (line 301) still reads it. RemoveNode(None) raises, and the bare except at 299-300 swallows that. Possible loss of a user node with the same name is real but narrow; this is not a safety issue."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "TextToMarkups/TextToMarkups.py:278-301: after the checks and logic initialization, Apply executes `slicer.mrmlScene.RemoveNode(slicer.mrmlScene.GetFirstNodeByName(\"Electrodes\"))` before `df_text = logic.read_leadOR_txt(self._parameterNode.inputVolume)`. There is no type, ownership, or unsaved-data check or confirmation. The first matching node, including a selected text input, may be removed; unsaved scene data can be lost even if parsing subsequently fails. This is scene-node removal, not verified deletion of an on-disk file."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In TextToMarkups/TextToMarkups.py lines 298-306, onApplyButton calls `slicer.mrmlScene.RemoveNode(slicer.mrmlScene.GetFirstNodeByName(\"Electrodes\"))` before creating a new markups node named `\"Electrodes\"`. While it removes an existing MRML node in the in-memory scene with that exact name (written to replace the previous run's output), this is an ordinary Slicer scene-management bug/soundness issue rather than a blocking safety vulnerability (it does not delete files on disk, and the rubric states \"Do not label ordinary bugs as safety issues merely because the extension processes medical images\")."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Direct pip_install('torch') instead of using SlicerPyTorch (PyTorchUtils)",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line": 19,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Direct pip_install('torch') instead of using SlicerPyTorch (PyTorchUtils)",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 67,
+     "line_end": 71,
+     "evidence": "try:\n    import torch\nexcept ImportError:\n    slicer.util.pip_install('torch')\n    import torch",
+     "explanation": "Both `STNSegmenter/STNSegmenter.py` (lines 67-71) and `DBS_STN/DBSShiftPrediction.py` (lines 17-25 and 1742-1746) install PyTorch directly via `slicer.util.pip_install('torch')` (and also pull `torch` as a dependency of `dbs-pure-lib`, `torchio`, and `ANTsTorch`). Direct `pip_install('torch')` in Slicer's Python environment bypasses `PyTorchUtils` from the `SlicerPyTorch` extension, can install CPU-only or incompatible CUDA wheels, and can break other PyTorch-based extensions in Slicer.",
+     "suggestion": "Add `PyTorch` to `EXTENSION_DEPENDS` in `CMakeLists.txt` and `build_dependencies` in the catalog entry, and use `PyTorchUtils.PyTorchUtilsLogic()` to check for and install PyTorch on demand rather than calling `slicer.util.pip_install('torch')`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 19
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "STNSegmenter/STNSegmenter.py:67-71 and DBS_STN/DBSShiftPrediction.py:17-25 and 1742-1746 run slicer.util.pip_install('torch') at module import or in the logic constructor. The search for PyTorchUtils found no use of it anywhere. The policy explicitly requires changes for PyTorch installed other than through the PyTorch extension. The install also happens without user confirmation, and ANTsTorch, torchio and dbs-pure-lib can pull torch in as well."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "STNSegmenter/STNSegmenter.py:67-71 and DBS_STN/DBSShiftPrediction.py:17-25 both contain `slicer.util.pip_install('torch')` after an import failure; DBS_STN/DBSShiftPrediction.py:1742-1750 repeats it and installs torchio. Root CMakeLists.txt:12 lists `set(EXTENSION_DEPENDS \"SlicerElastix;SlicerNetstim\")`, not PyTorchUtils. These paths bypass SlicerPyTorch and can change the shared environment without confirmation. I did not verify the dependency metadata of the separately installed packages or prove a particular wheel conflict."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Checked STNSegmenter/STNSegmenter.py lines 19-76 and DBS_STN/DBSShiftPrediction.py lines 17-25 and 1742-1746. Both modules directly run `slicer.util.pip_install('torch')` (and install `dbs-pure-lib` and `ANTsTorch` which pull torch from PyPI) at module import time without using `PyTorchUtils` from SlicerPyTorch. The Slicer review policy explicitly states to request changes (blocking) for PyTorch installed other than through the Slicer PyTorch extension (`PyTorchUtils`) and for package installation at module import."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Downloaded weights are loaded without integrity or safe-deserialization guarantees",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "minor"
+   ],
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line": 153,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "Downloaded model weights loaded with torch.load without a checksum",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 153,
+     "line_end": 164,
+     "evidence": "success = slicer.util.downloadFile(download_url, str(tmp_path))\n...\n        return torch.load(str(file_path), map_location=torch.device('cpu'))",
+     "explanation": "`shp_pred.pt` is downloaded from a GitHub release and loaded with `torch.load`, which unpickles by default depending on the torch version. A tampered file would give code execution. No integrity check is done, and the file is placed in the module directory.",
+     "suggestion": "Verify a SHA256 of the download. Use `weights_only=True`. Download to a user-writable cache rather than the install directory.",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 153
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Downloaded weights are loaded without integrity or safe-deserialization guarantees",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 153,
+     "line_end": 164,
+     "evidence": "        success = slicer.util.downloadFile(download_url, str(tmp_path))\n        if not success:\n            raise RuntimeError(f\"Failed to download weights for {model_name} from {download_url}\")\n        if not tmp_path.exists() or tmp_path.stat().st_size == 0:\n            raise RuntimeError(f\"Downloaded empty weights file for {model_name} from {download_url}\")\n        tmp_path.replace(file_path)",
+     "explanation": "The shape model is fetched from the release URL at lines 727–731 and then passed to torch.load at line 164 without a checksum or explicit weights_only=True. On PyTorch versions whose default allows pickle, a substituted release asset can execute code when the module initializes; the remote asset could not be inspected.",
+     "suggestion": "Pin and verify a trusted digest, load explicitly with weights_only=True or use a non-executable weights format, and fail closed on verification errors.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 153
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "STNSegmenter/STNSegmenter.py:153-164 downloads shp_pred.pt from a GitHub release URL (line 730, over HTTPS, in the author's own repo) and calls torch.load without weights_only=True and without a checksum. Newer torch versions default to weights_only=True, so the risk depends on the version. The source is the author's own release, so this is a hardening gap and not a concrete path to harm. Not blocking."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "STNSegmenter/STNSegmenter.py:727-732 passes the GitHub release URL for `shp_pred.pt` to the loader. Lines 153-164 download it with `slicer.util.downloadFile(download_url, str(tmp_path))`, check only that it is nonempty, and call `return torch.load(str(file_path), map_location=torch.device('cpu'))` without a checksum or explicit `weights_only=True`. On PyTorch versions that default to unrestricted pickle loading, a substituted asset can execute code during logic initialization; newer defaults may mitigate this. I could not inspect the release asset or verify a compromise."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked STNSegmenter/STNSegmenter.py lines 137-179 and 727-733. `_load_torch_state_dict` downloads `shp_pred.pt` from `https://github.com/IVarha/SlicerDBSCoalignment/releases/download/0.0.1/shp_pred.pt` without verifying a SHA256 checksum and calls `torch.load(str(file_path), map_location=torch.device('cpu'))` without `weights_only=True`. Because `cd_state_dict` is only passed to `net.load_state_dict(cd_state_dict)`, passing `weights_only=True` and verifying a hash is recommended, though since the URL is the author's own GitHub repository release, this is a minor hardening issue rather than a blocking defect."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "DBSShiftPrediction installs torch, pandas, intensity-normalization and dbs-pure-lib at import",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DBS_STN/DBSShiftPrediction.py",
+   "line": 8,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "major",
+     "title": "DBSShiftPrediction installs torch, pandas, intensity-normalization and dbs-pure-lib at import",
+     "file": "DBS_STN/DBSShiftPrediction.py",
+     "line_start": 17,
+     "line_end": 47,
+     "evidence": "except ImportError:\n    slicer.util.pip_install('torch')\n    import torch",
+     "explanation": "The module has the same import-time install pattern. `intensity-normalization` and `dbs-pure-lib` may pull in torch, numpy or other pinned dependencies that conflict with Slicer-bundled packages.",
+     "suggestion": "Defer installs to a user-triggered, confirmed setup step. Use PyTorchUtils for torch. Check the transitive pins of dbs-pure-lib and intensity-normalization against Slicer's bundled packages.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DBS_STN/DBSShiftPrediction.py",
+      "line": 8
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DBS_STN/DBSShiftPrediction.py:6-47 runs pip_install for pandas, torch, intensity-normalization and dbs-pure-lib at module import, with no confirmation. This affects Slicer's shared Python environment. intensity-normalization and dbs-pure-lib may pull in torch or pinned dependencies. It is the same pattern as D2, so it is a real environment concern."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DBS_STN/DBSShiftPrediction.py:6-10, 17-25, 34-38, and 43-47 conditionally install the four packages at module import; for example `slicer.util.pip_install(r'dbs-pure-lib')` is at line 46. Missing packages trigger installation into Slicer's shared environment without a prompt, including direct torch installation. The dependency metadata and any specific numpy pin or downgrade were not verified."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Checked DBS_STN/DBSShiftPrediction.py lines 6-48. At module top-level (executed during Slicer startup/module discovery), it calls `slicer.util.pip_install` for `pandas`, `torch`, `intensity-normalization`, and `dbs-pure-lib`. Under the Slicer review policy and rubric, installing packages (especially PyTorch and heavy dependencies) at module import / Slicer startup modifies Slicer's shared Python environment for all users even if they never open the module, which is a blocking environment issue."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "STN shape weights and registration parameters are not installed",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "STNSegmenter/CMakeLists.txt",
+   "line": 23,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "STN shape weights and registration parameters are not installed",
+     "file": "STNSegmenter/CMakeLists.txt",
+     "line_start": 23,
+     "line_end": 28,
+     "evidence": "  Resources/nets/cent_pred.pt\n  Resources/nets/detect_mask.pkl\n  Resources/nets/mer_pca_mesh.pkl\n  Resources/nets/shape_hist.pkl\n  Resources/nets/shape_pcas.pkl\n  Resources/nets/stn_shape_mask.pkl",
+     "explanation": "The module loads nets/shp_pred.pt and uses elastix/rigid_mri.txt, but neither is in the module resource list. An installed package must download the shape model into the installation directory, which may be read-only, and cannot find the rigid parameter file. These are functional issues separate from catalog admission.",
+     "suggestion": "Install the registration parameters and either install the shape model or download it with consent and integrity verification into a writable cache.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "STNSegmenter/CMakeLists.txt",
+      "line": 23
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "STNSegmenter/CMakeLists.txt:15-29 lists the nets resources but not Resources/elastix/rigid_mri.txt. That file exists in the repo and is used at STNSegmenter.py:876, so it will be missing from an installed package. shp_pred.pt (STNSegmenter.py:727) is not in the repo or the CMake list. It is downloaded at runtime into the module resource directory, which may not be writable in an installed build. Both are functional bugs, not catalog admission blockers."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "STNSegmenter/CMakeLists.txt:15-29 lists installed resources but omits both `Resources/nets/shp_pred.pt` and `Resources/elastix/rigid_mri.txt`. STNSegmenter/STNSegmenter.py:691-696 resolves resources relative to the module installation; lines 727-732 invoke the download for the missing model, and lines 872-877 pass `self.resourcePath('elastix/rigid_mri.txt')` to registration. The latter exists in the source tree but is not listed for installation. Model initialization can fail where the installed resource directory is not writable, and registration cannot find its omitted parameter file. I did not run an installed build."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked STNSegmenter/CMakeLists.txt lines 15-29 and STNSegmenter/STNSegmenter.py lines 714, 727, and 876, plus the file listing of STNSegmenter/Resources. `Resources/nets/cent_pred.pt` is listed in CMakeLists.txt (line 23) and loaded without a download URL (line 714), yet `cent_pred.pt` does not exist in `STNSegmenter/Resources/nets/` at all (so CMake configure/install will fail or the file will be missing). Furthermore, `Resources/elastix/rigid_mri.txt` exists in the repo and is used at STNSegmenter.py:876, but is omitted from `MODULE_PYTHON_RESOURCES` in CMakeLists.txt, and `shp_pred.pt` is downloaded at runtime into `self.resourcePath('nets/shp_pred.pt')` which may be in a read-only installation folder."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Catalog build_dependencies does not match CMakeLists.txt EXTENSION_DEPENDS",
+   "category": "packaging",
+   "severity": "blocking",
+   "kind": "consensus",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "blocking",
+    "major"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 12,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "major",
+     "title": "EXTENSION_DEPENDS does not match catalog build_dependencies; PyTorchUtils missing",
+     "file": "CMakeLists.txt",
+     "line_start": 12,
+     "line_end": 12,
+     "evidence": "set(EXTENSION_DEPENDS \"SlicerElastix;SlicerNetstim\")",
+     "explanation": "CMakeLists declares SlicerElastix and SlicerNetstim as dependencies, but the catalog entry has `build_dependencies: []`. The index will not build or ship the intended dependencies. The code also needs PyTorchUtils.",
+     "suggestion": "Make `build_dependencies` in the catalog entry identical to `EXTENSION_DEPENDS`, and add PyTorchUtils.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 12
+     }
+    },
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Catalog build_dependencies does not match CMakeLists.txt EXTENSION_DEPENDS",
+     "file": "CMakeLists.txt",
+     "line_start": 12,
+     "line_end": 12,
+     "evidence": "set(EXTENSION_DEPENDS \"SlicerElastix;SlicerNetstim\") # AtlasMapping uses Elastix, DBS workflow integrates with Netstim/Lead-OR",
+     "explanation": "`CMakeLists.txt` declares `set(EXTENSION_DEPENDS \"SlicerElastix;SlicerNetstim\")`, and the modules rely on `Elastix` and `SlicerNetstim` (and should also depend on `PyTorch`). However, the Extensions Index catalog entry specifies `\"build_dependencies\": []`. The catalog entry's `build_dependencies` must match `EXTENSION_DEPENDS`.",
+     "suggestion": "Update `build_dependencies` in `DBSCoalignment.json` to `[\"SlicerElastix\", \"SlicerNetstim\", \"PyTorch\"]` (and include `PyTorch` in `EXTENSION_DEPENDS` in `CMakeLists.txt`).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 12
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Catalog omits extension dependencies declared by the build",
+     "file": "CMakeLists.txt",
+     "line_start": 12,
+     "line_end": 12,
+     "evidence": "set(EXTENSION_DEPENDS \"SlicerElastix;SlicerNetstim\") # AtlasMapping uses Elastix, DBS workflow integrates with Netstim/Lead-OR",
+     "explanation": "The supplied catalog entry sets build_dependencies to an empty array. Consequently the index cannot order or provision the declared dependencies, and AtlasMapping explicitly imports Elastix while the documented electrode workflow requires Netstim.",
+     "suggestion": "List SlicerElastix and SlicerNetstim in the catalog build_dependencies and keep that list synchronized with EXTENSION_DEPENDS.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 12
+     }
+    }
+   ]
+  },
+  {
+   "title": "PyTorch and other packages pip-installed at module import without consent",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "consensus",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "blocking",
+    "blocking"
+   ],
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line": 19,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "blocking",
+     "title": "PyTorch and other packages pip-installed at module import without consent",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 55,
+     "line_end": 76,
+     "evidence": "try:\n    import torch\nexcept ImportError:\n    slicer.util.pip_install('torch')\n    import torch",
+     "explanation": "When Slicer loads the module (even if the user never opens it), a missing `torch` is installed from PyPI instead of through PyTorchUtils. A missing `antspyx` is installed in the same way. This can alter or break the shared Slicer Python environment, and the downloads are large. PyTorchUtils is not declared as a dependency.",
+     "suggestion": "Declare PyTorchUtils in `build_dependencies` and `EXTENSION_DEPENDS` and install torch through it. Move all pip installs into the module logic behind an explicit user confirmation. Do not run them at import time.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 19
+     }
+    },
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Packages installed via pip_install at module import / Slicer startup",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 19,
+     "line_end": 23,
+     "evidence": "try:\n    from dbs_image_utils.mask import SubcorticalMask\nexcept ImportError:\n    slicer.util.pip_install('dbs-pure-lib')\n    from dbs_image_utils.mask import SubcorticalMask",
+     "explanation": "`STNSegmenter.py` and `DBSShiftPrediction.py` call `slicer.util.pip_install` at the top level of the module during module import (when 3D Slicer starts up and discovers scripted modules), installing `dbs-pure-lib`, `antspyx`, `git+https://github.com/ANTsX/ANTsTorch.git`, `torch`, `intensity-normalization`, and `pandas` without user interaction or confirmation. Installing heavy packages and git repositories at Slicer startup blocks application launch and modifies the shared Slicer Python environment for all users, even those who never open these modules.",
+     "suggestion": "Move all third-party imports (`dbs_image_utils`, `ants`, `antstorch`, `torch`, `intensity_normalization`, `pandas`) and any dependency installation logic out of module-top-level scope and into `Logic` methods or widget actions, after prompting the user for confirmation (e.g., via `slicer.util.confirmOkCancelDisplay`).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 19
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Imports install packages and PyTorch into the shared environment",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 55,
+     "line_end": 70,
+     "evidence": "    import ants\n    import antstorch\nexcept ImportError:\n    _install_antspyx()\n    slicer.util.pip_install('git+https://github.com/ANTsX/ANTsTorch.git')",
+     "explanation": "These top-level imports cause Slicer startup/module discovery to install dependencies without confirmation; lines 67–70 directly pip-install torch, and DBSShiftPrediction.py has the same direct torch installation at lines 17–22. This can change shared packages or install an incompatible PyTorch for users who never open the module.",
+     "suggestion": "Move dependency checks to an explicit user-confirmed setup, use the PyTorch extension for torch, and declare PyTorchUtils in both dependency lists.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 56
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unverified binary wheel downloaded from Box shared link and installed at startup",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "consensus",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "blocking",
+    "major"
+   ],
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line": 35,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "major",
+     "title": "Unverified wheel downloaded from box.com and installed; ANTsTorch installed from git HEAD",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 35,
+     "line_end": 60,
+     "evidence": "download_url = \"https://app.box.com/shared/static/mu1gy26t80oopbtv3mndl5yveb6s4431.whl\"\n...\n    urllib.request.urlretrieve(download_url, str(whl_path))\n...\n    slicer.util.pip_install('git+https://github.com/ANTsX/ANTsTorch.git')",
+     "explanation": "A binary wheel is fetched over a shared Box link with no checksum or signature and is then pip-installed, which means arbitrary code runs if the link content changes. ANTsTorch is installed from an unpinned git HEAD, so the installed code can change at any time. Both happen at import time without consent.",
+     "suggestion": "Verify a pinned SHA256 before installing. Prefer official PyPI wheels, and pin a commit or release for ANTsTorch. Ask the user before installing.",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 35
+     }
+    },
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Unverified binary wheel downloaded from Box shared link and installed at startup",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 35,
+     "line_end": 40,
+     "evidence": "        download_url = \"https://app.box.com/shared/static/mu1gy26t80oopbtv3mndl5yveb6s4431.whl\"\n        whl_filename = \"antspyx-0.6.2-cp312-cp312-linux_x86_64.whl\"\n        whl_path = Path(tempfile.gettempdir()) / whl_filename\n\n        logging.info(\"Downloading antspyx wheel from %s\", download_url)\n        urllib.request.urlretrieve(download_url, str(whl_path))",
+     "explanation": "On Linux x86_64 with Python 3.12 (Slicer 5.9/5.10), `_install_antspyx()`—which is called automatically at Slicer startup if `ants` is not yet installed—downloads a binary wheel (`antspyx-0.6.2-cp312-cp312-linux_x86_64.whl`) from an unverified personal/shared Box URL (`https://app.box.com/shared/static/mu1gy26t80oopbtv3mndl5yveb6s4431.whl`) into the shared system temp directory without any cryptographic hash verification or user consent, and immediately executes/installs it via `pip_install`. Downloading and executing unverified binary wheels from opaque file-sharing links without checksum validation poses a severe supply-chain and code-execution risk.",
+     "suggestion": "Install official releases from PyPI (`slicer.util.pip_install(\"antspyx\")`) or, if a custom wheel is strictly required, host it on a controlled release page with mandatory SHA-256 checksum verification before installation and only after explicit user consent.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 35
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Unverified remote wheel is installed into Slicer's process",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 35,
+     "line_end": 44,
+     "evidence": "        download_url = \"https://app.box.com/shared/static/mu1gy26t80oopbtv3mndl5yveb6s4431.whl\"\n        whl_filename = \"antspyx-0.6.2-cp312-cp312-linux_x86_64.whl\"\n        whl_path = Path(tempfile.gettempdir()) / whl_filename\n\n        logging.info(\"Downloading antspyx wheel from %s\", download_url)\n        urllib.request.urlretrieve(download_url, str(whl_path))",
+     "explanation": "On Linux x86-64 with Python 3.12, missing ANTs dependencies trigger download and pip installation of a Box-hosted binary wheel with no integrity or publisher verification. A replaced or compromised payload can execute native or Python code in Slicer, and the wheel's contents and provenance were unavailable for review.",
+     "suggestion": "Use a verified trusted distribution with a pinned digest and documented provenance; obtain user consent before installation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 35
+     }
+    }
+   ]
+  },
+  {
+   "title": "STNSegmenter calls functions that do not exist",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "consensus",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "major",
+    "major"
+   ],
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line": 873,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "major",
+     "title": "STNSegmenter calls functions that do not exist",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 873,
+     "line_end": 877,
+     "evidence": "slicer_preprocessing.elastix_registration(\n            ref_image=t1_path,\n            flo_image=t2_path,\n            elastix_parameters=self.resourcePath('elastix/rigid_mri.txt'),\n            out_folder=out_folder)",
+     "explanation": "`coregistration_t2_t1` calls `slicer_preprocessing.elastix_registration`, but segm_lib/slicer_preprocessing.py only defines `elastix_registration_cmd`. `process` references `STNSegmenter.check_storage_node` and `STNSegmenter.loadNiiImage` on the module class, where they are not attributes (they are module-level functions). Together this suggests the T2-to-T1 coregistration button and the one-shot pipeline fail with an AttributeError. I did not run it.",
+     "suggestion": "Use the Elastix extension's logic (`elastix_registration_cmd` plus `ElastixLogic`) and fix the references. Add working tests.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 873
+     }
+    },
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Broken T2-to-T1 coregistration in STNSegmenter due to missing function and uninstalled resource",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 873,
+     "line_end": 877,
+     "evidence": "        slicer_preprocessing.elastix_registration(\n            ref_image=t1_path,\n            flo_image=t2_path,\n            elastix_parameters=self.resourcePath('elastix/rigid_mri.txt'),\n            out_folder=out_folder)",
+     "explanation": "`STNSegmenterLogic.coregistration_t2_t1` calls `slicer_preprocessing.elastix_registration(...)`, which exists in `DBS_STN/Lib/slicer_preprocessing.py` (where it calls `subprocess.check_output([\"elastix\", ...])` assuming `elastix` is on the system PATH), but does NOT exist in `STNSegmenter/segm_lib/slicer_preprocessing.py` (which only defines `elastix_registration_cmd`). Because `_import_segm_support()` imports `segm_lib.slicer_preprocessing` first, calling `coregistration_t2_t1` raises `AttributeError: module 'segm_lib.slicer_preprocessing' has no attribute 'elastix_registration'`. Furthermore, `STNSegmenter/CMakeLists.txt` does not install `Resources/elastix/rigid_mri.txt` in `MODULE_PYTHON_RESOURCES`, so `self.resourcePath('elastix/rigid_mri.txt')` will not exist in a packaged installation.",
+     "suggestion": "Use `Elastix.ElastixLogic()` from `SlicerElastix` (as done in `AtlasMapping`) to run Elastix registration, and add `Resources/elastix/rigid_mri.txt` to `MODULE_PYTHON_RESOURCES` in `STNSegmenter/CMakeLists.txt`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 873
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "T2-to-T1 coregistration calls a nonexistent helper",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 872,
+     "line_end": 877,
+     "evidence": "        # Elastix.ElastixLogic().register()\n        slicer_preprocessing.elastix_registration(\n            ref_image=t1_path,\n            flo_image=t2_path,\n            elastix_parameters=self.resourcePath('elastix/rigid_mri.txt'),\n            out_folder=out_folder)",
+     "explanation": "The preferred segm_lib.slicer_preprocessing module defines elastix_registration_cmd but not elastix_registration. With that package installed, the coregistration button raises AttributeError rather than registering T2 to T1.",
+     "suggestion": "Invoke SlicerElastix with the defined parameter list, handle its status, and add a workflow test.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 872
+     }
+    }
+   ]
+  },
+  {
+   "title": "Duplicate DBSShiftPredictionWidget class definition and early return on second run in on_calculate_shift",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DBS_STN/DBSShiftPrediction.py",
+   "line": 959,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Duplicate DBSShiftPredictionWidget class definition and early return on second run in on_calculate_shift",
+     "file": "DBS_STN/DBSShiftPrediction.py",
+     "line_start": 1128,
+     "line_end": 1131,
+     "evidence": "class DBSShiftPredictionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):\n    \"\"\"Uses ScriptedLoadableModuleWidget base class, available at:\n    https://github.com/Slicer/Slicer/blob/main/Base/Python/slicer/ScriptedLoadableModule.py\n    \"\"\"",
+     "explanation": "`DBS_STN/DBSShiftPrediction.py` defines `class DBSShiftPredictionWidget` twice (first at line 959 as an incomplete stub, and again at line 1128 with the actual implementation). In addition, `on_calculate_shift` (lines 1574-1586) contains a `try` block that removes existing `shift` and `scale_mesh` nodes and immediately executes `return`, so clicking the button a second time only deletes the previous output and returns without recalculating the shift unless the user clicks a third time.",
+     "suggestion": "Remove the duplicate `DBSShiftPredictionWidget` stub at lines 959-1005 and remove the premature `return` in `on_calculate_shift` at line 1584.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "DBS_STN/DBSShiftPrediction.py",
+      "line": 959
+     }
+    }
+   ]
+  },
+  {
+   "title": "Generic top-level package name `Lib` and fallback import loop",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DBS_STN/DBSShiftPrediction.py",
+   "line": 57,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "Generic top-level package name `Lib` and fallback import loop",
+     "file": "DBS_STN/DBSShiftPrediction.py",
+     "line_start": 57,
+     "line_end": 59,
+     "evidence": "import Lib\nimport Lib.mer_support\nfrom Lib import slicer_preprocessing",
+     "explanation": "DBS_STN installs a package called `Lib` into Slicer's module path, and STNSegmenter tries `segm_lib` and then `Lib`. The generic name can collide with other extensions' modules. The `Lib` fallback in STNSegmenter would import a different, incompatible module if DBS_STN is the one on the path.",
+     "suggestion": "Rename to a unique package name such as `DBSShiftPredictionLib`.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DBS_STN/DBSShiftPrediction.py",
+      "line": 57
+     }
+    }
+   ]
+  },
+  {
+   "title": "Model weights committed to git or downloaded into potentially read-only Resources folder",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line": 727,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Model weights committed to git or downloaded into potentially read-only Resources folder",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 125,
+     "line_end": 130,
+     "evidence": "        shape_weights_path = Path(self.resourcePath('nets/shp_pred.pt'))\n        cd_state_dict = _load_torch_state_dict(\n            shape_weights_path,\n            download_url=\"https://github.com/IVarha/SlicerDBSCoalignment/releases/download/0.0.1/shp_pred.pt\",\n            model_name=\"shape predictor\",\n        )",
+     "explanation": "The repository commits several multi-megabyte binary model weight and template files (`DBS_STN/Resources/MNI/MNI152_T1_1mm_brain.nii.gz`, `DBS_STN/Resources/nets/cent_pred.pt`, `DBS_STN/Resources/nets/shp_pred.pt`, `STNSegmenter/Resources/nets/shp_pred.pt`), while `STNSegmenter/CMakeLists.txt` omits `Resources/nets/shp_pred.pt` from `MODULE_PYTHON_RESOURCES` and downloads it at runtime into the installed module's `Resources/nets` directory (which may be read-only in system-wide installations). Large weights should not be committed to git and should be downloaded on demand to a user-writable cache directory (such as `slicer.app.cachePath`).",
+     "suggestion": "Store downloaded weights in a user-writable cache directory (e.g., under `slicer.app.cachePath`) rather than writing into the installed `Resources/nets` folder, and verify downloaded files with a SHA-256 checksum.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 727
+     }
+    }
+   ]
+  },
+  {
+   "title": "Template placeholders, example modules and no clinical disclaimer",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line": 240,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "Template placeholders, example modules and no clinical disclaimer",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 240,
+     "line_end": 241,
+     "evidence": "self.parent.contributors = [\n              \"John Doe (AnyWare Corp.)\"]  # TODO: replace with \"Firstname Lastname (Organization)\"",
+     "explanation": "Several modules still carry the template contributors, help text and acknowledgements. ShiftCLI is a leftover example Gaussian blur. AtlasMapping is categorised under 'Examples'. The tests are template boilerplate and refer to nonexistent behaviour. There is no research-use-only disclaimer for a surgical-guidance tool. An AGENTS.md with local developer paths is committed.",
+     "suggestion": "Fill in the metadata, remove ShiftCLI and AGENTS.md, add a not-for-clinical-use disclaimer, and document the model provenance and validation.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 240
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unused template ShiftCLI module and placeholder metadata included in build",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 21,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Unused template ShiftCLI module and placeholder metadata included in build",
+     "file": "CMakeLists.txt",
+     "line_start": 21,
+     "line_end": 26,
+     "evidence": "add_subdirectory(STNSegmenter)\nadd_subdirectory(LabelConversion)\nadd_subdirectory(TextToMarkups)\nadd_subdirectory(ShiftCLI)\nadd_subdirectory(DBS_STN)\nadd_subdirectory(AtlasMapping)",
+     "explanation": "`ShiftCLI` is a leftover boilerplate Gaussian blur CLI module (`Apply a Gaussian blur to an image`, contributor `Andras Lasso (PerkLab)`) that is not used anywhere in the extension and is registered under the `Examples` category. Similarly, `AtlasMapping`, `STNSegmenter`, `DBSShiftPrediction`, `LabelConversion`, and `TextToMarkups` retain template `John Doe (AnyWare Corp.)` contributor metadata, template help text, and broken template `SampleData` / `ScriptedLoadableModuleTest` classes.",
+     "suggestion": "Remove the unused `ShiftCLI` module from `CMakeLists.txt` (or hide/remove template boilerplate), and update module metadata (`contributors`, `helpText`, `categories`) in the remaining modules.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 21
+     }
+    }
+   ]
+  },
+  {
+   "title": "Workflow validation and clinical-use limitations are not documented",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Workflow validation and clinical-use limitations are not documented",
+     "file": "README.md",
+     "line_start": 1,
+     "line_end": 5,
+     "evidence": "Project: SlicerDBSCoalignment\n\nThis project focuses on improving the precision of electrode placement in Deep Brain Stimulation (DBS) surgery by integrating neuroimaging data with intraoperative microelectrode recordings (MER). We propose a multimodal pipeline that combines deep learning-based segmentation of the subthalamic nucleus (STN) with spatial optimisation of MER trajectories. Implemented as a 3D Slicer plugin and integrated into the Lead-OR framework, the method supports accurate STN identification, accounts for intraoperative brain shift, and provides real-time visualisation tools for neurosurgical applications",
+     "explanation": "The README describes neurosurgical use but does not explain validation, model provenance, or intended clinical-use limitations. Users cannot readily judge whether the predictions are appropriate for their setting.",
+     "suggestion": "Document training data provenance, validation results, limitations, and intended clinical or research use.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 1
+     }
+    }
+   ]
+  },
+  {
+   "title": "Third-party data and model license not stated",
+   "category": "license",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "LICENSE.txt",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "info",
+     "title": "Third-party data and model license not stated",
+     "file": "LICENSE.txt",
+     "line_start": 1,
+     "line_end": 3,
+     "evidence": "MIT License",
+     "explanation": "The MIT license covers the code. The repository bundles the MNI152 template, the STN atlas NIfTI files and trained weights, and it says nothing about their licenses or provenance.",
+     "suggestion": "Document the sources and licenses of the MNI template, the atlas, and the model weights/training data.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "LICENSE.txt",
+      "line": 1
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "A conversion deletes any existing scene node named Electrodes",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "TextToMarkups/TextToMarkups.py",
+   "line": 294,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "A conversion deletes any existing scene node named Electrodes",
+     "file": "TextToMarkups/TextToMarkups.py",
+     "line_start": 294,
+     "line_end": 301,
+     "evidence": "        logic = DBSShiftPrediction.MRI_MERLogic()\n        # remove previous markup node with name electrodes\n\n        try:\n            slicer.mrmlScene.RemoveNode(slicer.mrmlScene.GetFirstNodeByName(\"Electrodes\"))",
+     "explanation": "Clicking Apply removes the first node with this name without checking its type, provenance, or whether it contains unsaved user data; it can even remove a selected input before parsing. An unrelated or manually edited node may be lost without warning.",
+     "suggestion": "Track only nodes created by this module, preserve existing nodes by default, and confirm any destructive replacement.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "TextToMarkups/TextToMarkups.py",
+      "line": 294
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "TextToMarkups/TextToMarkups.py:298 calls RemoveNode(GetFirstNodeByName(\"Electrodes\")) with no type check, and the output is later renamed \"Electrodes\" (line 306). So it is a replace-previous-output pattern on a name the module itself assigns. The input is a text node, so it is only removed in the odd case where the user named it \"Electrodes\", and then read_leadOR_txt (line 301) still reads it. RemoveNode(None) raises, and the bare except at 299-300 swallows that. Possible loss of a user node with the same name is real but narrow; this is not a safety issue."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "TextToMarkups/TextToMarkups.py:278-301: after the checks and logic initialization, Apply executes `slicer.mrmlScene.RemoveNode(slicer.mrmlScene.GetFirstNodeByName(\"Electrodes\"))` before `df_text = logic.read_leadOR_txt(self._parameterNode.inputVolume)`. There is no type, ownership, or unsaved-data check or confirmation. The first matching node, including a selected text input, may be removed; unsaved scene data can be lost even if parsing subsequently fails. This is scene-node removal, not verified deletion of an on-disk file."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In TextToMarkups/TextToMarkups.py lines 298-306, onApplyButton calls `slicer.mrmlScene.RemoveNode(slicer.mrmlScene.GetFirstNodeByName(\"Electrodes\"))` before creating a new markups node named `\"Electrodes\"`. While it removes an existing MRML node in the in-memory scene with that exact name (written to replace the previous run's output), this is an ordinary Slicer scene-management bug/soundness issue rather than a blocking safety vulnerability (it does not delete files on disk, and the rubric states \"Do not label ordinary bugs as safety issues merely because the extension processes medical images\")."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Direct pip_install('torch') instead of using SlicerPyTorch (PyTorchUtils)",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line": 19,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Direct pip_install('torch') instead of using SlicerPyTorch (PyTorchUtils)",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 67,
+     "line_end": 71,
+     "evidence": "try:\n    import torch\nexcept ImportError:\n    slicer.util.pip_install('torch')\n    import torch",
+     "explanation": "Both `STNSegmenter/STNSegmenter.py` (lines 67-71) and `DBS_STN/DBSShiftPrediction.py` (lines 17-25 and 1742-1746) install PyTorch directly via `slicer.util.pip_install('torch')` (and also pull `torch` as a dependency of `dbs-pure-lib`, `torchio`, and `ANTsTorch`). Direct `pip_install('torch')` in Slicer's Python environment bypasses `PyTorchUtils` from the `SlicerPyTorch` extension, can install CPU-only or incompatible CUDA wheels, and can break other PyTorch-based extensions in Slicer.",
+     "suggestion": "Add `PyTorch` to `EXTENSION_DEPENDS` in `CMakeLists.txt` and `build_dependencies` in the catalog entry, and use `PyTorchUtils.PyTorchUtilsLogic()` to check for and install PyTorch on demand rather than calling `slicer.util.pip_install('torch')`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 19
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "STNSegmenter/STNSegmenter.py:67-71 and DBS_STN/DBSShiftPrediction.py:17-25 and 1742-1746 run slicer.util.pip_install('torch') at module import or in the logic constructor. The search for PyTorchUtils found no use of it anywhere. The policy explicitly requires changes for PyTorch installed other than through the PyTorch extension. The install also happens without user confirmation, and ANTsTorch, torchio and dbs-pure-lib can pull torch in as well."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "STNSegmenter/STNSegmenter.py:67-71 and DBS_STN/DBSShiftPrediction.py:17-25 both contain `slicer.util.pip_install('torch')` after an import failure; DBS_STN/DBSShiftPrediction.py:1742-1750 repeats it and installs torchio. Root CMakeLists.txt:12 lists `set(EXTENSION_DEPENDS \"SlicerElastix;SlicerNetstim\")`, not PyTorchUtils. These paths bypass SlicerPyTorch and can change the shared environment without confirmation. I did not verify the dependency metadata of the separately installed packages or prove a particular wheel conflict."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Checked STNSegmenter/STNSegmenter.py lines 19-76 and DBS_STN/DBSShiftPrediction.py lines 17-25 and 1742-1746. Both modules directly run `slicer.util.pip_install('torch')` (and install `dbs-pure-lib` and `ANTsTorch` which pull torch from PyPI) at module import time without using `PyTorchUtils` from SlicerPyTorch. The Slicer review policy explicitly states to request changes (blocking) for PyTorch installed other than through the Slicer PyTorch extension (`PyTorchUtils`) and for package installation at module import."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Downloaded weights are loaded without integrity or safe-deserialization guarantees",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "minor"
+   ],
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line": 153,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "Downloaded model weights loaded with torch.load without a checksum",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 153,
+     "line_end": 164,
+     "evidence": "success = slicer.util.downloadFile(download_url, str(tmp_path))\n...\n        return torch.load(str(file_path), map_location=torch.device('cpu'))",
+     "explanation": "`shp_pred.pt` is downloaded from a GitHub release and loaded with `torch.load`, which unpickles by default depending on the torch version. A tampered file would give code execution. No integrity check is done, and the file is placed in the module directory.",
+     "suggestion": "Verify a SHA256 of the download. Use `weights_only=True`. Download to a user-writable cache rather than the install directory.",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 153
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Downloaded weights are loaded without integrity or safe-deserialization guarantees",
+     "file": "STNSegmenter/STNSegmenter.py",
+     "line_start": 153,
+     "line_end": 164,
+     "evidence": "        success = slicer.util.downloadFile(download_url, str(tmp_path))\n        if not success:\n            raise RuntimeError(f\"Failed to download weights for {model_name} from {download_url}\")\n        if not tmp_path.exists() or tmp_path.stat().st_size == 0:\n            raise RuntimeError(f\"Downloaded empty weights file for {model_name} from {download_url}\")\n        tmp_path.replace(file_path)",
+     "explanation": "The shape model is fetched from the release URL at lines 727–731 and then passed to torch.load at line 164 without a checksum or explicit weights_only=True. On PyTorch versions whose default allows pickle, a substituted release asset can execute code when the module initializes; the remote asset could not be inspected.",
+     "suggestion": "Pin and verify a trusted digest, load explicitly with weights_only=True or use a non-executable weights format, and fail closed on verification errors.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "STNSegmenter/STNSegmenter.py",
+      "line": 153
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "STNSegmenter/STNSegmenter.py:153-164 downloads shp_pred.pt from a GitHub release URL (line 730, over HTTPS, in the author's own repo) and calls torch.load without weights_only=True and without a checksum. Newer torch versions default to weights_only=True, so the risk depends on the version. The source is the author's own release, so this is a hardening gap and not a concrete path to harm. Not blocking."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "STNSegmenter/STNSegmenter.py:727-732 passes the GitHub release URL for `shp_pred.pt` to the loader. Lines 153-164 download it with `slicer.util.downloadFile(download_url, str(tmp_path))`, check only that it is nonempty, and call `return torch.load(str(file_path), map_location=torch.device('cpu'))` without a checksum or explicit `weights_only=True`. On PyTorch versions that default to unrestricted pickle loading, a substituted asset can execute code during logic initialization; newer defaults may mitigate this. I could not inspect the release asset or verify a compromise."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked STNSegmenter/STNSegmenter.py lines 137-179 and 727-733. `_load_torch_state_dict` downloads `shp_pred.pt` from `https://github.com/IVarha/SlicerDBSCoalignment/releases/download/0.0.1/shp_pred.pt` without verifying a SHA256 checksum and calls `torch.load(str(file_path), map_location=torch.device('cpu'))` without `weights_only=True`. Because `cd_state_dict` is only passed to `net.load_state_dict(cd_state_dict)`, passing `weights_only=True` and verifying a hash is recommended, though since the URL is the author's own GitHub repository release, this is a minor hardening issue rather than a blocking defect."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "DBSShiftPrediction installs torch, pandas, intensity-normalization and dbs-pure-lib at import",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DBS_STN/DBSShiftPrediction.py",
+   "line": 8,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "major",
+     "title": "DBSShiftPrediction installs torch, pandas, intensity-normalization and dbs-pure-lib at import",
+     "file": "DBS_STN/DBSShiftPrediction.py",
+     "line_start": 17,
+     "line_end": 47,
+     "evidence": "except ImportError:\n    slicer.util.pip_install('torch')\n    import torch",
+     "explanation": "The module has the same import-time install pattern. `intensity-normalization` and `dbs-pure-lib` may pull in torch, numpy or other pinned dependencies that conflict with Slicer-bundled packages.",
+     "suggestion": "Defer installs to a user-triggered, confirmed setup step. Use PyTorchUtils for torch. Check the transitive pins of dbs-pure-lib and intensity-normalization against Slicer's bundled packages.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DBS_STN/DBSShiftPrediction.py",
+      "line": 8
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DBS_STN/DBSShiftPrediction.py:6-47 runs pip_install for pandas, torch, intensity-normalization and dbs-pure-lib at module import, with no confirmation. This affects Slicer's shared Python environment. intensity-normalization and dbs-pure-lib may pull in torch or pinned dependencies. It is the same pattern as D2, so it is a real environment concern."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DBS_STN/DBSShiftPrediction.py:6-10, 17-25, 34-38, and 43-47 conditionally install the four packages at module import; for example `slicer.util.pip_install(r'dbs-pure-lib')` is at line 46. Missing packages trigger installation into Slicer's shared environment without a prompt, including direct torch installation. The dependency metadata and any specific numpy pin or downgrade were not verified."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Checked DBS_STN/DBSShiftPrediction.py lines 6-48. At module top-level (executed during Slicer startup/module discovery), it calls `slicer.util.pip_install` for `pandas`, `torch`, `intensity-normalization`, and `dbs-pure-lib`. Under the Slicer review policy and rubric, installing packages (especially PyTorch and heavy dependencies) at module import / Slicer startup modifies Slicer's shared Python environment for all users even if they never open the module, which is a blocking environment issue."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "STN shape weights and registration parameters are not installed",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "STNSegmenter/CMakeLists.txt",
+   "line": 23,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "STN shape weights and registration parameters are not installed",
+     "file": "STNSegmenter/CMakeLists.txt",
+     "line_start": 23,
+     "line_end": 28,
+     "evidence": "  Resources/nets/cent_pred.pt\n  Resources/nets/detect_mask.pkl\n  Resources/nets/mer_pca_mesh.pkl\n  Resources/nets/shape_hist.pkl\n  Resources/nets/shape_pcas.pkl\n  Resources/nets/stn_shape_mask.pkl",
+     "explanation": "The module loads nets/shp_pred.pt and uses elastix/rigid_mri.txt, but neither is in the module resource list. An installed package must download the shape model into the installation directory, which may be read-only, and cannot find the rigid parameter file. These are functional issues separate from catalog admission.",
+     "suggestion": "Install the registration parameters and either install the shape model or download it with consent and integrity verification into a writable cache.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "STNSegmenter/CMakeLists.txt",
+      "line": 23
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "STNSegmenter/CMakeLists.txt:15-29 lists the nets resources but not Resources/elastix/rigid_mri.txt. That file exists in the repo and is used at STNSegmenter.py:876, so it will be missing from an installed package. shp_pred.pt (STNSegmenter.py:727) is not in the repo or the CMake list. It is downloaded at runtime into the module resource directory, which may not be writable in an installed build. Both are functional bugs, not catalog admission blockers."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "STNSegmenter/CMakeLists.txt:15-29 lists installed resources but omits both `Resources/nets/shp_pred.pt` and `Resources/elastix/rigid_mri.txt`. STNSegmenter/STNSegmenter.py:691-696 resolves resources relative to the module installation; lines 727-732 invoke the download for the missing model, and lines 872-877 pass `self.resourcePath('elastix/rigid_mri.txt')` to registration. The latter exists in the source tree but is not listed for installation. Model initialization can fail where the installed resource directory is not writable, and registration cannot find its omitted parameter file. I did not run an installed build."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked STNSegmenter/CMakeLists.txt lines 15-29 and STNSegmenter/STNSegmenter.py lines 714, 727, and 876, plus the file listing of STNSegmenter/Resources. `Resources/nets/cent_pred.pt` is listed in CMakeLists.txt (line 23) and loaded without a download URL (line 714), yet `cent_pred.pt` does not exist in `STNSegmenter/Resources/nets/` at all (so CMake configure/install will fail or the file will be missing). Furthermore, `Resources/elastix/rigid_mri.txt` exists in the repo and is used at STNSegmenter.py:876, but is omitted from `MODULE_PYTHON_RESOURCES` in CMakeLists.txt, and `shp_pred.pt` is downloaded at runtime into `self.resourcePath('nets/shp_pred.pt')` which may be in a read-only installation folder."
+    }
+   },
+   "settled_severity": "major"
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "concern",
+   "gemini": "blocking",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "blocking",
+   "gemini": "blocking",
+   "gpt": "blocking"
+  },
+  "packaging": {
+   "claude": "concern",
+   "gemini": "blocking",
+   "gpt": "blocking"
+  },
+  "license": {
+   "claude": "minor",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "soundness": {
+   "claude": "concern",
+   "gemini": "concern",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "concern",
+   "gemini": "minor",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "needs fixes",
+  "gemini": "needs fixes",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 4,
+  "disputed": 5,
+  "single": 11,
+  "unverified": 0,
+  "total": 16,
+  "open_disputes": 0
+ }
+}

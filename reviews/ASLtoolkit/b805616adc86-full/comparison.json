@@ -1,0 +1,781 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Multi-echo T2 values are accepted and printed but not used",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+   "line": 125,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "T2 blood / T2 GM parameters are accepted but never used",
+     "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+     "line_start": 127,
+     "line_end": 134,
+     "evidence": "recon = MultiTE_ASLMapping(data)\n  recon.set_brain_mask(mask_img)\n  \n  # This is the long-running operation\n  maps = recon.create_map(",
+     "explanation": "`t2b` and `t2gm` are exposed in the GUI with defaults and ranges, but they are only printed in verbose output. They are not passed to `MultiTE_ASLMapping` or `create_map`. Changing them therefore has no effect on the result, which misleads users.",
+     "suggestion": "Pass the T2 values to asltk, for example via its setter or constructor options, or remove the parameters from the XML.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+      "line": 127
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Multi-echo T2 values are accepted and printed but not used",
+     "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+     "line_start": 125,
+     "line_end": 134,
+     "evidence": "    print('<filter-progress>0.5</filter-progress>')\n    print('<filter-comment>Computing T blood-GM map...</filter-comment>')\n    recon = MultiTE_ASLMapping(data)\n    recon.set_brain_mask(mask_img)\n    \n    # This is the long-running operation\n    maps = recon.create_map(\n       cores=numThreads,\n       smoothing=smoothMethod,\n       smoothing_params=smoothParameter)",
+     "explanation": "The XML exposes T2 Blood and T2 Gray Matter controls, and the script parses and logs them, but neither value is passed to ASLData, MultiTE_ASLMapping or create_map. Changing these controls therefore cannot affect the computed map, potentially misleading researchers about the parameters used. This is a non-blocking correctness issue under the index policy.",
+     "suggestion": "Pass both values through the appropriate asltk API, or remove the controls if they are unsupported; add a test showing that non-default values reach reconstruction.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+      "line": 125
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Multi_Echo_ASL.py:108-109 only prints args.t2b/t2gm. Lines 115-134 build ASLData, MultiTE_ASLMapping and create_map without them. The XML (lines 79-93) exposes both, so editing them does nothing. This is an ordinary soundness bug that misleads users, not a safety issue, so I rate it minor."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Multi_Echo_ASL/Multi_Echo_ASL.xml:78-82 and 90-94 expose two controls, including `<label>T2 Blood (ms)</label>` and `<label>T2 Gray Matter (ms)</label>`. Multi_Echo_ASL/Multi_Echo_ASL.py:108-109 prints both, but lines 115-134 pass neither to the reconstruction: `recon = MultiTE_ASLMapping(data)` and `smoothing_params=smoothParameter)`. Consequently changing either control cannot change the computed map; silent disregard of analysis parameters can invalidate research results. This is a non-blocking correctness finding under the index admission policy."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In Multi_Echo_ASL/Multi_Echo_ASL.xml lines 78-101, t2b and t2gm are defined as UI parameters. In Multi_Echo_ASL/Multi_Echo_ASL.py lines 245-246 they are parsed into args.t2b and args.t2gm, and printed at lines 108-109, but never passed to ASLData (lines 116-124), MultiTE_ASLMapping (line 127), or recon.create_map (lines 131-134). Changing these parameters in the UI silently has no effect on the computed map, making it a major soundness bug."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "`t2b` and `t2gm` parameters in `Multi_Echo_ASL` are parsed and logged but never used in computation",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+   "line": 107,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "`t2b` and `t2gm` parameters in `Multi_Echo_ASL` are parsed and logged but never used in computation",
+     "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+     "line_start": 107,
+     "line_end": 110,
+     "evidence": "      print('---- Advanced Options ----')\n      print('T2 Blood: ' + str(args.t2b))\n      print('T2 GM: ' + str(args.t2gm))\n      print('Average M0: ' + str(args.average_m0))",
+     "explanation": "In `Multi_Echo_ASL/Multi_Echo_ASL.py`, the `t2b` (T2 Blood) and `t2gm` (T2 Gray Matter) parameters exposed in `Multi_Echo_ASL.xml` are parsed into `args.t2b` and `args.t2gm` (lines 245-246) and printed in verbose output (lines 108-109), but are never passed to `ASLData`, `MultiTE_ASLMapping`, or `recon.create_map`. Any changes the user makes to `T2 Blood (ms)` or `T2 Gray Matter (ms)` in the UI have no effect on the computed map.",
+     "suggestion": "Pass `args.t2b` and `args.t2gm` to `MultiTE_ASLMapping` or `recon.create_map` (e.g., via its `t2b` / `t2gm` parameters or setter methods in `asltk`).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+      "line": 107
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "This is the same behaviour as D1. Multi_Echo_ASL.py:108-109 print t2b/t2gm, and 245-246 parse them. Lines 115-134 never pass them on. It is real, but it is a non-blocking correctness issue and the severity is not major."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Duplicate of D1. Multi_Echo_ASL/Multi_Echo_ASL.py:245-246 parses `t2b=float(parsed.get('t2b', '165.0')),` and `t2gm=float(parsed.get('t2gm', '75.0')),`; lines 107-109 only print them, and lines 115-134 show neither passed to ASLData or reconstruction. The exposed controls therefore silently have no effect on computed results; this is a serious research-correctness issue, not a blocking safety finding."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Same underlying defect as D1: in Multi_Echo_ASL/Multi_Echo_ASL.py, args.t2b and args.t2gm are parsed (lines 245-246) and logged (lines 108-109), but never passed to ASLData (lines 116-124), MultiTE_ASLMapping (line 127), or recon.create_map (lines 131-134). Exposing scientific parameters in the UI that silently do nothing is a major soundness defect."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Unconfirmed package installation runs at CLI script import",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "consensus",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "major",
+    "major"
+   ],
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line": 28,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "major",
+     "title": "asltk is pip-installed silently at first module run, without user confirmation",
+     "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+     "line_start": 28,
+     "line_end": 37,
+     "evidence": "except ModuleNotFoundError:\n    import slicer.util\n    slicer.util.pip_install(\"asltk==1.1.3\")",
+     "explanation": "If `asltk` is missing, the CLI script calls `slicer.util.pip_install(\"asltk==1.1.3\")` straight away. This installs asltk and all its transitive dependencies into Slicer's shared Python with no prompt, even though the download may be large. Those dependencies may pin or replace packages Slicer bundles (numpy, scipy, SimpleITK, pydicom), and I did not verify them. The install happens inside a `python-real` subprocess, so the user sees nothing in the UI. The README mentions it only in a note. The `slicer` package may also not be fully usable from `python-real`, so the fallback may simply fail.",
+     "suggestion": "Add a scripted module with a GUI that tells the user which packages will be installed and asks for confirmation before calling `pip_install`. Check that asltk's dependency requirements do not pin or downgrade Slicer-bundled packages. Apply the same change to the Multi_Echo_ASL script.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+      "line": 32
+     }
+    },
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Scripted CLI modules call `slicer.util.pip_install` inside standalone `python-real` subprocess",
+     "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+     "line_start": 28,
+     "line_end": 34,
+     "evidence": "try:\n    from asltk.asldata import ASLData\n    from asltk.reconstruction import CBFMapping\n    from asltk.utils.io import ImageIO\nexcept ModuleNotFoundError:\n    import slicer.util\n    slicer.util.pip_install(\"asltk==1.1.3\")",
+     "explanation": "Both `CBF_ATT_ASL.py` and `Multi_Echo_ASL.py` are configured as `SlicerMacroBuildScriptedCLI` modules running under `#!/usr/bin/env python-real`. When Slicer executes a Scripted CLI module, it launches a standalone `python-real` subprocess rather than executing inside the embedded Slicer Python interpreter. In a standalone `python-real` process, `import slicer.util` is not available (`ModuleNotFoundError: No module named 'slicer'`), so the automatic installation fallback for `asltk==1.1.3` will fail with an unhandled exception whenever `asltk` is not already installed. Furthermore, installing packages silently during CLI execution without prior user confirmation violates Slicer's convention for third-party Python package installation.",
+     "suggestion": "Either invoke `pip` via `subprocess.check_call([sys.executable, \"-m\", \"pip\", \"install\", \"asltk==1.1.3\"])` in the `python-real` CLI script, or provide a ScriptedLoadableModule wrapper that asks the user for confirmation before calling `slicer.util.pip_install(\"asltk==1.1.3\")`. Also synchronize the version in `requirements.txt` (`asltk==1.1.0`) with the version installed in the scripts (`asltk==1.1.3`).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+      "line": 28
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Unconfirmed package installation runs at CLI script import",
+     "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+     "line_start": 28,
+     "line_end": 35,
+     "evidence": "try:\n    from asltk.asldata import ASLData\n    from asltk.reconstruction import CBFMapping\n    from asltk.utils.io import ImageIO\nexcept ModuleNotFoundError:\n    import slicer.util\n    slicer.util.pip_install(\"asltk==1.1.3\")\n    from asltk.asldata import ASLData",
+     "explanation": "When the script is imported or executed and an asltk import fails, it immediately downloads and installs asltk and its dependencies into the shared Slicer Python environment, without asking the user. This can change packages used by other extensions; a missing transitive import also triggers the same installation. Multi_Echo_ASL/Multi_Echo_ASL.py:28-37 contains the same pattern. The precise discovery/startup behavior and transitive packages could not be verified.",
+     "suggestion": "Move dependency installation out of module import into an explicit, informed user-confirmed setup step; inspect its dependencies and avoid modifying Slicer-bundled packages incompatibly.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+      "line": 28
+     }
+    }
+   ]
+  },
+  {
+   "title": "Smoothing-parameter validation in CBF module compares wrong case and never triggers",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "consensus",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "minor",
+    "minor"
+   ],
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line": 187,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "Smoothing-parameter validation in CBF module compares wrong case and never triggers",
+     "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+     "line_start": 187,
+     "line_end": 192,
+     "evidence": "if args.smoothMethod == 'gaussian' and args.smoothParameter <= 0:",
+     "explanation": "Valid methods are 'Gaussian' and 'Median', but the checks compare against lowercase 'gaussian' and 'median'. Invalid sigma or kernel sizes, such as an even median size, therefore pass validation and fail later inside asltk or give wrong results. The Multi_Echo module uses the correct case.",
+     "suggestion": "Compare against 'Gaussian' and 'Median', matching the Multi_Echo module.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+      "line": 187
+     }
+    },
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Smoothing parameter validation in `CBF_ATT_ASL.py` never runs due to case mismatch",
+     "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+     "line_start": 180,
+     "line_end": 188,
+     "evidence": "  # Checks the smoothing Method and Parameters\n  valid_smooth_methods = ['None', 'Gaussian', 'Median']\n  if args.smoothMethod not in valid_smooth_methods:\n    print(\n        f'Smoothing method \"{args.smoothMethod}\" is not valid. Please select one of the following methods: {valid_smooth_methods}.'\n    )\n    is_ok = False\n  if args.smoothMethod == 'gaussian' and args.smoothParameter <= 0:",
+     "explanation": "In `CBF_ATT_ASL/CBF_ATT_ASL.py`, `checkUpParameters` validates `args.smoothMethod` against `['None', 'Gaussian', 'Median']` (capitalized), but then checks `if args.smoothMethod == 'gaussian'` (line 187) and `if args.smoothMethod == 'median'` (line 192) in lowercase before `args.smoothMethod` has been lowercased. As a result, invalid smoothing parameters (such as an even or non-positive kernel size for Median filtering) bypass validation in `CBF_ATT_ASL.py`.",
+     "suggestion": "Check against `'Gaussian'` and `'Median'` (as done in `Multi_Echo_ASL.py` lines 192 and 197) or compare `args.smoothMethod.lower()`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+      "line": 180
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "CBF smoothing parameter validation never matches accepted method names",
+     "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+     "line_start": 180,
+     "line_end": 187,
+     "evidence": "  # Checks the smoothing Method and Parameters\n  valid_smooth_methods = ['None', 'Gaussian', 'Median']\n  if args.smoothMethod not in valid_smooth_methods:\n    print(\n        f'Smoothing method \"{args.smoothMethod}\" is not valid. Please select one of the following methods: {valid_smooth_methods}.'\n    )\n    is_ok = False\n  if args.smoothMethod == 'gaussian' and args.smoothParameter <= 0:",
+     "explanation": "The accepted and GUI-provided names are capitalized, while the Gaussian and Median validation branches test lowercase strings. Consequently invalid sigma or kernel sizes pass this validation and reach reconstruction, potentially failing or producing unintended smoothing.",
+     "suggestion": "Normalize the method once before both validation and dispatch, and test invalid Gaussian and Median parameters.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+      "line": 180
+     }
+    }
+   ]
+  },
+  {
+   "title": "Documented outputFolder option does not control output location",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line": 127,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Documented outputFolder option does not control output location",
+     "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+     "line_start": 127,
+     "line_end": 133,
+     "evidence": "  print('<filter-progress>0.9</filter-progress>')\n  print('<filter-comment>Saving output files...</filter-comment>')\n  if args.norm_cbf:\n    maps['cbf_norm'].save_image(args.out_cbf)\n  else:\n    maps['cbf'].save_image(args.out_cbf)\n  maps['att'].save_image(args.out_att)",
+     "explanation": "The XML's command-line example specifies --outputFolder and relative output names, but the script only checks that folder exists and saves directly to the output arguments. Relative names thus resolve against the process working directory, not the selected output folder. The multi-echo script has the same issue.",
+     "suggestion": "Join relative output paths to the chosen output folder, or remove the option and correct the documentation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+      "line": 127
+     }
+    }
+   ]
+  },
+  {
+   "title": "Mixed vector formats silently truncate timing values",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line": 28,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Mixed vector formats silently truncate timing values",
+     "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+     "line_start": 70,
+     "line_end": 75,
+     "evidence": "  try:\n      pld = [float(s) for s in args.pld]\n      ld = [float(s) for s in args.ld]\n  except:\n      pld = [float(s) for s in str(args.pld[0]).split()]\n      ld = [float(s) for s in str(args.ld[0]).split()]",
+     "explanation": "If one timing vector is space-separated and another is comma-separated, conversion of the first triggers the fallback, which reads only element zero of both vectors. For example, a comma-separated LD list loses all but its first value. The multi-echo module uses the same fallback for three vectors.",
+     "suggestion": "Parse each vector independently, supporting the documented separators without discarding elements, and validate its length against the acquisition.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+      "line": 28
+     }
+    }
+   ]
+  },
+  {
+   "title": "Overriding `print` with `rich.print` can interfere with Slicer CLI XML progress tags",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line": 39,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Overriding `print` with `rich.print` can interfere with Slicer CLI XML progress tags",
+     "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+     "line_start": 39,
+     "line_end": 40,
+     "evidence": "import numpy as np\nfrom rich import print",
+     "explanation": "Both CLI scripts override Python's built-in `print` with `rich.print`. Slicer's CLI process runner parses standard output for XML progress tags such as `<filter-start>`, `<filter-progress>0.1</filter-progress>`, and `<filter-end>`. Because `rich.print` interprets angle-bracket tags as Rich console markup and applies terminal formatting/word wrapping, it can strip or alter the XML progress tags expected by Slicer.",
+     "suggestion": "Use Python's built-in `print` (and `sys.stdout.flush()`) for Slicer `<filter-...>` XML progress reporting.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+      "line": 39
+     }
+    }
+   ]
+  },
+  {
+   "title": "Same silent pip install in the Multi_Echo_ASL module",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+   "line": 33,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "Same silent pip install in the Multi_Echo_ASL module",
+     "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+     "line_start": 28,
+     "line_end": 37,
+     "evidence": "    import slicer.util\n    slicer.util.pip_install(\"asltk==1.1.3\")",
+     "explanation": "The identical pattern is repeated, so either module can trigger a silent installation into the shared environment.",
+     "suggestion": "Centralize and gate the installation behind a user confirmation.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+      "line": 33
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unchecking `normalizedCBF` in the GUI has no effect because omitted CLI boolean flags default to `'true'`",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line": 239,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Unchecking `normalizedCBF` in the GUI has no effect because omitted CLI boolean flags default to `'true'`",
+     "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+     "line_start": 239,
+     "line_end": 241,
+     "evidence": "        out_cbf=parsed.get('outputCBF', ''),\n        norm_cbf=parse_bool(parsed.get('normalizedCBF', 'true')),\n        out_att=parsed.get('outputATT', ''),",
+     "explanation": "In Slicer's CLI execution model, `<boolean>` parameters are passed as a flag (`--normalizedCBF`) when checked (`true`) and omitted entirely from the command-line arguments when unchecked (`false`). Because `CBF_ATT_ASL.py` defaults `parsed.get('normalizedCBF', 'true')` to `'true'` when the flag is absent, unchecking \"Set CBF to mL/100 g/min scale\" in the Slicer GUI still results in `args.norm_cbf == True`. Consequently, users cannot disable CBF normalization from the GUI.",
+     "suggestion": "Default missing boolean flags to `'false'` (`parsed.get('normalizedCBF', 'false')`) when invoked by Slicer's CLI launcher, or use standard Slicer CLI argument parsing.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+      "line": 239
+     }
+    }
+   ]
+  },
+  {
+   "title": "Input images are declared as disk `<file>` parameters rather than scene `<image>` nodes",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.xml",
+   "line": 48,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Input images are declared as disk `<file>` parameters rather than scene `<image>` nodes",
+     "file": "CBF_ATT_ASL/CBF_ATT_ASL.xml",
+     "line_start": 48,
+     "line_end": 53,
+     "evidence": "    <file fileExtensions=\".nii,.nii.gz\">\n    <name>inputASL</name>\n      <label>Input ASL file</label>\n      <longflag>inputASL</longflag>\n      <description><![CDATA[Input ASL file path in .nii or nii.gz format]]></description>\n    </file>",
+     "explanation": "Both `CBF_ATT_ASL.xml` and `Multi_Echo_ASL.xml` declare `inputASL`, `inputM0`, and `labelMask` as `<file>` parameters restricted to `.nii,.nii.gz` on disk rather than `<image>` parameters, whereas the outputs (`outputCBF`, `outputATT`, `outputVolume`) are declared as `<image channel=\"output\">`. This prevents users from selecting input volumes that are already loaded in the Slicer scene.",
+     "suggestion": "Consider using `<image>` parameters for input volumes if `asltk` supports the file formats Slicer uses for CLI volume exchange, or document that inputs must be selected as external NIfTI files from disk while outputs are loaded into the scene.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CBF_ATT_ASL/CBF_ATT_ASL.xml",
+      "line": 48
+     }
+    }
+   ]
+  },
+  {
+   "title": "No tests, no research-use disclaimer; docs and requirements inconsistent; sample data on Google Drive",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "requirements.txt",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "info",
+     "title": "No tests, no research-use disclaimer; docs and requirements inconsistent; sample data on Google Drive",
+     "file": "requirements.txt",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "asltk==1.1.0",
+     "explanation": "The repository has no automated tests. `requirements.txt` pins asltk==1.1.0 while the scripts install 1.1.3. The tutorial sample data is on a personal Google Drive link. There is no statement that the maps are for research use only. The catalog entry tracks the moving branch `main`.",
+     "suggestion": "Align the versions, add a research-use note, host the sample data in a stable location, and consider pinning `scm_revision` to a commit or tag.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "requirements.txt",
+      "line": 1
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Multi-echo T2 values are accepted and printed but not used",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+   "line": 125,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "T2 blood / T2 GM parameters are accepted but never used",
+     "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+     "line_start": 127,
+     "line_end": 134,
+     "evidence": "recon = MultiTE_ASLMapping(data)\n  recon.set_brain_mask(mask_img)\n  \n  # This is the long-running operation\n  maps = recon.create_map(",
+     "explanation": "`t2b` and `t2gm` are exposed in the GUI with defaults and ranges, but they are only printed in verbose output. They are not passed to `MultiTE_ASLMapping` or `create_map`. Changing them therefore has no effect on the result, which misleads users.",
+     "suggestion": "Pass the T2 values to asltk, for example via its setter or constructor options, or remove the parameters from the XML.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+      "line": 127
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Multi-echo T2 values are accepted and printed but not used",
+     "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+     "line_start": 125,
+     "line_end": 134,
+     "evidence": "    print('<filter-progress>0.5</filter-progress>')\n    print('<filter-comment>Computing T blood-GM map...</filter-comment>')\n    recon = MultiTE_ASLMapping(data)\n    recon.set_brain_mask(mask_img)\n    \n    # This is the long-running operation\n    maps = recon.create_map(\n       cores=numThreads,\n       smoothing=smoothMethod,\n       smoothing_params=smoothParameter)",
+     "explanation": "The XML exposes T2 Blood and T2 Gray Matter controls, and the script parses and logs them, but neither value is passed to ASLData, MultiTE_ASLMapping or create_map. Changing these controls therefore cannot affect the computed map, potentially misleading researchers about the parameters used. This is a non-blocking correctness issue under the index policy.",
+     "suggestion": "Pass both values through the appropriate asltk API, or remove the controls if they are unsupported; add a test showing that non-default values reach reconstruction.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+      "line": 125
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Multi_Echo_ASL.py:108-109 only prints args.t2b/t2gm. Lines 115-134 build ASLData, MultiTE_ASLMapping and create_map without them. The XML (lines 79-93) exposes both, so editing them does nothing. This is an ordinary soundness bug that misleads users, not a safety issue, so I rate it minor."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Multi_Echo_ASL/Multi_Echo_ASL.xml:78-82 and 90-94 expose two controls, including `<label>T2 Blood (ms)</label>` and `<label>T2 Gray Matter (ms)</label>`. Multi_Echo_ASL/Multi_Echo_ASL.py:108-109 prints both, but lines 115-134 pass neither to the reconstruction: `recon = MultiTE_ASLMapping(data)` and `smoothing_params=smoothParameter)`. Consequently changing either control cannot change the computed map; silent disregard of analysis parameters can invalidate research results. This is a non-blocking correctness finding under the index admission policy."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In Multi_Echo_ASL/Multi_Echo_ASL.xml lines 78-101, t2b and t2gm are defined as UI parameters. In Multi_Echo_ASL/Multi_Echo_ASL.py lines 245-246 they are parsed into args.t2b and args.t2gm, and printed at lines 108-109, but never passed to ASLData (lines 116-124), MultiTE_ASLMapping (line 127), or recon.create_map (lines 131-134). Changing these parameters in the UI silently has no effect on the computed map, making it a major soundness bug."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "`t2b` and `t2gm` parameters in `Multi_Echo_ASL` are parsed and logged but never used in computation",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+   "line": 107,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "`t2b` and `t2gm` parameters in `Multi_Echo_ASL` are parsed and logged but never used in computation",
+     "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+     "line_start": 107,
+     "line_end": 110,
+     "evidence": "      print('---- Advanced Options ----')\n      print('T2 Blood: ' + str(args.t2b))\n      print('T2 GM: ' + str(args.t2gm))\n      print('Average M0: ' + str(args.average_m0))",
+     "explanation": "In `Multi_Echo_ASL/Multi_Echo_ASL.py`, the `t2b` (T2 Blood) and `t2gm` (T2 Gray Matter) parameters exposed in `Multi_Echo_ASL.xml` are parsed into `args.t2b` and `args.t2gm` (lines 245-246) and printed in verbose output (lines 108-109), but are never passed to `ASLData`, `MultiTE_ASLMapping`, or `recon.create_map`. Any changes the user makes to `T2 Blood (ms)` or `T2 Gray Matter (ms)` in the UI have no effect on the computed map.",
+     "suggestion": "Pass `args.t2b` and `args.t2gm` to `MultiTE_ASLMapping` or `recon.create_map` (e.g., via its `t2b` / `t2gm` parameters or setter methods in `asltk`).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+      "line": 107
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "This is the same behaviour as D1. Multi_Echo_ASL.py:108-109 print t2b/t2gm, and 245-246 parse them. Lines 115-134 never pass them on. It is real, but it is a non-blocking correctness issue and the severity is not major."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Duplicate of D1. Multi_Echo_ASL/Multi_Echo_ASL.py:245-246 parses `t2b=float(parsed.get('t2b', '165.0')),` and `t2gm=float(parsed.get('t2gm', '75.0')),`; lines 107-109 only print them, and lines 115-134 show neither passed to ASLData or reconstruction. The exposed controls therefore silently have no effect on computed results; this is a serious research-correctness issue, not a blocking safety finding."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Same underlying defect as D1: in Multi_Echo_ASL/Multi_Echo_ASL.py, args.t2b and args.t2gm are parsed (lines 245-246) and logged (lines 108-109), but never passed to ASLData (lines 116-124), MultiTE_ASLMapping (line 127), or recon.create_map (lines 131-134). Exposing scientific parameters in the UI that silently do nothing is a major soundness defect."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D3",
+   "rating_dispute": {
+    "claude": "concern",
+    "gemini": "minor",
+    "gpt": "blocking"
+   },
+   "outcome": "settled: concern (concern, blocking, con",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": null,
+     "rating": "concern",
+     "reason": "Multi_Echo_ASL.py:34 and CBF_ATT_ASL.py:34 call slicer.util.pip_install(\"asltk==1.1.3\") from a ModuleNotFoundError fallback. This installs into Slicer's shared Python without asking the user. It runs when the CLI module is first executed, not at Slicer startup or import, so it only affects users who run the module. asltk's transitive dependencies could pin or replace Slicer-bundled packages, and I could not check them. The exact pin is on asltk itself, not on a bundled package. CMakeLists.txt sets EXTENSION_DEPENDS to NA, and I found no torch install. This calls for a consent prompt and a check of asltk's dependencies, but I found no concrete harm, so I rate it concern rather than blocking."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": null,
+     "rating": "blocking",
+     "reason": "Both CLI scripts install into Slicer's Python environment without confirmation on an import failure. Multi_Echo_ASL/Multi_Echo_ASL.py:28-34 has `except ModuleNotFoundError:` followed by `slicer.util.pip_install(\"asltk==1.1.3\")`; CBF_ATT_ASL/CBF_ATT_ASL.py:28-34 has the same code. This top-level installation runs whenever the script is imported or invoked and the import fails, potentially changing the shared environment for other extensions. The policy expressly requests changes for installation at module import. README.md:14 documents runtime installation but is not user confirmation. The external package's dependency requirements and whether Slicer invokes the CLI during discovery were not available to verify."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": null,
+     "rating": "concern",
+     "reason": "In both CBF_ATT_ASL/CBF_ATT_ASL.py (lines 28-37) and Multi_Echo_ASL/Multi_Echo_ASL.py (lines 28-37), top-level module code attempts to call slicer.util.pip_install(\"asltk==1.1.3\") on ModuleNotFoundError without user confirmation. Because these are SlicerMacroBuildScriptedCLI modules executed via python-real in a separate process (often during CLI discovery with --xml or on CLI invocation where the slicer module is not even importable), top-level pip installation and installing a package that pulls in its own dependencies (numpy, scipy, SimpleITK, rich, etc.) into Slicer's shared Python environment without prompt warrants a 'concern' rating."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "ok",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "environment": {
+   "claude": "concern",
+   "gemini": "minor",
+   "gpt": "blocking"
+  },
+  "packaging": {
+   "claude": "ok",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "ok",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "soundness": {
+   "claude": "concern",
+   "gemini": "concern",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "minor",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "needs fixes",
+  "gemini": "minor issues",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 2,
+  "disputed": 3,
+  "single": 8,
+  "unverified": 0,
+  "total": 11,
+  "open_disputes": 0
+ }
+}

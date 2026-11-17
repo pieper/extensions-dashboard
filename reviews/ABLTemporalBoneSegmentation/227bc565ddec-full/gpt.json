@@ -1,0 +1,124 @@
+{
+ "purpose": "This extension prepares and segments temporal-bone CT scans using landmark and rigid registration followed by local Docker or remote inference. It also provides batch registration and export tools for researchers working with temporal-bone images.",
+ "summary": "The reviewed source has concrete safety issues: remote inference disables TLS verification, and cancelling an export can write to or delete files in the current directory. It also installs a Python package at import without consent. External inference code, model configuration and asset licenses were not available for inspection, and the catalog’s moving revision was not independently resolved. 🔴 Do not merge yet: fix the security and data-loss issues and complete the external-payload and revision review.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected remote inference configuration, credentials handling, export filesystem operations, atlas downloads, and the build-time model download. Disabled TLS verification and export cancellation create concrete exposure and data-loss paths; external inference dependencies remain uninspected."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "The main module installs ablinfer during import without confirmation and globally disables urllib3 insecure-request warnings. Its transitive dependency requirements could not be inspected."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "The module CMake files list the two Python modules and resources, and the declared SlicerElastix dependency matches the provided entry. The branch revision, generated model JSON, and actual build were not independently verified."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "LICENSE grants BSD 3-Clause distribution permission for the extension, but the downloaded atlas, mutable model configuration, Docker image and ablinfer package terms were not available to verify."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected registration and export code; the export assigns fixed anatomy names to numeric labels without verifying segment identity, and the batch registration marks progress complete during individual steps."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md provides a workflow, sample-data suggestion and links to the network, but local model provenance and validation could not be verified. The visible batch test only displays a start message."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Remote inference disables certificate verification",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 932,
+   "line_end": 936,
+   "evidence": "            ## Setup the session\n            s = requests.Session()\n            s.verify = False\n            if username:\n                s.auth = (username, password)",
+   "explanation": "When users run remote inference over HTTPS, an on-path attacker can impersonate the configured server, intercept credentials and scan data, and alter responses. The UI also gives an HTTP URL as an example, permitting unencrypted use.",
+   "suggestion": "Require HTTPS and certificate verification, allow a user-provided CA for private servers, and reject insecure endpoints.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Cancelling export can delete or overwrite files in the current directory",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 1038,
+   "line_end": 1039,
+   "evidence": "        target = qt.QFileDialog.getExistingDirectory(None, \"Choose an output directory *MUST BE EMPTY*\")\n        ABLTemporalBoneSegmentationModuleLogic.export_for_cardinalsim(self.movingSelector.currentNode(), self.exportSelector.currentNode(), target)",
+   "explanation": "Cancelling the directory dialog returns an empty path, but the export proceeds. Lines 1390–1396 turn it into the process working directory and recursively remove an existing volume-named DICOM folder; lines 1449–1453 can overwrite label files there. The empty-directory warning does not protect a user who cancels.",
+   "suggestion": "Return immediately on cancellation, validate that the selected directory is empty, and refuse to remove or overwrite existing files without explicit confirmation.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Remote credentials are displayed and persisted in application settings",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 935,
+   "line_end": 938,
+   "evidence": "            if username:\n                s.auth = (username, password)\n                settings.setValue(\"ablinfer_server_username\", username) \n                settings.setValue(\"ablinfer_server_password\", password)",
+   "explanation": "Remote server passwords are stored as ordinary Slicer settings and are restored into a normal QLineEdit at lines 357–364, exposing them to anyone who can read the settings or see the screen.",
+   "suggestion": "Mask the password field and avoid persisting credentials, or use an operating-system credential store with explicit consent.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Unprompted package installation occurs at module import",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 23,
+   "line_end": 26,
+   "evidence": "try:\n    import ablinfer\nexcept ModuleNotFoundError:\n    slicer.util.pip_install(\"ablinfer\")",
+   "explanation": "When ablinfer is absent, importing the module downloads and installs an unpinned package and dependencies into Slicer's shared Python environment without asking. This can affect other extensions or users who did not request inference.",
+   "suggestion": "Install dependencies only after explicit user confirmation, and inspect their requirements for compatibility with Slicer's bundled packages.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Insecure-request warnings are disabled process-wide",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 37,
+   "line_end": 37,
+   "evidence": "urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)",
+   "explanation": "Importing the module suppresses urllib3 warnings for the whole Slicer process, hiding insecure HTTPS use by this and other extensions.",
+   "suggestion": "Remove the global suppression and use verified connections.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Export assigns fixed anatomy names by label number rather than segment identity",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 1418,
+   "line_end": 1425,
+   "evidence": "        if labels is None:\n            labels = {\n                1: \"Sigmoid Sinus\",\n                2: \"Facial Nerve\",\n                3: \"Bony Inner Ear\",\n                4: \"Malleus\",\n                5: \"Incus\",",
+   "explanation": "The UI permits selection of any segmentation, and the exporter converts its segments in their current order before assigning these fixed names to label values. A reordered or different segmentation can therefore be exported under incorrect anatomical filenames without warning.",
+   "suggestion": "Map labels using verified segment names or IDs, reject unexpected or missing structures, and test reordered segments.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Remote model retrieval error handler references an unimported name",
+   "file": "ABLTemporalBoneSegmentationModule/ABLTemporalBoneSegmentationModule.py",
+   "line_start": 1366,
+   "line_end": 1370,
+   "evidence": "        if get_model and isinstance(dispatch, DispatchRemote): ## Try to retrieve the model from the remote server\n            try:\n                model = dispatch.get_model(model[\"id\"])\n            except Exception as e:\n                logging.warning(\"Encountered an error retrieving model from remote: \" + str(e))",
+   "explanation": "The module does not import logging, so a failed remote model lookup raises NameError instead of logging the failure and continuing with the local model as intended.",
+   "suggestion": "Import logging and test the remote lookup failure path.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The supplied source is identified by the user as commit 227bc565ddec65509bac6dcbbddd6c02e718eaeb; no independent Git resolution or verification that catalog branch master selects it was available.",
+  "The build fetches a mutable model JSON from another repository (SuperBuild.cmake:38–48); the actual generated configuration, its image or weights, integrity, and distribution terms could not be inspected.",
+  "The ablinfer package, its dependency tree and remote/local dispatch implementation, the atlas release assets and their license terms were not available to inspect.",
+  "No Slicer execution, build, tests, network access, CI results, or comparison with a previously reviewed source revision were available."
+ ],
+ "questions_for_author": []
+}

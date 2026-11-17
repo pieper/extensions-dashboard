@@ -1,0 +1,202 @@
+{
+ "purpose": "ArduinoController links 3D Slicer to Arduino boards over a serial port: ArduinoConnect detects ports, connects, sends/receives text and exposes incoming data through a \"arduinoNode\" parameter node, while ArduinoMotionSensor and ArduinoPedalBoard use that data to drive slice views. It targets developers and researchers building hardware-in-the-loop Slicer applications.",
+ "summary": "No malicious or exfiltrating code found; MIT license permits distribution and the catalog entry matches the CMake build. The main problems are environmental and functional: pyserial is pip-installed at module import (i.e. at Slicer startup, for every user, without consent), the two consumer modules crash if ArduinoConnect was not opened first, a second \"arduinoNode\" is created so data may never reach the observers, and a blocking serial readline runs on the GUI thread. The bundled unit tests are broken and would fail in CI. Fixes needed before offering to users.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Read all three module .py files, the .ino sketches, CMake files and docs: no telemetry, no data upload, no obfuscation, no prompt-injection text. The only network activity is slicer.util.pip_install(\"pyserial\") at import (ArduinoConnect.py:13) and a dead test URL; subprocess.Popen(ArduinoConnect.py:330) launches only a user-picked executable without shell=True."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "ArduinoConnect.py:9-15 installs pyserial into Slicer's shared Python environment at module import, which happens at Slicer startup for everyone who has the extension installed, without asking; a failed/offline pip run raises and prevents the module from loading. pyserial itself is small and does not bundle Qt/VTK or pin Slicer packages, so the impact is limited to an unrequested install."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt installs every imported .py and every listed resource (icons, .ui, Config.json all exist); EXTENSION_DEPENDS \"NA\" matches build_dependencies []; scm_revision master is a supported branch reference. However ArduinoConnect/CMakeLists.txt:28 registers slicer_add_python_unittest on test code that cannot pass, so the extension's ctest will fail."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is a standard MIT text granting distribution rights; README.md:43 and :89 attribute the Flaticon icons, and the Arduino sketches are the authors' own. Copyright is held by Andras Lasso rather than the listed authors, which is an attribution oddity, not a distribution restriction."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected all module code: ArduinoPedalBoard/ArduinoMotionSensor dereference a possibly-None 'arduinoNode' (ArduinoPedalBoard.py:36,50), a second node with the same name is created (ArduinoPedalBoard.py:186-188), readline() without timeout blocks the GUI thread (ArduinoConnect.py:426,449), cleanup() is 'pass' everywhere so observers are never removed, and the bundled tests are non-functional."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README, docs/ pages, two demo videos, a schematic image and a published paper give a usable entry point, and the module is a developer tool so no clinical disclaimer is required. Tests are placeholders that fail, and the example .mrb scene is committed as an unreadable 2 MB binary."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "pyserial is pip-installed at module import, i.e. at Slicer startup, without user consent",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 9,
+   "line_end": 15,
+   "evidence": "except ModuleNotFoundError:\n  slicer.util.pip_install(\"pyserial\")\n  import serial\n  import serial.tools.list_ports",
+   "explanation": "Scripted module files are imported by Slicer's module factory at startup, so this pip_install runs for every user who has the extension installed, even if they never open ArduinoConnect, and it modifies Slicer's shared Python environment without asking. If the machine is offline or pip fails, the exception propagates out of the import and the module (and possibly the extension's other modules) fails to load. The extension index policy explicitly asks for changes on package installation at import.",
+   "suggestion": "Move the import into the logic/widget code and install pyserial only after an explicit user confirmation (slicer.util.pip_install inside a try/except with a message box), or ship/declare it as a proper dependency.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "ArduinoPedalBoard and ArduinoMotionSensor crash when opened before ArduinoConnect",
+   "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+   "line_start": 36,
+   "line_end": 50,
+   "evidence": "self.ArduinoNode = slicer.mrmlScene.GetFirstNodeByName(\"arduinoNode\")\n    self.logic = ArduinoPedalBoardLogic(self.ArduinoNode)",
+   "explanation": "The 'arduinoNode' node is only created by ArduinoConnectLogic.__init__ (ArduinoConnect.py:376-378), which runs when the ArduinoConnect widget is first opened. If a user opens ArduinoPedalBoard (or ArduinoMotionSensor, ArduinoMotionSensor.py:41-42 and :59) first, GetFirstNodeByName returns None and the subsequent self.ArduinoNode.AddObserver(...) raises AttributeError, so the module panel fails to open with a Python error instead of a helpful message.",
+   "suggestion": "Create the parameter node if it is missing (or reuse the ArduinoConnect logic) and show a user-facing message telling the user to open ArduinoConnect first.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "A second node named 'arduinoNode' is created, so observers may watch a node that never receives data",
+   "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+   "line_start": 186,
+   "line_end": 188,
+   "evidence": "self.parameterNode=slicer.vtkMRMLScriptedModuleNode()\n        self.parameterNode.SetName(\"arduinoNode\")\n        slicer.mrmlScene.AddNode(self.parameterNode)",
+   "explanation": "ArduinoConnectLogic already adds a node named 'arduinoNode' (ArduinoConnect.py:376-378) and writes incoming serial data into it. ArduinoPedalBoardLogic adds a second node with the same name, and every consumer resolves the node with GetFirstNodeByName, so the pedal board can observe the empty duplicate while ArduinoConnect writes into the other one: the pedal board silently does nothing. The duplicate nodes are also saved into the user's scene.",
+   "suggestion": "Reuse the existing node (GetFirstNodeByName, create only if absent) and do not add a second node with the same name; consider making it a scene singleton.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Blocking serial readline() runs on the GUI thread and can freeze Slicer",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 426,
+   "line_end": 449,
+   "evidence": "self.arduinoConnection = serial.Serial(self.port, self.baud)",
+   "explanation": "The port is opened without a timeout, and pollSerialDevice (scheduled by qt.QTimer.singleShot) calls self.arduinoConnection.readline(), which blocks until a newline arrives. The in_waiting > 0 guard does not help when the board sends a partial line or stops mid-line (e.g. unplugged, reset, or a sketch using Serial.print without newline): the main thread blocks and the whole Slicer UI hangs until data arrives.",
+   "suggestion": "Open the port with a short timeout (e.g. serial.Serial(port, baud, timeout=0.1)) and buffer partial lines, or move polling to a worker thread/Qt thread with signals back to the GUI.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Bundled unit tests cannot pass and are registered as ctests",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 511,
+   "line_end": 521,
+   "evidence": "SampleData.downloadFromURL(\n    nodeNames='FA',\n    fileNames='FA.nrrd',\n    uris='http://self.kitware.com/midas3/download?items=5767',",
+   "explanation": "The tests are unmodified templates: the URL host 'self.kitware.com' does not exist, logic.hasImageData() is not defined on any logic class, ArduinoPedalBoard.py:484 calls ArduinoPedalBoardLogic() without its required arduinoNode argument, and runTest calls test_ArduinoPedalBoard1 while the method is named test_ArduinoPedalBoard11 (ArduinoPedalBoard.py:457 vs :459). Because ArduinoConnect/CMakeLists.txt:28 registers slicer_add_python_unittest, the extension's test step fails, giving misleading red CI and no real coverage of the serial logic.",
+   "suggestion": "Replace the template tests with tests that exercise processMessage/connect error paths without hardware, or remove the ctest registration until real tests exist.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "cleanup() is empty in all three widgets, so observers are never removed",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 247,
+   "line_end": 248,
+   "evidence": "def cleanup(self):\n    pass",
+   "explanation": "Observers added on the parameter node (ArduinoConnect.py:215-216), on the Arduino node by the plotter/monitor (ArduinoConnect.py:65,150) and by the pedal board/motion sensor (ArduinoPedalBoard.py:50, ArduinoMotionSensor.py:59) are never removed, and the observer tags are overwritten (ArduinoConnect.py:39 and :42 both assign sceneModifiedObserverTag). If the widget is destroyed or the scene is closed while a connection is active, callbacks run against deleted Qt widgets, producing exceptions or crashes.",
+   "suggestion": "Store each observer tag and remove the observers in cleanup(), and stop the polling timer / close the serial port there.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "IDE path is persisted by writing into the installed extension directory",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 250,
+   "line_end": 252,
+   "evidence": "def writeConfig(self):\n    with open(self.configFileName, 'w') as json_file:\n      json.dump(self.config, json_file)",
+   "explanation": "configFileName is derived from __file__ (ArduinoConnect.py:210), i.e. the extension's installed Resources folder. On a system-wide or read-only installation the write raises PermissionError when the user clicks 'Set IDE' (unhandled, no message), and the setting is lost or overwritten on extension update. The stored path is later executed with subprocess.Popen (ArduinoConnect.py:330).",
+   "suggestion": "Store the IDE path in QSettings or a user-writable location, and wrap the write in try/except with a user-visible error.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Free-text numeric fields are parsed with int()/float() without validation",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 352,
+   "line_end": 356,
+   "evidence": "def onSamplesToPlot(self, event):\n    samplesToPlot = int(self.ui.samplesToPlotText.text)",
+   "explanation": "Clearing or typing a non-numeric value in 'Samples' (or 'Samples/s', ArduinoConnect.py:423, or 'Offset' in ArduinoMotionSensor.py:56) raises ValueError inside a Qt slot; the exception is only printed to the console and the user gets no feedback, and the plot/connection silently does not update.",
+   "suggestion": "Use QIntValidator/QDoubleSpinBox or catch ValueError and show a message box.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Serial port is not closed when the connection drops",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 435,
+   "line_end": 440,
+   "evidence": "def disconnect(self, disconnectedByUser):\n    if disconnectedByUser:\n      self.arduinoConnection.close()",
+   "explanation": "On an error path (disconnectedByUser=False) the port object is dropped without close(), so the OS handle can stay open and the device remains busy; the automatic reconnect attempt in pollSerialDevice (ArduinoConnect.py:466-468) can then fail because the port is still held.",
+   "suggestion": "Always close the connection in a try/except before setting arduinoConnection = None.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Yellow-slice offset branch only prints, never moves the slice",
+   "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+   "line_start": 401,
+   "line_end": 403,
+   "evidence": "if message==\"2\" and self.button2==\"Slice Offset -\" and self.selected_view==2 and self.button3==\"Change Viewer\":\n        print(\"Button DOWN Pressed, [Operation num.]:\",message)              \n        print(\"Offset Yellow Slice:\",self.yellow_Slice.GetSliceOffset())",
+   "explanation": "Unlike the neighbouring branches, this one omits SetSliceOffset, so with that button configuration the yellow slice never moves while the log claims it did. Ordinary functional bug in a large copy-pasted if-chain.",
+   "suggestion": "Add the missing self.yellow_Slice.SetSliceOffset(...) call and consider replacing the if-chain with a table-driven mapping.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "User-selected executable is launched with subprocess.Popen",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 328,
+   "line_end": 330,
+   "evidence": "def onRunIDEButton(self, clicked):\n    if self.arduinoIDEExe != \"\":\n      subprocess.Popen(self.arduinoIDEExe)",
+   "explanation": "The path comes from a QFileDialog chosen by the user (or from shutil.which('arduino')) and is passed as an argument list-free string without shell=True, so there is no shell injection; the action is explicitly user-initiated. Noted for completeness because the path is also persisted in a file inside the extension directory.",
+   "suggestion": "Optionally validate that the stored path still exists before launching and report failure to the user.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "MIT license names a different copyright holder than the listed authors; icons are third-party",
+   "file": "LICENSE",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "MIT License\n\nCopyright (c) 2020 Andras Lasso",
+   "explanation": "Distribution is permitted, so this is not blocking. The copyright line credits only Andras Lasso while README.md:10-17 lists Zaffino/Spadea and students as authors, and README.md:43,89 state the module icons come from Freepik/Flaticon, whose free license requires the attribution that is present.",
+   "suggestion": "Align the copyright line with the actual authors and keep the Flaticon attribution in the distributed documentation.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "2 MB example scene is committed as an opaque binary",
+   "file": "docs/examples.md",
+   "line_start": 16,
+   "line_end": 16,
+   "evidence": "Exemplary Slicer scene can be downloaded from [here](https://github.com/pzaffino/SlicerArduinoController/blob/master/docs/extra/SlicerArduino_US_probe_example.mrb?raw=true).",
+   "explanation": "docs/extra/SlicerArduino_US_probe_example.mrb is a binary MRB scene in the repository that I could not inspect; an .mrb can embed volumes and models, so it should be confirmed that it contains only synthetic/phantom data before it is distributed with the extension.",
+   "suggestion": "Confirm the scene contains no patient data, or host it outside the repository and download it on demand.",
+   "confidence": "low"
+  }
+ ],
+ "not_checked": [
+  "docs/extra/SlicerArduino_US_probe_example.mrb (2 MB binary) could not be read, so its contents (possible embedded patient images) are unverified",
+  "The exact source revision: the catalog pins scm_revision 'master', so the reviewed files are the ones served for this review, not a fixed commit; commit 229f407 was not independently resolved",
+  "Runtime behaviour against real Arduino hardware (serial protocol, baud handling, gesture/pedal sketches) was not executed",
+  "CI/build results for this extension on the Slicer build farm were not available",
+  "pyserial's own license text was not read (commonly BSD-3-Clause, compatible)",
+  "Full Flaticon/Freepik license terms for the bundled icons were not retrieved"
+ ],
+ "questions_for_author": [
+  "Does docs/extra/SlicerArduino_US_probe_example.mrb contain any patient or otherwise restricted data?",
+  "Can pyserial be installed only after user confirmation instead of at module import?",
+  "Should ArduinoPedalBoard/ArduinoMotionSensor create the 'arduinoNode' themselves instead of requiring ArduinoConnect to be opened first?"
+ ]
+}

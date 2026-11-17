@@ -1,0 +1,113 @@
+{
+ "purpose": "ASLtoolkit provides two 3D Slicer scripted CLI modules (`CBF_ATT_ASL` and `Multi_Echo_ASL`) for reconstructing quantitative Cerebral Blood Flow (CBF), Arterial Transit Time (ATT), and T1 blood-GM maps from Arterial Spin Labeling (ASL) MRI data. It is intended for neuroimaging researchers analyzing multi-PLD and multi-TE ASL acquisitions using the `asltk` Python library.",
+ "summary": "ASLtoolkit is an MIT-licensed neuroimaging extension providing two scripted CLI modules (`CBF_ATT_ASL` and `Multi_Echo_ASL`) wrapping the `asltk` library for Arterial Spin Labeling MRI reconstruction. The code is clean and safe, with a valid catalog entry and CMake configuration. There are several non-blocking functional issues in the scripted CLI implementation: `slicer.util.pip_install` is called inside a standalone `python-real` CLI script where `slicer` is unavailable, `t2b`/`t2gm` parameters in `Multi_Echo_ASL` are parsed but never used, `normalizedCBF` in `CBF_ATT_ASL` cannot be unchecked from the GUI due to CLI flag parsing defaults, and `rich.print` is used where Slicer expects raw XML progress tags.\n\n🟢 Recommend merge",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all files in the repository at commit b805616adc86eb902505f27dd58764d83647228c. Found no malicious code, telemetry, unauthorized network activity, unsafe deserialization, command injection, or prompt injection."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Reviewed `CBF_ATT_ASL.py`, `Multi_Echo_ASL.py`, and `requirements.txt`. Because both modules are CLI scripts rather than startup-loaded Python modules, nothing is installed at Slicer startup; however, they attempt an unprompted `pip_install(\"asltk==1.1.3\")` when the CLI runs, and the transitive dependencies of `asltk==1.1.3` on PyPI could not be inspected offline."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Reviewed `CMakeLists.txt`, `CBF_ATT_ASL/CMakeLists.txt`, `Multi_Echo_ASL/CMakeLists.txt`, the XML descriptors, and the catalog entry. Both scripted CLI modules are properly registered with `SlicerMacroBuildScriptedCLI`, `EXTENSION_DEPENDS` (`NA`) is consistent with `build_dependencies` (`[]`), and no large binaries are committed."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Reviewed `LICENSE` and file headers in `CBF_ATT_ASL.py` and `Multi_Echo_ASL.py`. The repository is licensed under the permissive MIT License, which clearly permits distribution."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected `CBF_ATT_ASL.py`, `CBF_ATT_ASL.xml`, `Multi_Echo_ASL.py`, and `Multi_Echo_ASL.xml`. Found several functional bugs: `import slicer.util` fails inside standalone `python-real` scripted CLI execution when `asltk` is missing; `t2b` and `t2gm` parameters in `Multi_Echo_ASL` are ignored in computation; `normalizedCBF` cannot be turned off via the GUI; and `rich.print` is used to print Slicer CLI XML progress tags."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Reviewed `README.md`, `docs/index.md`, and the module XML descriptions. The extension provides clear documentation, example outputs, a tutorial with sample data, and a scientific publication reference for multi-PLD and multi-TE ASL MRI reconstruction."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Scripted CLI modules call `slicer.util.pip_install` inside standalone `python-real` subprocess",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 28,
+   "line_end": 34,
+   "evidence": "try:\n    from asltk.asldata import ASLData\n    from asltk.reconstruction import CBFMapping\n    from asltk.utils.io import ImageIO\nexcept ModuleNotFoundError:\n    import slicer.util\n    slicer.util.pip_install(\"asltk==1.1.3\")",
+   "explanation": "Both `CBF_ATT_ASL.py` and `Multi_Echo_ASL.py` are configured as `SlicerMacroBuildScriptedCLI` modules running under `#!/usr/bin/env python-real`. When Slicer executes a Scripted CLI module, it launches a standalone `python-real` subprocess rather than executing inside the embedded Slicer Python interpreter. In a standalone `python-real` process, `import slicer.util` is not available (`ModuleNotFoundError: No module named 'slicer'`), so the automatic installation fallback for `asltk==1.1.3` will fail with an unhandled exception whenever `asltk` is not already installed. Furthermore, installing packages silently during CLI execution without prior user confirmation violates Slicer's convention for third-party Python package installation.",
+   "suggestion": "Either invoke `pip` via `subprocess.check_call([sys.executable, \"-m\", \"pip\", \"install\", \"asltk==1.1.3\"])` in the `python-real` CLI script, or provide a ScriptedLoadableModule wrapper that asks the user for confirmation before calling `slicer.util.pip_install(\"asltk==1.1.3\")`. Also synchronize the version in `requirements.txt` (`asltk==1.1.0`) with the version installed in the scripts (`asltk==1.1.3`).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "`t2b` and `t2gm` parameters in `Multi_Echo_ASL` are parsed and logged but never used in computation",
+   "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+   "line_start": 107,
+   "line_end": 110,
+   "evidence": "      print('---- Advanced Options ----')\n      print('T2 Blood: ' + str(args.t2b))\n      print('T2 GM: ' + str(args.t2gm))\n      print('Average M0: ' + str(args.average_m0))",
+   "explanation": "In `Multi_Echo_ASL/Multi_Echo_ASL.py`, the `t2b` (T2 Blood) and `t2gm` (T2 Gray Matter) parameters exposed in `Multi_Echo_ASL.xml` are parsed into `args.t2b` and `args.t2gm` (lines 245-246) and printed in verbose output (lines 108-109), but are never passed to `ASLData`, `MultiTE_ASLMapping`, or `recon.create_map`. Any changes the user makes to `T2 Blood (ms)` or `T2 Gray Matter (ms)` in the UI have no effect on the computed map.",
+   "suggestion": "Pass `args.t2b` and `args.t2gm` to `MultiTE_ASLMapping` or `recon.create_map` (e.g., via its `t2b` / `t2gm` parameters or setter methods in `asltk`).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Unchecking `normalizedCBF` in the GUI has no effect because omitted CLI boolean flags default to `'true'`",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 239,
+   "line_end": 241,
+   "evidence": "        out_cbf=parsed.get('outputCBF', ''),\n        norm_cbf=parse_bool(parsed.get('normalizedCBF', 'true')),\n        out_att=parsed.get('outputATT', ''),",
+   "explanation": "In Slicer's CLI execution model, `<boolean>` parameters are passed as a flag (`--normalizedCBF`) when checked (`true`) and omitted entirely from the command-line arguments when unchecked (`false`). Because `CBF_ATT_ASL.py` defaults `parsed.get('normalizedCBF', 'true')` to `'true'` when the flag is absent, unchecking \"Set CBF to mL/100 g/min scale\" in the Slicer GUI still results in `args.norm_cbf == True`. Consequently, users cannot disable CBF normalization from the GUI.",
+   "suggestion": "Default missing boolean flags to `'false'` (`parsed.get('normalizedCBF', 'false')`) when invoked by Slicer's CLI launcher, or use standard Slicer CLI argument parsing.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Smoothing parameter validation in `CBF_ATT_ASL.py` never runs due to case mismatch",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 180,
+   "line_end": 188,
+   "evidence": "  # Checks the smoothing Method and Parameters\n  valid_smooth_methods = ['None', 'Gaussian', 'Median']\n  if args.smoothMethod not in valid_smooth_methods:\n    print(\n        f'Smoothing method \"{args.smoothMethod}\" is not valid. Please select one of the following methods: {valid_smooth_methods}.'\n    )\n    is_ok = False\n  if args.smoothMethod == 'gaussian' and args.smoothParameter <= 0:",
+   "explanation": "In `CBF_ATT_ASL/CBF_ATT_ASL.py`, `checkUpParameters` validates `args.smoothMethod` against `['None', 'Gaussian', 'Median']` (capitalized), but then checks `if args.smoothMethod == 'gaussian'` (line 187) and `if args.smoothMethod == 'median'` (line 192) in lowercase before `args.smoothMethod` has been lowercased. As a result, invalid smoothing parameters (such as an even or non-positive kernel size for Median filtering) bypass validation in `CBF_ATT_ASL.py`.",
+   "suggestion": "Check against `'Gaussian'` and `'Median'` (as done in `Multi_Echo_ASL.py` lines 192 and 197) or compare `args.smoothMethod.lower()`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Overriding `print` with `rich.print` can interfere with Slicer CLI XML progress tags",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 39,
+   "line_end": 40,
+   "evidence": "import numpy as np\nfrom rich import print",
+   "explanation": "Both CLI scripts override Python's built-in `print` with `rich.print`. Slicer's CLI process runner parses standard output for XML progress tags such as `<filter-start>`, `<filter-progress>0.1</filter-progress>`, and `<filter-end>`. Because `rich.print` interprets angle-bracket tags as Rich console markup and applies terminal formatting/word wrapping, it can strip or alter the XML progress tags expected by Slicer.",
+   "suggestion": "Use Python's built-in `print` (and `sys.stdout.flush()`) for Slicer `<filter-...>` XML progress reporting.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Input images are declared as disk `<file>` parameters rather than scene `<image>` nodes",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.xml",
+   "line_start": 48,
+   "line_end": 53,
+   "evidence": "    <file fileExtensions=\".nii,.nii.gz\">\n    <name>inputASL</name>\n      <label>Input ASL file</label>\n      <longflag>inputASL</longflag>\n      <description><![CDATA[Input ASL file path in .nii or nii.gz format]]></description>\n    </file>",
+   "explanation": "Both `CBF_ATT_ASL.xml` and `Multi_Echo_ASL.xml` declare `inputASL`, `inputM0`, and `labelMask` as `<file>` parameters restricted to `.nii,.nii.gz` on disk rather than `<image>` parameters, whereas the outputs (`outputCBF`, `outputATT`, `outputVolume`) are declared as `<image channel=\"output\">`. This prevents users from selecting input volumes that are already loaded in the Slicer scene.",
+   "suggestion": "Consider using `<image>` parameters for input volumes if `asltk` supports the file formats Slicer uses for CLI volume exchange, or document that inputs must be selected as external NIfTI files from disk while outputs are loaded into the scene.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Transitive dependency tree and version constraints of `asltk==1.1.3` on PyPI (could not verify without network access whether `asltk==1.1.3` pins or upgrades packages bundled with Slicer such as `SimpleITK`, `numpy`, or `scipy`, or pulls in `torch` or GUI packages).",
+  "Contents of the external Google Drive sample dataset linked in `docs/index.md`."
+ ],
+ "questions_for_author": [
+  "Does `asltk==1.1.3` impose strict version pins on packages already bundled in 3D Slicer (such as `numpy`, `scipy`, or `SimpleITK`)?",
+  "How is `slicer.util.pip_install(\"asltk==1.1.3\")` expected to succeed when `CBF_ATT_ASL.py` and `Multi_Echo_ASL.py` are executed as `SlicerMacroBuildScriptedCLI` scripts inside a standalone `python-real` process where the `slicer` module is not initialized?"
+ ]
+}

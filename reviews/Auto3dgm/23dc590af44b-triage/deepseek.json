@@ -1,0 +1,240 @@
+{
+ "purpose": "Auto3dgm brings the Auto3dgm automated 3D geometric-morphometrics pipeline (farthest-point subsampling, pairwise Procrustes/assignment alignment, globalized alignment) into 3D Slicer for comparative analysis of collections of 3D surface meshes, plus a small web-based mesh viewer CLI module. It targets researchers in evolutionary biology/morphometrics rather than clinicians.",
+ "summary": "Research-grade morphometrics extension with a working-looking pipeline, but several issues should be fixed before it is offered to users: an unauthenticated HTTP server bound to all interfaces with unsanitized path handling (meshviewer), a button that clears the user's MRML scene without confirmation, an unpinned `pip_install('mosek')` into Slicer's shared Python environment at module open, a committed prebuilt Windows CPython-3.6 binary, and no license covering the Slicer module code itself (only the vendored auto3dgm_nazar subdirectory is MIT). Documentation is the unmodified Slicer template text and the module test is empty. No malicious or reviewer-manipulating content was found.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "meshviewer/web_view_mesh/viewer.py starts an unauthenticated HTTP server on (\"\", 8000) whose translate_path concatenates the request path without sanitization, and Auto3dgm.py:846 calls slicer.mrmlScene.Clear(0) on a button click. No data exfiltration, credential access, eval/exec, or reviewer-directed text was found in the files I read."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Auto3dgm.py:71-77 runs slicer.util.pip_install('mosek') (unpinned) into Slicer's shared Python when the module widget is constructed, and correspondence.py:19 sets the MOSEKLM_LICENSE_FILE environment variable process-wide. requirements.txt lists bare 'vtk', which would shadow Slicer's bundled VTK if anyone followed it."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "CMake installs auto3dgm_nazar and web_view_mesh, and EXTENSION_DEPENDS \"NA\" matches build_dependencies [], but the repo commits a prebuilt _lapjv.cp36-win_amd64.pyd for a Python version Slicer no longer uses, committed __pycache__ .pyc files, and a 16 MB test fixture."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "Auto3dgm/auto3dgm_nazar/LICENSE is MIT, but there is no LICENSE at the repository root and Readme.md states no terms, so the Slicer module code (Auto3dgm.py, meshviewer) has no stated distribution permission; the pipeline also requires the proprietary mosek solver under a separate academic license."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The pipeline runs long mosek/scipy computations synchronously on the GUI thread with no progress reporting, errors surface only as console tracebacks, and I found concrete bugs (meshfactory.py:87 opens a hardcoded 'hammas.off', subsample.py:114 uses `func is 'FPS'`, Auto3dgm.py:583 writes m[1,3] twice)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The module help text is the unmodified Slicer template ('It performs a simple thresholding on the input volume...'), the registered unittest is empty (Auto3dgm.py:928-929), and documentation is a link to an external site; the workflow itself (Setup/Run/Visualize tabs) is coherent."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "meshviewer starts an unauthenticated HTTP server on all interfaces with unsanitized path handling",
+   "file": "meshviewer/web_view_mesh/viewer.py",
+   "line_start": 20,
+   "line_end": 29,
+   "evidence": "  def translate_path(self, path):\n    if self.ext_prefix and self.path.startswith(self.ext_prefix):\n      return self.ext_dir_path + path[len(self.ext_prefix):]\n    else:\n      base_path = os.path.dirname(os.path.abspath(__file__))\n      return base_path + path",
+   "explanation": "serve_viewer() binds to (\"\", 8000), i.e. every network interface, and the overridden translate_path bypasses SimpleHTTPRequestHandler's '..' sanitization by plain string concatenation. Any host on the same network can therefore request e.g. /../../../../home/<user>/... and read any file the Slicer user can read, and the /mesh prefix serves the user's chosen mesh directory (their research/medical surface data) with no authentication. Reachable when a user launches the installed 'meshviewer' CLI module (meshviewer/meshviewer.py -> web_view_mesh.viewer.serve_viewer); the Auto3dgm module's own server button is commented out, which limits but does not remove the exposure. Fix: bind to 127.0.0.1 and normalize/validate the resolved path against the allowed roots.",
+   "suggestion": "Bind to ('127.0.0.1', port) and resolve paths with os.path.realpath + a commonpath check against the allowed directories before serving.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Visualize buttons clear the user's MRML scene without confirmation",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 845,
+   "line_end": 846,
+   "evidence": "    def viewAlignedMeshWithinSlicer(viewMeshFolder, viewLmkFolder):\n        slicer.mrmlScene.Clear(0)",
+   "explanation": "Clicking 'View Phase 1 alignment' or 'View Phase 2 alignment' (Auto3dgm.py:386-401) calls viewAlignedMeshWithinSlicer, which unconditionally clears the whole MRML scene. Any unsaved work in the user's current scene (loaded volumes, segmentations, markups, other module state) is discarded with no prompt and no undo. Fix: ask for confirmation, or load into a new scene / separate view without clearing.",
+   "suggestion": "Prompt with slicer.util.confirmOkCancelDisplay before clearing, or avoid clearing and only remove the nodes this module created.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Unpinned pip_install('mosek') into Slicer's shared Python when the module widget is constructed",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 71,
+   "line_end": 77,
+   "evidence": "      try:\n        import mosek\n      except ModuleNotFoundError as e:\n        if slicer.util.confirmOkCancelDisplay(\"Auto3dgm requires 'mosek' python package. Click OK to download it now. It may take a few minues. Please also download an academic mosek license from https://www.mosek.com/products/academic-licenses/ and save the license file in the lib folder. More details about installing a mosek license can be found on https://toothandclaw.github.io/installations/\"):\n          slicer.util.pip_install('mosek')\n          import mosek",
+   "explanation": "The install happens in Auto3dgmWidget.__init__, i.e. as soon as the module is opened, and installs an unpinned package into Slicer's shared Python environment, affecting every other extension in that Slicer installation. There is a confirmation dialog, which is why this is not blocking, but the dialog text also tells users to drop a license file into the installed extension's lib folder (wiped on extension update, and often not writable). The dependency is also proprietary (see license finding).",
+   "suggestion": "Pin a tested version, install only after an explicit user action (a dedicated button), and document the license path in a user-writable location instead of the install tree.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Process-wide MOSEKLM_LICENSE_FILE environment variable set at import of correspondence.py",
+   "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+   "line_start": 18,
+   "line_end": 19,
+   "evidence": "file_path = os.path.dirname(os.path.abspath(__file__))\nos.environ.setdefault('MOSEKLM_LICENSE_FILE', os.path.join(file_path, '../lib/mosek.lic'))",
+   "explanation": "Importing this module mutates the Slicer process environment for all code that runs afterwards (including other extensions that might use mosek). It is imported lazily from Auto3dgmLogic.correspondence, so it does not fire at Slicer startup, but the side effect is global and silent.",
+   "suggestion": "Pass the license path explicitly to M.putlicensepath() (already done at line 468) and drop the environment mutation.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "requirements.txt lists bare 'vtk', which would shadow Slicer's bundled VTK",
+   "file": "Auto3dgm/auto3dgm_nazar/requirements.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "numpy\nvtk",
+   "explanation": "Nothing in the build or code reads this file, so it is not executed automatically; but a user or packager following it would pip-install a second VTK into Slicer's environment, which is a known way to break Slicer and other extensions. numpy is likewise bundled by Slicer.",
+   "suggestion": "Remove the file or replace it with a comment stating that numpy/VTK come from Slicer.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Committed prebuilt binary extension module for CPython 3.6 Windows, unused by the code",
+   "file": "Auto3dgm/auto3dgm_nazar/lap_windows/_lapjv.cp36-win_amd64.pyd",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "",
+   "explanation": "A 99 KB compiled .pyd for CPython 3.6 win_amd64 is committed to the repository and installed with the extension (Auto3dgm/CMakeLists.txt installs the whole auto3dgm_nazar directory). Current Slicer releases use Python 3.9+, so the binary cannot load, and a search shows nothing in the extension imports lap_windows (only its own __init__.py/lapmod.py/tests reference it). Committed binaries of unverified provenance that are not needed should not ship; the upstream 'lap' package is the normal source.",
+   "suggestion": "Delete lap_windows (or exclude it from the install rule) and, if the solver is needed, depend on the upstream package installed on demand.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Committed __pycache__ .pyc files and a 16 MB test fixture are installed/carried",
+   "file": "meshviewer/web_view_mesh/__pycache__/viewer.cpython-36.pyc",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "",
+   "explanation": "meshviewer/CMakeLists.txt copies the whole web_view_mesh directory into the install tree, so stale CPython-3.6 .pyc files ship to users; .gitignore only covers the root pattern. Auto3dgm/auto3dgm_nazar/tests/fixtures/test.ply (16 MB) and two 2 MB PNG textures are also committed rather than downloaded on demand.",
+   "suggestion": "Remove __pycache__ from the repository and exclude it from the install rule; move large fixtures to a download or a smaller sample.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "No license terms for the Slicer module code itself",
+   "file": "Readme.md",
+   "line_start": 1,
+   "line_end": 5,
+   "evidence": "# Welcome to Slicer Auto3dgm!\n\nFor details please see our web page:\n\nhttps://toothandclaw.github.io/",
+   "explanation": "The only license file in the repository is Auto3dgm/auto3dgm_nazar/LICENSE (MIT, 'Copyright (c) 2018 Julie Winchester et al.'), which covers the vendored auto3dgm_nazar package. There is no LICENSE at the repository root and the Readme states no terms, so distribution permission for the Slicer-specific code (Auto3dgm/Auto3dgm.py, meshviewer/) is not stated. The bundled three.js/jquery/OpenCTM assets do carry their own notices.",
+   "suggestion": "Add a root LICENSE (or explicit terms in the Readme) covering the Slicer module code, and keep the vendored MIT notice.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Core alignment step requires the proprietary mosek solver under a separate academic license",
+   "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+   "line_start": 453,
+   "line_end": 468,
+   "evidence": "                ### specify mosek license\n                file_path = os.path.dirname(os.path.abspath(__file__))\n                lic_path = os.path.join(file_path, '../lib/mosek.lic')",
+   "explanation": "The sparse assignment branch calls Mosek Fusion, which is commercial software; the module tells users to obtain an academic license (Auto3dgm.py:75). Academic mosek licenses are typically non-commercial, so users must be told the extension's core computation is not usable without a third-party license and is restricted to non-commercial use. Auto3dgm/auto3dgm_nazar/lib/Save_mosek_license_here is an empty placeholder, so no license is bundled (which is correct).",
+   "suggestion": "State the mosek dependency and its non-commercial academic restriction prominently in the module help and Readme.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Long-running alignment runs synchronously on the GUI thread with no progress or error reporting",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 281,
+   "line_end": 285,
+   "evidence": "    def allStepsButtonOnLoad(self):\n      self.Auto3dgmData.phase1SampledPoints = self.phase1PointNumber.value\n      self.Auto3dgmData.phase2SampledPoints = self.phase2PointNumber.value\n      Auto3dgmLogic.runAll(self.Auto3dgmData, self.reflectionCheckBox.checked)\n      Auto3dgmLogic.exportData(self.Auto3dgmData, self.outputFolder, phases = [1, 2])",
+   "explanation": "runAll performs farthest-point subsampling plus an all-pairs Procrustes/assignment alignment (Correspondence computes n*n pairs, since has_pair at correspondence.py:128-135 always returns False) and mosek solves, all on the Qt main thread. Slicer freezes with no progress bar or cancel for the whole run, and failures surface only as tracebacks in the Python console rather than a dialog. The same applies to the individual step buttons.",
+   "suggestion": "Run the pipeline in a CLI module or a worker thread with slicer.util.progress / a progress dialog, and wrap failures in a user-visible error dialog.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "OFF parser ignores its argument and opens a hardcoded file",
+   "file": "Auto3dgm/auto3dgm_nazar/mesh/meshfactory.py",
+   "line_start": 86,
+   "line_end": 88,
+   "evidence": "    def off_parser(file_path):\n        file=open(\"hammas.off\",\"r\")",
+   "explanation": "Any .off mesh in the user's input folder is read from 'hammas.off' in the current working directory instead of the requested file, so .off inputs either fail with FileNotFoundError or silently analyse the wrong mesh. .off is in the accepted extension list (meshfactory.py:28), so this is reachable from the normal Load Data path.",
+   "suggestion": "Use open(file_path, 'r').",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Identity comparison against a string literal in subsample method dispatch",
+   "file": "Auto3dgm/auto3dgm_nazar/mesh/subsample.py",
+   "line_start": 112,
+   "line_end": 118,
+   "evidence": "    def generate_func(self, func='FPS'):\n        #print(func)\n        if func is 'FPS' or func is None:\n            #print(\"entered\")\n            return self.far_point_subsample",
+   "explanation": "`func is 'FPS'` relies on string interning; with a non-interned method string the function returns None and Job validation raises 'Unexpected value ... for type func'. The module currently passes method=None so it works by accident, but any caller supplying 'FPS' explicitly can break.",
+   "suggestion": "Use == for string comparison.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Transform export writes the wrong translation component",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 583,
+   "line_end": 583,
+   "evidence": "    file.write(str(-1 * m[0,3]) + \" \" + str(-1 * m[1,3]) + \" \" + str(m[1,3]) + \"\\n\")",
+   "explanation": "The third translation value is m[1,3] instead of m[2,3], so .tfm files written by saveTFM contain a wrong z translation. saveTFM is currently only reachable from dead/commented code paths, hence minor, but the exported transform would be silently incorrect if re-enabled.",
+   "suggestion": "Write str(m[2,3]) as the third component.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Output folder handling assumes a folder was chosen",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 216,
+   "line_end": 223,
+   "evidence": "    def prepareOutputFolder(self):\n      if (not os.path.exists(self.outputFolder+\"/lowres/\")):\n        os.mkdir(self.outputFolder+\"/lowres/\")",
+   "explanation": "self.outputFolder starts as None and is only set by the folder dialog; the Run buttons are enabled by the input folder alone, so pressing Run without choosing an output folder raises TypeError on None + str instead of telling the user what is missing. Paths are also built by string concatenation rather than os.path.join.",
+   "suggestion": "Validate that an output folder is set and show a message; use os.path.join.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Module help text is the unmodified Slicer template and the registered test is empty",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 30,
+   "line_end": 33,
+   "evidence": "    self.parent.helpText = \"\"\"\nThis is an example of scripted loadable module bundled in an extension.\nIt performs a simple thresholding on the input volume and optionally captures a screenshot.\n\"\"\"",
+   "explanation": "Users opening the module see help text describing volume thresholding, which has nothing to do with the morphometrics workflow, and the acknowledgement credits the Slicer template authors. The ctest registered in Auto3dgm/CMakeLists.txt:32 runs Auto3dgmTest.test_Auto3dgm1, which is `pass` (Auto3dgm.py:928-929), so CI gives no signal about the pipeline.",
+   "suggestion": "Write real help text (inputs, parameters, outputs, mosek requirement, citation) and add at least a smoke test on the bundled fixtures.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Debug and dead-code leftovers in the shipped package",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 8,
+   "line_end": 8,
+   "evidence": "import pdb",
+   "explanation": "pdb is imported at module import, and Auto3dgm/auto3dgm_nazar/analysis/mini-auto3dgm_barakshan.py executes matplotlib plotting code at import (it is not importable due to the dashes in its name, so it is dead weight). meshviewer/web_view_mesh/examples/http_server_two_dirs.py hardcodes '/Users/jmw110/data/bunny'. None of these affect users directly but they add noise to the installed package.",
+   "suggestion": "Remove debug imports, the scratch script, and the example file from the installed tree.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not verify the catalog revision: the entry pins scm_revision 'master' (a moving branch), so the exact source commit reviewed is unknown; I inspected the snapshot provided in this review.",
+  "Could not read binary files: Auto3dgm/auto3dgm_nazar/lap_windows/_lapjv.cp36-win_amd64.pyd (provenance and contents unverified), the committed .pyc files, the PNG icons/screenshots, and the 16 MB tests/fixtures/test.ply.",
+  "Did not audit the ~189 vendored three.js/jquery JavaScript files under meshviewer/web_view_mesh/js beyond confirming that index.html loads them locally (the CDN script tags are commented out) and that license notices exist for OpenCTM/js-lzma.",
+  "Did not verify the mosek Fusion API usage or run the pipeline, so I cannot confirm the alignment results are numerically correct.",
+  "Did not check whether the extension builds on any platform (no CI evidence available to me).",
+  "Did not inspect the remaining test scripts under Auto3dgm/auto3dgm_nazar/tests/ or the sample fixture meshes."
+ ],
+ "questions_for_author": [
+  "Is the meshviewer CLI module intended for end users? If so, can it bind to 127.0.0.1 and sanitize request paths, or be removed from the install?",
+  "Can the 'View Phase 1/2 alignment' buttons avoid clearing the user's MRML scene (or at least ask first)?",
+  "Can the mosek install be moved behind an explicit button with a pinned version, and can the license file location be a user-writable folder?",
+  "Which license covers Auto3dgm/Auto3dgm.py and meshviewer/? A root LICENSE would resolve the distribution-permission question.",
+  "Is the committed _lapjv.cp36-win_amd64.pyd still needed? It cannot load in current Slicer (Python 3.9+) and nothing imports lap_windows."
+ ]
+}

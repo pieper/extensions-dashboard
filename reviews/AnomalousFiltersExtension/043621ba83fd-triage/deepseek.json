@@ -1,0 +1,178 @@
+{
+ "purpose": "Provides four C++/ITK command-line modules (AAD, IAD, AAD for DWI, AAD for EPI/fMRI data) that denoise scalar MRI volumes and diffusion-weighted/EPI 4D data with anisotropic and isotropic anomalous-diffusion filters, exposed to Slicer users through the Filtering category.",
+ "summary": "Pure C++/ITK CLI extension: no Python, no network, no downloads, no telemetry, no environment changes — safety and environment look clean, and Apache-2.0 licensing is clear. Packaging is mechanically usable (all four modules are added in CMakeLists.txt, ExternalData stubs are tiny, no EXTENSION_DEPENDS needed since build_dependencies is empty). The main problems are correctness: the DWI module reuses one rescaler for every volume so all output volumes end up identical, the AAD module's \"Homogeneity Level\" parameter is never applied, and all four bundled tests pass a `--sigma` argument that no XML defines (and feed 3D non-DWI data to 4D/DWI-only modules), so the tests cannot pass. Non-blocking per index policy, but should be fixed.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Searched the whole tree for http/curl/wget/socket/requests/urllib/system/popen/exec/eval/pickle/download: only documentation URLs, Apache license URLs and CMake find_package lines matched. All modules are self-contained ITK C++ CLIs (e.g. AADImageFilter/AADImageFilter.cxx) that read a user-chosen file and write a user-chosen output; no data leaves the machine and no code is fetched or executed."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "No Python at all; requirements.txt only lists mkdocstrings/mkdocstrings-python for the ReadTheDocs build (.readthedocs.yaml) and is never installed by Slicer. CMakeLists.txt only does find_package(Slicer)/SlicerExecutionModel/ITK and add_subdirectory of the four modules; no pip, no PyTorch, no sys.path or global side effects."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt adds all four module subdirectories and each module CMakeLists.txt lists its headers in ADDITIONAL_SRCS; Data/ contains only small .md5 ExternalData stubs, so nothing large is committed. build_dependencies is empty and no EXTENSION_DEPENDS is set, which is consistent. However the bundled tests pass a nonexistent --sigma flag and mismatched input data, so the extension's test suite cannot pass."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is the full Apache License 2.0, README.md line 23 and docs/index.md line 67 both state Apache 2.0, and every source file carries an Apache-2.0 header (e.g. AADImageFilter/AADImageFilter.cxx lines 1-15). No bundled model weights or third-party binaries; test data are ExternalData references only."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read all four .cxx entry points and the ITK filter headers/.hxx. Several concrete defects: AADDiffusionWeightedData.cxx reuses a single rescaler object for every volume so all composed volumes alias the last filter output; AADImageFilter.xml exposes homoLevel but AADImageFilter.cxx never calls SetH; AADEPIData.cxx is hard-wired to 4D input while its test feeds a 3D volume; all four tests pass --sigma, which no XML declares."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "docs/index.md gives a good mathematical and literature-backed description with references and before/after figures, and the modules appear in Filtering.Denoising with sensible parameter ranges. But the only tests are broken, there is no sample data shipped for users, and the docs suggest clinical-adjacent uses (MS lesion segmentation) without a research-use disclaimer."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "DWI module reuses one rescaler for all volumes, so every output volume is the last filtered volume",
+   "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+   "line_start": 214,
+   "line_end": 219,
+   "evidence": "        rescaler->SetInput(filter->GetOutput());\n        rescaler->SetOutputMaximum(imgValues->GetMaximum());\n        rescaler->SetOutputMinimum(imgValues->GetMinimum());\n        rescaler->Update();\n\n        scalar2vector->SetInput(vol, rescaler->GetOutput());",
+   "explanation": "The same `rescaler` object is created once per loop iteration but `scalar2vector->SetInput(vol, rescaler->GetOutput())` stores a pointer to that one filter's output image for every `vol`. When `scalar2vector->Update()` runs after the loop, all N inputs resolve to the rescaler's current output, i.e. the last filtered volume. A user filtering a DWI dataset silently gets an output where every gradient volume is a copy of the last one, which destroys the diffusion information while reporting success. The sibling module AADEPIData.cxx handles exactly this case correctly with `aux->DisconnectPipeline();` (lines 147-149), which shows the intended pattern.",
+   "suggestion": "Call `rescaler->GetOutput()->DisconnectPipeline()` (or allocate a fresh rescaler per volume) before passing the image to `scalar2vector->SetInput(vol, ...)`, as AADEPIData.cxx does.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "All four bundled tests pass a --sigma argument that no module XML declares",
+   "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+   "line_start": 20,
+   "line_end": 20,
+   "evidence": "  --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nhdr",
+   "explanation": "The identical line appears in AADImageFilter, IADImageFilter, AADDiffusionWeightedData and AADEPIData Testing/Cxx/CMakeLists.txt. None of the four .xml files defines a `sigma` parameter (AADImageFilter.xml has iterations/q/timeStep/conductance/optFunction/edgeFunction/homoLevel; IADImageFilter.xml has D/iterations/timeStep/q). SlicerExecutionModel's generated PARSE_ARGS rejects unknown long flags, so every test exits with a parse error and the extension's test suite fails on every platform, giving no regression protection at all.",
+   "suggestion": "Replace `--sigma 2.5` with parameters that actually exist for each module (e.g. `--iterations 1 --anomalousparameter 1.2`), and give each module its own appropriate input/baseline.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "AADEPIData is hard-wired to 4D input but its test feeds a 3D volume",
+   "file": "AADEPIData/AADEPIData.cxx",
+   "line_start": 34,
+   "line_end": 34,
+   "evidence": "    const unsigned int Dimension = 4;",
+   "explanation": "The reader is `itk::ImageFileReader<itk::Image<float,4>>` and `numberOfImages = size[3]`, so a 3D input either throws in the reader or yields an undefined volume count. The test (AADEPIData/Testing/Cxx/CMakeLists.txt line 20) passes `CTHeadAxial.nhdr`, a 3D scalar volume, so this test cannot succeed. The XML also never tells the user that a 4D (multi-volume) input is required, so a user selecting a normal T1 volume gets an opaque ITK exception.",
+   "suggestion": "Ship a 4D EPI test volume for this module, and state the 4D input requirement in AADEPIData.xml (or handle 3D input gracefully).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "DWI module test uses a non-diffusion input and always returns failure",
+   "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+   "line_start": 131,
+   "line_end": 135,
+   "evidence": "    if(!readb0)\n    {\n        std::cerr << \"BValue not specified in header file\" << std::endl;\n        return EXIT_FAILURE;\n    }",
+   "explanation": "The test for this module also uses `CTHeadAxial.nhdr`, which has no `DWMRI_b-value`/`DWMRI_gradient` metadata, so the module exits with EXIT_FAILURE before doing any work. The test therefore fails by construction and never exercises the filter.",
+   "suggestion": "Provide a small DWI NRRD with DWMRI_b-value and DWMRI_gradient headers as test input and a matching baseline.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "AAD module exposes a 'Homogeneity Level' parameter that is never applied",
+   "file": "AADImageFilter/AADImageFilter.xml",
+   "line_start": 131,
+   "line_end": 135,
+   "evidence": "      <name>homoLevel</name>\n      <longflag>--homogeneity</longflag>\n      <label>Homogeneity Level</label>",
+   "explanation": "AADImageFilter.cxx (read in full, 194 lines) never references `homoLevel` and never calls `filter->SetH(...)`, so the value stays at the class default m_H = 0.98 (itkAnisotropicAnomalousDiffusionImageFilter.hxx line 28). A user who moves the slider for the Logistic edge function sees no change in the result, which is misleading for a parameter documented as controlling smoothing of homogeneous regions.",
+   "suggestion": "Add `filter->SetH(homoLevel);` in AADImageFilter.cxx, or remove the parameter from the XML.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Dead duplicated branch in AADEPIData automatic-conductance handling",
+   "file": "AADEPIData/AADEPIData.cxx",
+   "line_start": 129,
+   "line_end": 135,
+   "evidence": "            if (q!=1.0) {\n                filter->SetConductance(optKappa->GetKappa());\n                std::cout<<\"Optimum kappa value estimate: \"<<optKappa->GetKappa()<<std::endl;\n            }else {\n                filter->SetConductance(optKappa->GetKappa());",
+   "explanation": "Both branches do exactly the same thing, so the q-dependent conductance scaling that the DWI module applies (AADDiffusionWeightedData.cxx lines 201-207) is missing here. Either the branch is a leftover or the intended q-scaling was lost; in the latter case EPI results differ from the documented behaviour.",
+   "suggestion": "Remove the redundant branch or restore the intended q-dependent scaling.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Unsupported pixel type reported as success without writing output",
+   "file": "AADImageFilter/AADImageFilter.cxx",
+   "line_start": 180,
+   "line_end": 184,
+   "evidence": "        case itk::ImageIOBase::UNKNOWNCOMPONENTTYPE:\n        default:\n            std::cout << \"unknown component type\" << std::endl;\n            break;",
+   "explanation": "After the switch falls through, `main` returns EXIT_SUCCESS (line 193) even though no output file was produced. The same pattern is in IADImageFilter.cxx (lines 146-150) and AADDiffusionWeightedData.cxx (lines 290-294). Slicer will show the CLI as completed successfully while the output node stays empty, which is confusing rather than an error message.",
+   "suggestion": "Return EXIT_FAILURE (and print to stderr) in the default case.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Conductance of 0 divides by zero in the edge-weight function",
+   "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+   "line_start": 172,
+   "line_end": 172,
+   "evidence": "        return  GeneralizedDiffCurve()*exp((-1.0)*pow(static_cast<InputPixelType>(abs((idxValue - centerValue)))/static_cast<InputPixelType>(m_Conductance),  2.0));",
+   "explanation": "`conductance` is declared in AADImageFilter.xml (lines 75-82) as a plain float with no `<constraints>` minimum, so a user can enter 0 (or a negative value). m_Conductance is then used as a divisor, producing inf/NaN that propagate into the output volume and are written to disk without any warning.",
+   "suggestion": "Add a minimum constraint (e.g. 0.001) to the conductance parameter and/or guard against non-positive conductance in the filter.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Uninitialized gradient components if sscanf fails on malformed DWMRI_gradient metadata",
+   "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+   "line_start": 101,
+   "line_end": 107,
+   "evidence": "        double x,y,z;\n        itk::ExposeMetaData<std::string> (imgMetaDictionary, *itKey, metaString);\n        if (itKey->find(\"DWMRI_gradient\") != std::string::npos)\n        {\n            std::cout << *itKey << \" ---> \" << metaString << std::endl;\n            sscanf(metaString.c_str(), \"%lf %lf %lf\\n\", &x, &y, &z);",
+   "explanation": "`x`, `y`, `z` are not initialized and the sscanf return value is ignored. A DWI file with a truncated or differently formatted gradient string yields undefined gradient directions that are then written back into the output NRRD header, silently corrupting the diffusion geometry of the result.",
+   "suggestion": "Initialize x=y=z=0 and check that sscanf returns 3, reporting an error otherwise.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "CLI XML declares <license>Slicer</license> while the project is Apache-2.0",
+   "file": "AADImageFilter/AADImageFilter.xml",
+   "line_start": 8,
+   "line_end": 8,
+   "evidence": "    <license>Slicer</license>",
+   "explanation": "All four module XMLs use the generic Slicer CLI placeholder even though the repository LICENSE is Apache 2.0. This is a common Slicer convention and does not restrict distribution, but it is inconsistent with the actual terms shown to users in the module panel.",
+   "suggestion": "Use `Apache-2.0` (or the full license name) in the <license> element of each module XML.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Clinical-adjacent use cases documented without a research-use disclaimer",
+   "file": "docs/index.md",
+   "line_start": 35,
+   "line_end": 37,
+   "evidence": "  - **Use Case 3:** Noise reduction as part of image processing pipeline\n      \n      - Could offer a better segmentation and classification on specific brain image analysis such as in Multiple Sclerosis lesion segmentation",
+   "explanation": "The documentation markets the filters for downstream diagnostic-adjacent tasks (MS lesion segmentation, tissue classification) but neither README.md nor docs/index.md states that the output is for research use and not validated for clinical decision making. Users may treat the denoised volume as a validated preprocessing step.",
+   "suggestion": "Add a short research-use-only / not-for-clinical-diagnosis statement to README.md and docs/index.md.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Could not build the extension or run its tests; the test failures reported are inferred from reading the CMakeLists.txt and XML parameter definitions, not from an actual build log.",
+  "Could not resolve the ExternalData .md5 stubs (AADImageFilter/Data/Input/CTHeadAxial.nhdr.md5 etc.) to their actual content, so the provenance and license of the test data (presumably ITK/Slicer CT head data) are unverified.",
+  "The catalog entry pins scm_revision to the branch 'main'; the reviewed snapshot is the provided commit 043621ba83fde1f88b53fc11e5149f23f8752866, but I could not verify that this is the current tip of main or inspect any later commits.",
+  "Did not inspect the binary PNG assets (AnomalousFiltersExtension.png, docs/assets/*.png) beyond their sizes.",
+  "Did not verify whether the four duplicated copies of itkAnisotropicAnomalousDiffusionImageFilter.hxx / itkAutomaticConductanceImageCalculator.hxx compile against the current Slicer ITK version (e.g. ITK_DELETE_FUNCTION and DynamicMultiThreadingOff deprecations)."
+ ],
+ "questions_for_author": [
+  "AADDiffusionWeightedData.cxx passes `rescaler->GetOutput()` to `scalar2vector->SetInput(vol, ...)` for every volume without disconnecting the pipeline (unlike AADEPIData.cxx). Is the resulting all-volumes-identical output a known bug?",
+  "All four Testing/Cxx/CMakeLists.txt pass `--sigma 2.5`, but no module XML defines a sigma parameter. Was this copied from a template and never updated?",
+  "AADImageFilter.xml exposes `homoLevel` (--homogeneity) but AADImageFilter.cxx never calls SetH. Is the parameter intentionally inert?",
+  "AADEPIData requires 4D input (Dimension = 4) but its test and XML documentation use a 3D volume. Should the module reject 3D input with a clear message, or support it?"
+ ]
+}

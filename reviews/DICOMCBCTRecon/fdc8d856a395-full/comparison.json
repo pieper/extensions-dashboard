@@ -1,0 +1,281 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "CPU SART refinement modifies cached projection data",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DICOMCBCTRecon/DICOMCBCTReconLib/reconstruction.py",
+   "line": 32,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "CPU SART refinement modifies cached projection data",
+     "file": "DICOMCBCTRecon/DICOMCBCTReconLib/reconstruction.py",
+     "line_start": 565,
+     "line_end": 572,
+     "evidence": "    import torch\n    device = device or torchDevice()\n    measured = torch.as_tensor(p, dtype=torch.float32, device=device)\n    volume = (torch.as_tensor(initial, dtype=torch.float32, device=device).clone() if initial is not None\n              else torch.zeros(grid.shape, dtype=torch.float32, device=device))\n    if initial is not None and consistencySigmaMm:\n        offset = removeLowFrequencyInconsistency(measured, volume, geometry, grid, consistencySigmaMm,",
+     "explanation": "On CPU, as_tensor shares the float32 NumPy input buffer; removeLowFrequencyInconsistency changes measured in place at line 554. The dialog caches that input, so another reconstruction with unchanged preprocessing can use altered projections and yield different results; a stopped refinement can also leave a partially altered cache.",
+     "suggestion": "Clone measured before in-place consistency correction, and add a CPU regression test checking input preservation and repeatability.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "DICOMCBCTRecon/DICOMCBCTReconLib/reconstruction.py",
+      "line": 32
+     }
+    }
+   ]
+  },
+  {
+   "title": "Failed rerun can leave the previous result loadable",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DICOMCBCTRecon/DICOMCBCTReconLib/dialog.py",
+   "line": 593,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Failed rerun can leave the previous result loadable",
+     "file": "DICOMCBCTRecon/DICOMCBCTReconLib/dialog.py",
+     "line_start": 593,
+     "line_end": 599,
+     "evidence": "        upToDate = self._isUpToDate()\n        self.loadButton.setEnabled(upToDate and not self.busy)\n        if self.busy:\n            text = \"\"\n        elif self.lastRunFailed:\n            text = (\"<span style='color:#d04040'>&#9888; The last reconstruction did not finish (see the log) - \"\n                    \"press <b>Reconstruct</b> again before loading.</span>\")",
+     "explanation": "If a user reruns unchanged settings after a successful preview and the rerun fails or is stopped, the old image and applied parameters remain. The button is enabled because they still match, despite the warning saying to reconstruct again; the user can load the previous result rather than a completed rerun.",
+     "suggestion": "Include lastRunFailed in the load eligibility check or invalidate the stored result at the start of a rerun.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMCBCTRecon/DICOMCBCTReconLib/dialog.py",
+      "line": 593
+     }
+    }
+   ]
+  },
+  {
+   "title": "Quarter-turn frame correction leaves detector dimensions unchanged",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DICOMCBCTRecon/DICOMCBCTReconLib/xadata.py",
+   "line": 518,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Quarter-turn frame correction leaves detector dimensions unchanged",
+     "file": "DICOMCBCTRecon/DICOMCBCTReconLib/xadata.py",
+     "line_start": 518,
+     "line_end": 523,
+     "evidence": "    if flipped:\n        frames = frames[:, :, ::-1]\n    quarterTurns = int(round(rotationDeg / 90.0)) % 4\n    if quarterTurns:\n        # np.rot90 with k>0 rotates counter-clockwise, which undoes a clockwise rotation\n        frames = np.rot90(frames, k=quarterTurns, axes=(1, 2))",
+     "explanation": "For a nonsquare frame with a 90- or 270-degree field-of-view rotation, the returned array has swapped rows and columns while readGeometry and ProjectionGeometry retain the original dimensions and pixel spacing. Filtering combines arrays sized from the rotated pixels with weights and detector coordinates sized from the unchanged geometry, which can fail or misrepresent the detector.",
+     "suggestion": "Transform detector dimensions, spacing and collimator coordinates consistently with the pixels, and test nonsquare rotated acquisitions.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMCBCTRecon/DICOMCBCTReconLib/xadata.py",
+      "line": 518
+     }
+    }
+   ]
+  },
+  {
+   "title": "Subtraction candidates are matched on primary angle alone",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+   "line": 196,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Subtraction candidates are matched on primary angle alone",
+     "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+     "line_start": 196,
+     "line_end": 203,
+     "evidence": "                    candidate = xadata.sweepGeometry(otherGeometry, k)\n                    if (candidate[\"nFrames\"] != target[\"nFrames\"] or candidate[\"rows\"] != target[\"rows\"]\n                            or candidate[\"columns\"] != target[\"columns\"]):\n                        continue\n                    if np.abs(candidate[\"primaryDeg\"] - target[\"primaryDeg\"]).max() > 2.0:\n                        continue\n                    matches.append({\"file\": other, \"sweep\": k,\n                                    \"label\": self._sweepName(other, otherGeometry, k)})",
+     "explanation": "Runs with the same dimensions and primary angles but different secondary angles, source distances or detector spacing are offered as having the same trajectory. The subtraction path checks shape and primary angle again but then subtracts the projections directly, so such a selection can produce misregistered subtraction artifacts.",
+     "suggestion": "Compare the full per-frame geometry and detector configuration, or explicitly warn and require registration when these differ.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+      "line": 196
+     }
+    }
+   ]
+  },
+  {
+   "title": "Scripting API `reconstructFile` does not check for PyTorch before running",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+   "line": 83,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Scripting API `reconstructFile` does not check for PyTorch before running",
+     "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+     "line_start": 83,
+     "line_end": 92,
+     "evidence": "    def reconstructFile(self, path, matrix=256, binning=1, filterName=None, truncation=0.25,\n                        geometryOptions=None, sweep=0, log=logging.info):\n        from DICOMCBCTReconLib import geometry as geom\n        from DICOMCBCTReconLib import reconstruction as recon\n        from DICOMCBCTReconLib import xadata\n        import SimpleITK as sitk\n\n        geometry = xadata.sweepGeometry(xadata.readGeometry(xadata.readHeader(path), log=log), sweep)\n        start, stop = geometry[\"frameRange\"]\n        frames = recon.binFrames(xadata.readFrames(path, geometry, log=log)[start:stop], binning)",
+     "explanation": "`reconstructFile()` does not call `ensureDependencies()` before calling `recon.fdk(...)`, which imports `torch`. If a script or test invokes `DICOMCBCTReconLogic().reconstructFile(...)` when PyTorch is not yet installed, it will raise an unhandled `ModuleNotFoundError: No module named 'torch'` rather than prompting or giving a clear dependency error.",
+     "suggestion": "Consider checking `torch` availability or calling `ensureDependencies()` (or raising a descriptive `RuntimeError` in headless/scripted mode) at the start of `reconstructFile`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+      "line": 83
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D1",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "concern"
+   },
+   "outcome": "still disputed (minor, concern, ok)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": "minor",
+     "reason": "I read DICOMCBCTRecon.py (all) and dialog.py lines 520-870. The structure is sound. It is a DICOMPlugin with a hidden ScriptedLoadableModule. Heavy imports (torch, SimpleITK, the Lib package) happen inside functions. Torch is only installed through PyTorchUtils, after the user confirms. Reconstruction shows a progress bar and a Stop button (dialog.py 546-575) and reports errors in the log (734-739). Temp files in the self-test use TemporaryDirectory. Three weaknesses keep it from being fully ok. (1) Reconstruction runs on the GUI thread and relies on slicer.app.processEvents() (dialog.py 544, 550), so the UI can stay partly unresponsive during long CPU runs. (2) Several broad `except Exception: pass` blocks hide errors, for example dialog.py 648-649 and the debug-only logging in _runSummary. (3) It inserts the module directory into sys.path (DICOMCBCTRecon.py 43-44), but the directory is specific to this module and the package name is specific. I found no blocking bug. Testing is limited to one synthetic self-test. I only skimmed the numerical code in reconstruction.py, geometry.py and xadata.py, so I could not verify its correctness. Claude's 'unknown' is too pessimistic, because "
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "The subtraction workflow can offer geometrically mismatched runs as having the same trajectory: DICOMCBCTRecon/DICOMCBCTRecon.py:196-203 checks frame dimensions and primary angles but not secondary angles, source distances or detector spacing; in particular, it rejects only when `if np.abs(candidate[\"primaryDeg\"] - target[\"primaryDeg\"]).max() > 2.0:`. DICOMCBCTRecon/DICOMCBCTReconLib/dialog.py:694-702 repeats only the shape/primary-angle checks before `integrals = integrals - convert(other)`. Runs with matching primary angles but different other geometry can consequently produce misleading subtraction artifacts. The criterion is not unknown or wholly unsound: dialog.py:546-550 provides progress and processes events, and test_cbct_reconstruction.py:160-164 contains synthetic reconstruction assertions. I inspected these paths and the geometry and reconstruction code; I did not run Slicer or the tests or verify results on real acquisitions."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Checked DICOMCBCTRecon/DICOMCBCTRecon.py (lines 58-105, 110-287, 341-414), DICOMCBCTRecon/DICOMCBCTReconLib/dialog.py (lines 141-260, 546-663, 714-820), DICOMCBCTRecon/DICOMCBCTReconLib/reconstruction.py (lines 1-638), DICOMCBCTRecon/DICOMCBCTReconLib/xadata.py (lines 1-524), DICOMCBCTRecon/DICOMCBCTReconLib/display.py (lines 50-118), and DICOMCBCTRecon/Testing/Python/test_cbct_reconstruction.py (lines 1-315). The module follows Slicer conventions cleanly: it uses ScriptedLoadableModule/DICOMPlugin structure, defers heavy imports (torch, pydicom, SimpleITK) inside functions, installs PyTorch only via PyTorchUtils with explicit user confirmation (DICOMCBCTRecon.py lines 341-374), updates progress and supports user cancellation via ReconstructionAborted (dialog.py lines 546-574, reconstruction.py lines 27-43), falls back from CUDA OOM to CPU gracefully (dialog.py lines 791-796), cleans up temporary directories and timers in a finally block (dialog.py lines 657-659, display.py lines 115-118), reports errors to the user rather than swallowing them (DICOMCBCTRecon.py lines 256-258, dialog.py lines 734-739), and includes thorough unit tests and a self-test. Soundness is 'ok'."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "no concerns",
+  "gpt": "incomplete"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 1,
+  "single": 5,
+  "unverified": 0,
+  "total": 5,
+  "open_disputes": 1
+ }
+}

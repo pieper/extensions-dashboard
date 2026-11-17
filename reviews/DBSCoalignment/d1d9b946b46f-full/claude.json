@@ -1,0 +1,148 @@
+{
+ "purpose": "DBSCoalignment is a multi-module Slicer extension for deep brain stimulation (DBS) work. It segments the subthalamic nucleus (STN) from T1/T2 MRI with deep-learning models, predicts electrode and brain-shift alignment from microelectrode recordings (MER) with Lead-OR/Netstim, and maps an STN atlas with Elastix. It is aimed at DBS research users.",
+ "summary": "The extension has an MIT license and no evidence of malicious behaviour, telemetry or open ports. It has serious environment problems, though. STNSegmenter and DBSShiftPrediction run pip installs at module import time with no user confirmation. These include `torch` straight from PyPI, `antspyx`, ANTsTorch from a git HEAD, and an unverified wheel from box.com. A weights file is also downloaded and loaded with `torch.load` with no checksum. `EXTENSION_DEPENDS` does not match the empty `build_dependencies`. The STNSegmenter code appears to call a missing function, and the modules carry template placeholders, so the delivered functionality looks partly broken. There is no clinical-use disclaimer. Recommend needs fixes.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "No telemetry, servers or obfuscation seen. However, an unverified wheel is downloaded from box.com and installed, ANTsTorch is installed from git HEAD, and a weights file is downloaded and loaded with `torch.load` with no checksum."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "STNSegmenter.py and DBSShiftPrediction.py run `slicer.util.pip_install` at import time for torch, antspyx, ANTsTorch, intensity-normalization, pandas and others. Installing torch from PyPI instead of PyTorchUtils is not allowed. The modules also use the generic top-level package name `Lib`."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "`EXTENSION_DEPENDS` lists SlicerElastix and SlicerNetstim but the catalog `build_dependencies` is empty. PyTorchUtils is not declared. `shp_pred.pt` and other large binaries are committed or fetched ad hoc, and a ShiftCLI example module is left in."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE.txt is MIT, which covers the code. The licensing of the bundled MNI152 template, the model weights and the atlas data is not stated."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "STNSegmenter calls `slicer_preprocessing.elastix_registration`, which does not exist in segm_lib, and `STNSegmenter.check_storage_node`, which is not a class attribute. Its test calls `process` with the wrong signature. Placeholder contributors and help text are left in, and heavy work runs on the GUI thread."
+  },
+  "utility": {
+   "rating": "concern",
+   "rationale": "The README describes the workflow, and the tool targets a real clinical research need. But there are no clinical-use disclaimers, no sample data or validation information for the models, and the tests are template boilerplate. The README's install steps (TensorFlow, SlicerNetsim) do not match the code."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "PyTorch and other packages pip-installed at module import without consent",
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line_start": 55,
+   "line_end": 76,
+   "evidence": "try:\n    import torch\nexcept ImportError:\n    slicer.util.pip_install('torch')\n    import torch",
+   "explanation": "When Slicer loads the module (even if the user never opens it), a missing `torch` is installed from PyPI instead of through PyTorchUtils. A missing `antspyx` is installed in the same way. This can alter or break the shared Slicer Python environment, and the downloads are large. PyTorchUtils is not declared as a dependency.",
+   "suggestion": "Declare PyTorchUtils in `build_dependencies` and `EXTENSION_DEPENDS` and install torch through it. Move all pip installs into the module logic behind an explicit user confirmation. Do not run them at import time.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "DBSShiftPrediction installs torch, pandas, intensity-normalization and dbs-pure-lib at import",
+   "file": "DBS_STN/DBSShiftPrediction.py",
+   "line_start": 17,
+   "line_end": 47,
+   "evidence": "except ImportError:\n    slicer.util.pip_install('torch')\n    import torch",
+   "explanation": "The module has the same import-time install pattern. `intensity-normalization` and `dbs-pure-lib` may pull in torch, numpy or other pinned dependencies that conflict with Slicer-bundled packages.",
+   "suggestion": "Defer installs to a user-triggered, confirmed setup step. Use PyTorchUtils for torch. Check the transitive pins of dbs-pure-lib and intensity-normalization against Slicer's bundled packages.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Unverified wheel downloaded from box.com and installed; ANTsTorch installed from git HEAD",
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line_start": 35,
+   "line_end": 60,
+   "evidence": "download_url = \"https://app.box.com/shared/static/mu1gy26t80oopbtv3mndl5yveb6s4431.whl\"\n...\n    urllib.request.urlretrieve(download_url, str(whl_path))\n...\n    slicer.util.pip_install('git+https://github.com/ANTsX/ANTsTorch.git')",
+   "explanation": "A binary wheel is fetched over a shared Box link with no checksum or signature and is then pip-installed, which means arbitrary code runs if the link content changes. ANTsTorch is installed from an unpinned git HEAD, so the installed code can change at any time. Both happen at import time without consent.",
+   "suggestion": "Verify a pinned SHA256 before installing. Prefer official PyPI wheels, and pin a commit or release for ANTsTorch. Ask the user before installing.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Downloaded model weights loaded with torch.load without a checksum",
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line_start": 153,
+   "line_end": 164,
+   "evidence": "success = slicer.util.downloadFile(download_url, str(tmp_path))\n...\n        return torch.load(str(file_path), map_location=torch.device('cpu'))",
+   "explanation": "`shp_pred.pt` is downloaded from a GitHub release and loaded with `torch.load`, which unpickles by default depending on the torch version. A tampered file would give code execution. No integrity check is done, and the file is placed in the module directory.",
+   "suggestion": "Verify a SHA256 of the download. Use `weights_only=True`. Download to a user-writable cache rather than the install directory.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "EXTENSION_DEPENDS does not match catalog build_dependencies; PyTorchUtils missing",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_DEPENDS \"SlicerElastix;SlicerNetstim\")",
+   "explanation": "CMakeLists declares SlicerElastix and SlicerNetstim as dependencies, but the catalog entry has `build_dependencies: []`. The index will not build or ship the intended dependencies. The code also needs PyTorchUtils.",
+   "suggestion": "Make `build_dependencies` in the catalog entry identical to `EXTENSION_DEPENDS`, and add PyTorchUtils.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "STNSegmenter calls functions that do not exist",
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line_start": 873,
+   "line_end": 877,
+   "evidence": "slicer_preprocessing.elastix_registration(\n            ref_image=t1_path,\n            flo_image=t2_path,\n            elastix_parameters=self.resourcePath('elastix/rigid_mri.txt'),\n            out_folder=out_folder)",
+   "explanation": "`coregistration_t2_t1` calls `slicer_preprocessing.elastix_registration`, but segm_lib/slicer_preprocessing.py only defines `elastix_registration_cmd`. `process` references `STNSegmenter.check_storage_node` and `STNSegmenter.loadNiiImage` on the module class, where they are not attributes (they are module-level functions). Together this suggests the T2-to-T1 coregistration button and the one-shot pipeline fail with an AttributeError. I did not run it.",
+   "suggestion": "Use the Elastix extension's logic (`elastix_registration_cmd` plus `ElastixLogic`) and fix the references. Add working tests.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Generic top-level package name `Lib` and fallback import loop",
+   "file": "DBS_STN/DBSShiftPrediction.py",
+   "line_start": 57,
+   "line_end": 59,
+   "evidence": "import Lib\nimport Lib.mer_support\nfrom Lib import slicer_preprocessing",
+   "explanation": "DBS_STN installs a package called `Lib` into Slicer's module path, and STNSegmenter tries `segm_lib` and then `Lib`. The generic name can collide with other extensions' modules. The `Lib` fallback in STNSegmenter would import a different, incompatible module if DBS_STN is the one on the path.",
+   "suggestion": "Rename to a unique package name such as `DBSShiftPredictionLib`.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Template placeholders, example modules and no clinical disclaimer",
+   "file": "STNSegmenter/STNSegmenter.py",
+   "line_start": 240,
+   "line_end": 241,
+   "evidence": "self.parent.contributors = [\n              \"John Doe (AnyWare Corp.)\"]  # TODO: replace with \"Firstname Lastname (Organization)\"",
+   "explanation": "Several modules still carry the template contributors, help text and acknowledgements. ShiftCLI is a leftover example Gaussian blur. AtlasMapping is categorised under 'Examples'. The tests are template boilerplate and refer to nonexistent behaviour. There is no research-use-only disclaimer for a surgical-guidance tool. An AGENTS.md with local developer paths is committed.",
+   "suggestion": "Fill in the metadata, remove ShiftCLI and AGENTS.md, add a not-for-clinical-use disclaimer, and document the model provenance and validation.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Third-party data and model license not stated",
+   "file": "LICENSE.txt",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "MIT License",
+   "explanation": "The MIT license covers the code. The repository bundles the MNI152 template, the STN atlas NIfTI files and trained weights, and it says nothing about their licenses or provenance.",
+   "suggestion": "Document the sources and licenses of the MNI template, the atlas, and the model weights/training data.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Binary model files (.pt, .pkl, .nii.gz); the pickle files are loaded with pickle.load but their contents could not be inspected",
+  "Full contents of DBS_STN/DBSShiftPrediction.py (read only lines 1-70 and grep matches), STNSegmenter/segm_lib/visualisiation.py and mer_support.py, TextToMarkups.py and LabelConversion.py beyond grep",
+  "The GitHub release assets (shp_pred.pt), the box.com wheel and the contents of the PyPI package dbs-pure-lib",
+  "Behaviour of the extension at runtime in Slicer"
+ ],
+ "questions_for_author": []
+}

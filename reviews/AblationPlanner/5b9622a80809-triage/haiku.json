@@ -1,0 +1,137 @@
+{
+ "purpose": "AblationPlanner is a scripted 3D Slicer module for planning thermal ablation. It places virtual probe ablation zones from fiducial pairs, fuses them, and computes signed margins against a segmented tumor using ModelToModelDistance. It is intended for research use, as the README disclaimer states.",
+ "summary": "I found no malicious, network, or shared-environment behavior in the inspected files. There are no pip installs, no network calls except a checksummed SampleData registration (which only registers and does not download at startup), and no unsafe deserialization. The main issues are soundness: a wrong node-reference name in the GUI refresh, an off-by-one loop that drops the last array element, a missing sample thumbnail, and an empty test that is not registered. Admission requirements look met (dependency matches, license permits distribution, revision is \"main\"). Overall: minor issues. I did not run anything and did not read the 10 MB STL or the .ui file.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read AblationPlanner.py, CMakeLists files and .s4ext. No subprocess, pip, eval/exec, pickle, or network calls found; the only remote URL is a SampleData entry with a SHA256 checksum that is registered, not downloaded, at startup. Deletion is limited to nodes the module itself creates (AblationPlanner.py lines 456-461)."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "No package installs, no sys.path changes, no global logging/warnings changes, and no monkey-patching were found in the inspected code. The only global side effect is setting the 3D view background to white in setup (lines 100-111), which is cosmetic."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMake lists AblationPlanner.py, Resources/Icons/AblationPlanner.png and Resources/UI/AblationPlanner.ui, and these exist in the listing. EXTENSION_DEPENDS and build_dependencies both list ModelToModelDistance. The Icons folder lacks the AblationPlanner1.png thumbnail that registerSampleData references (line 63). The automated hint mentions a 10 MB STL in Testing, which I could not read."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "license.txt is the 3D Slicer BSD-style contribution and software license. It grants redistribution rights for Slicer-based software, and the README contains a research-use disclaimer. No third-party bundled code or model weights were found."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Several real defects: line 250 requests the reference \"NativeFiducialsƒ\" (stray character), so the native fiducial selector is not restored. Lines 353, 548, 591 and 611 use range(0, size-1), which skips the last element. Lines 429-431 append and then overwrite endPoints_positions. Lines 100-111 swallow exceptions. Work is done on the GUI thread with time.sleep (lines 729-782). Line 383 dereferences formerMarkupID before it is set."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README gives a clear workflow, screenshots, and a research disclaimer. The only test (test_AblationPlanner1, lines 842-863) is an empty placeholder, and the Python test CMake registration is commented out (Testing/Python/CMakeLists.txt line 2). There is no tutorial sample dataset wired up beyond the external SampleData URL."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Native fiducial selector restored from a misspelled node reference",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 250,
+   "line_end": 250,
+   "evidence": "self.ui.nativeFiducialsSelector.setCurrentNode(self._parameterNode.GetNodeReference(\"NativeFiducialsƒ\"))",
+   "explanation": "updateGUIFromParameterNode looks up \"NativeFiducialsƒ\" (with a stray non-ASCII character), but updateParameterNodeFromGUI stores the key \"NativeFiducials\". On scene reload or GUI refresh the native fiducial selector will show nothing, and onTumorButton (which reads \"NativeFiducials\") may then register against the wrong or no fiducials.",
+   "suggestion": "Use the plain key \"NativeFiducials\" to match setup and updateParameterNodeFromGUI.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Off-by-one loops skip the last mesh value in margin computations",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 548,
+   "line_end": 549,
+   "evidence": "for i in range(0,VTKFieldDataArray.GetSize()-1):\n          signedVals.append(VTKFieldDataArray.GetValue(i)) #value",
+   "explanation": "The loops iterate range(0, GetSize()-1), so the final point value is never read or recoloured. This silently drops one vertex from signedVals, the statistics, and the colouring, and can change the reported minimum margin in edge cases.",
+   "suggestion": "Use range(0, GetSize()) in all these loops (lines 353, 548, 591, 611, 633).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Endpoint positions are appended in a loop and then overwritten",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 427,
+   "line_end": 435,
+   "evidence": "self.endPoints_positions.append(xyz) #.GetNthFiducialPosition(0, [1,1,1])\n          self.endPoints_positions = xyz",
+   "explanation": "Inside the loop, self.endPoints_positions is appended with xyz each iteration, then immediately reassigned to xyz. The append is dead code and misleads readers. Also, self.probeNodeIDs is indexed with endPoints_positions[i*2], which will raise IndexError if the fiducial count is odd or no probes were created.",
+   "suggestion": "Remove the append and guard the index loop against odd counts and missing probe IDs; report the error to the user instead of printing.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Sample thumbnail file referenced but not shipped",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 63,
+   "line_end": 63,
+   "evidence": "thumbnailFileName=os.path.join(iconsPath, 'AblationPlanner1.png'),",
+   "explanation": "registerSampleData points thumbnailFileName at Resources/Icons/AblationPlanner1.png, but the Icons folder contains only AblationPlanner.png. The sample entry will show no thumbnail.",
+   "suggestion": "Add the thumbnail to Resources/Icons or fix the path.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Bare exception handlers hide view setup errors",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 100,
+   "line_end": 111,
+   "evidence": "except Exception as e:\n         this_exception = e\n        #print(\"Didn't find 3D View Open\")",
+   "explanation": "Errors when configuring the 3D views are caught and assigned to an unused variable, so failures are silently dropped. This is minor, but it hides real problems from users and developers.",
+   "suggestion": "Log the exception with logging.debug or narrow the try block.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Test is a placeholder and not registered",
+   "file": "AblationPlanner/Testing/Python/CMakeLists.txt",
+   "line_start": 2,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The only ScriptedLoadableModuleTest does no assertions (it only calls delayDisplay), and the Testing/Python CMake registration is commented out. Regressions in the margin and probe logic (for example, the off-by-one and fiducial-key issues above) would not be caught by CI.",
+   "suggestion": "Add a test using the included Testing/tumor.seg.nrrd and Endpoints.mrk.json that asserts margin outputs, and enable it in CMake.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Long GUI-thread work with sleeps and unguarded observer teardown",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 382,
+   "line_end": 385,
+   "evidence": "thisScene = probeNode.GetScene()\n      markupReference = thisScene.GetNodeByID(self.formerMarkupID)\n      markupReference.RemoveObserver(self.observerID)",
+   "explanation": "Probe placement and duplication call time.sleep and processEvents on the GUI thread, and the README notes runs of 2-5 minutes. onTranslateButton dereferences self.formerMarkupID and self.observerID, which are only set after onProbeButton, so pressing Translate first raises AttributeError.",
+   "suggestion": "Guard these attributes with hasattr checks, show progress, and move long work off the GUI thread where possible.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Large binary test asset noted by the automated scan",
+   "file": "AblationPlanner/Testing/solid_LT6015.stl",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "",
+   "explanation": "The scan reports AblationPlanner/Testing/solid_LT6015.stl (10 MB) in the source repo, though it is not in the listed file tree I received. Large binaries should be fetched on demand, not committed. I could not read it to confirm.",
+   "suggestion": "Confirm whether the STL is tracked; if so, move it to a release or SampleData download.",
+   "confidence": "low"
+  }
+ ],
+ "not_checked": [
+  "The 10 MB STL in Testing (reported by the scan but not in the file listing) and the .ui file were not read.",
+  "The exact source revision was not resolved; I reviewed the repository snapshot provided, and 'main' is a moving branch reference.",
+  "No code was run; Slicer runtime behavior, the ModelToModelDistance dependency, and the SampleData download were not verified.",
+  "The external SampleData URL (SlicerTestingData) was not fetched; only the SHA256 string in the source was checked.",
+  "CI or build results were not available."
+ ],
+ "questions_for_author": []
+}

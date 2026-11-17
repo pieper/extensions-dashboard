@@ -1,0 +1,129 @@
+{
+ "purpose": "Auto3dgm is a 3D Slicer scripted module that wraps the Auto3dgm automated 3D geometric morphometrics pipeline (subsampling, pairwise and globalized alignment, landmark and mesh export) and includes a small web mesh viewer as a CLI module. It is for morphometrics researchers who want to align and compare batches of biological surface meshes inside Slicer.",
+ "summary": "No malicious or concealed behavior found in the files read. The main concerns are the meshviewer HTTP server: it binds to all interfaces and its translate_path override does not normalize the request path, allowing traversal outside the mesh folder. Other issues: an uncommitted license at the extension level, a committed Windows-only binary and a 16 MB fixture inside the installed package, a placeholder test with no real coverage, and a requirements.txt that lists pip vtk. Core auto3dgm_nazar code is MIT-licensed. The catalog entry is well formed, and the scm_revision is a branch name rather than a pinned commit.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Read Auto3dgm/Auto3dgm.py, meshviewer/web_view_mesh/viewer.py, meshviewer/meshviewer.py and correspondence.py. No exfiltration or obfuscation found. The meshviewer server exposes files over all interfaces with an un-normalized path, and the mosek install is user-confirmed. The commented-out serveWebViewer path is not used by the GUI, but the meshviewer CLI executable is installed and runnable."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Auto3dgm.py widget __init__ calls slicer.util.pip_install('mosek') only after a confirmation dialog, which is acceptable opt-in. correspondence.py line 19 sets a global os.environ default at import. requirements.txt lists vtk, which would bring its own VTK if a user pip-installs it into Slicer's Python. Nothing in the CMake build installs it automatically."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt installs the whole auto3dgm_nazar tree (including tests with a 16 MB test.ply fixture and a Windows-only lap_windows/_lapjv.cp36-win_amd64.pyd). Build dependencies (empty) and EXTENSION_DEPENDS 'NA' are consistent. The scm_revision is the branch 'master', not a pinned commit; I did not resolve it."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "auto3dgm_nazar/LICENSE is MIT, which permits distribution. There is no top-level license for the Slicer glue code (Auto3dgm.py, meshviewer/), and the meshviewer.xml license element is empty. Bundled JS libraries carry their own license files; I did not audit all of them."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Auto3dgm.py has several issues: the widget constructor continues if the user cancels the mosek prompt; exportRotations mutates the stored alignment arrays in place (rot[2][0] = ...); and the analysis logic has known placeholder code (ss_label_i undefined in app.py, Matlab-syntax comments, a broken off_parser that opens a hard-coded 'hammas.off'). Long jobs run synchronously on the GUI thread."
+  },
+  "utility": {
+   "rating": "concern",
+   "rationale": "Auto3dgmTest.test_Auto3dgm1 is just 'pass', and Testing/Python/CMakeLists.txt has the unittest commented out. The README is one line, and there is no user documentation or sample data beyond the test fixtures. The lap_windows tests import a module 'lap' that is not present. Overlap with existing Slicer tools is not a concern here."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Mesh viewer HTTP server binds to all interfaces and allows path traversal outside the mesh folder",
+   "file": "meshviewer/web_view_mesh/viewer.py",
+   "line_start": 20,
+   "line_end": 29,
+   "evidence": "def translate_path(self, path):\n  if self.ext_prefix and self.path.startswith(self.ext_prefix):\n    return self.ext_dir_path + path[len(self.ext_prefix):]\n  else:\n    base_path = os.path.dirname(os.path.abspath(__file__))\n    return base_path + path",
+   "explanation": "serve_viewer starts an HTTP server on ('', 8000), so it listens on every network interface, not just localhost. WebViewMeshRequestHandler.translate_path concatenates the raw request path without normalizing it or rejecting '..'. A raw HTTP request such as GET /mesh/../../../../etc/passwd (or a path outside the web root when the path does not start with /mesh) resolves to a file outside the mesh directory and is served. Any host on the local network can therefore read files the user can read while the viewer runs. The server is reachable through the installed meshviewer CLI executable; the GUI's serveWebViewer call is currently commented out.",
+   "suggestion": "Bind to 127.0.0.1, normalize with os.path.normpath/realpath and verify the result stays under the intended root (return 404 otherwise), or use SimpleHTTPRequestHandler's own translate_path logic. Document the server's exposure.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "No top-level license for the extension's Slicer glue code and meshviewer",
+   "file": "meshviewer/meshviewer.xml",
+   "line_start": 8,
+   "line_end": 8,
+   "evidence": "<license/>",
+   "explanation": "The MIT license only covers the auto3dgm_nazar subpackage. The Auto3dgm module (Auto3dgm.py) and meshviewer have no license file or header, and the meshviewer.xml license element is empty. Distribution permission for the extension as a whole is therefore not explicit, although the core code is MIT.",
+   "suggestion": "Add a top-level LICENSE covering the Slicer module and meshviewer code, and fill in the meshviewer.xml license and contributor fields.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Test fixtures, a Windows-only binary and a 16 MB file are installed with the extension",
+   "file": "Auto3dgm/CMakeLists.txt",
+   "line_start": 21,
+   "line_end": 25,
+   "evidence": "install(DIRECTORY \"auto3dgm_nazar\"\n  DESTINATION \"${Slicer_INSTALL_QTSCRIPTEDMODULES_BIN_DIR}\"",
+   "explanation": "CMake installs the whole auto3dgm_nazar directory, which contains tests/fixtures/test.ply (16 MB), a Windows-only compiled module lap_windows/_lapjv.cp36-win_amd64.pyd (not built by the CMake build and not loadable on Linux/macOS), and lap_windows/tests that import a 'lap' module that is not packaged. This bloats the package and ships an unused, platform-specific binary. The lap_windows package is not imported by the module code I read.",
+   "suggestion": "Install only the Python sources needed at runtime (or exclude tests/ and lap_windows/ with PATTERN filters) and move large fixtures out of the installed tree.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "requirements.txt lists 'vtk' and 'numpy', which could replace Slicer's bundled packages if installed",
+   "file": "Auto3dgm/auto3dgm_nazar/requirements.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "numpy\nvtk",
+   "explanation": "The pip package vtk bundles its own VTK, which conflicts with Slicer's VTK if a user installs the requirements into Slicer's Python environment. The file is not installed automatically by the code I read, so the risk depends on users following it manually.",
+   "suggestion": "Remove vtk and numpy from requirements.txt (Slicer provides both) or document that it should not be installed into Slicer's Python.",
+   "confidence": "low"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Mosek prompt continues module load when the user cancels, failing later",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 71,
+   "line_end": 77,
+   "evidence": "    try:\n        import mosek\n      except ModuleNotFoundError as e:\n        if slicer.util.confirmOkCancelDisplay(\"Auto3dgm requires 'mosek' python package. Click OK to download it now.",
+   "explanation": "If the user cancels the confirmation dialog, the widget constructor does nothing, and the module loads. Later, Correspondence imports mosek at the analysis step, which raises an unhandled ModuleNotFoundError in the GUI. The error is not reported to the user as a clear message.",
+   "suggestion": "Show an explicit error or disable the Run buttons when mosek is unavailable, and check the import before running an analysis step.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Global environment variable set at import and mutation of stored alignment arrays",
+   "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+   "line_start": 19,
+   "line_end": 19,
+   "evidence": "os.environ.setdefault('MOSEKLM_LICENSE_FILE', os.path.join(file_path, '../lib/mosek.lic'))",
+   "explanation": "correspondence.py sets MOSEKLM_LICENSE_FILE in os.environ at import time for the whole Slicer process, which is a global side effect. exportRotations modifies the stored globalized rotation arrays in place (rot[2][0] = -1 * rot[2][0]), so calling the export twice changes results.",
+   "suggestion": "Pass the license path to the Mosek model only, avoid global env changes, and copy the rotation array before flipping its signs.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No meaningful tests and minimal documentation",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 928,
+   "line_end": 929,
+   "evidence": "    def test_Auto3dgm1(self):\n      pass",
+   "explanation": "Auto3dgmTest.test_Auto3dgm1 is an empty pass, and the Testing/Python CMake registration is commented out. The module README is one line and the module help text still describes the template thresholding example. A user cannot verify the pipeline or learn the workflow from the extension.",
+   "suggestion": "Add a real test with the sample fixtures and a documented tutorial; update parent.helpText to describe Auto3dgm rather than the template.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Did not resolve scm_url or verify the master branch revision; reviewed only the files in the catalog listing.",
+  "Did not inspect analysis/mini-auto3dgm_barakshan.py, most of correspondence.py (lines 61-440), the remaining tests, the meshviewer JS libraries beyond the license headers, the pre-compiled .pyd, or the PNG and ply binaries.",
+  "Did not run the module, the CMake build, or the meshviewer server; the traversal finding is from reading code only.",
+  "Did not verify the mosek pip package or its license terms; the MOSEK academic license is a user-obtained requirement."
+ ],
+ "questions_for_author": [
+  "Is the meshviewer CLI intended to be runnable by users? If so, should it bind to localhost and reject path traversal?",
+  "Which license applies to the Auto3dgm Slicer module and meshviewer code? Please add a top-level LICENSE.",
+  "Can the scm_revision be pinned to a specific commit instead of 'master'?",
+  "Why is a Windows-only compiled lap_windows module and a 16 MB fixture included in the installed extension?"
+ ]
+}

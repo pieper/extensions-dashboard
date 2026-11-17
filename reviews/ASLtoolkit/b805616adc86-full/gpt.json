@@ -1,0 +1,100 @@
+{
+ "purpose": "ASLtoolkit provides Slicer CLI modules for reconstructing cerebral blood flow, arterial transit time, and multi-echo ASL maps. It is intended for researchers processing arterial spin labeling MRI data.",
+ "summary": "The supplied source snapshot installs a Python package into Slicer's shared environment at script import without confirmation. The external package and its dependencies could not be inspected, and the catalog's moving branch could not be resolved independently. Several reconstruction options also do not behave as documented; those correctness findings are non-blocking. 🔴 Do not merge yet: fix the unconfirmed import-time installation; review incomplete pending inspection of the downloaded package and verification of the catalog revision.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "unknown",
+   "rationale": "Inspected both CLI scripts, build files, XML interfaces and repository-wide searches; the extension downloads and imports asltk 1.1.3, whose code and transitive dependencies were unavailable for inspection. No direct patient-data transmission was found in the inspected scripts, but the external package handles the images and prevents a complete safety assessment."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "Both CLI scripts call slicer.util.pip_install at top-level on an import failure, without user confirmation, modifying Slicer's shared Python environment. The asltk dependency metadata was unavailable, so its effects on bundled packages cannot be verified."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "The root CMake file includes both module directories, each using SlicerMacroBuildScriptedCLI, and the catalog's empty dependency list matches EXTENSION_DEPENDS NA. The main branch, exact source revision, Slicer build macro and actual build/load were not independently verified."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "The extension source has an MIT license granting distribution rights, but the license and redistribution terms for the downloaded asltk package and its dependencies were not available for inspection."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected both CLI scripts and XML definitions. Multi-echo T2 parameters are never passed to reconstruction, the output folder option is not applied, and CBF smoothing validation has a case mismatch."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The documentation describes both modules, links sample data, and gives a short tutorial and a publication reference. No tests were visible in the file listing; sample-data access and scientific validation were not checked."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Unconfirmed package installation runs at CLI script import",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 28,
+   "line_end": 35,
+   "evidence": "try:\n    from asltk.asldata import ASLData\n    from asltk.reconstruction import CBFMapping\n    from asltk.utils.io import ImageIO\nexcept ModuleNotFoundError:\n    import slicer.util\n    slicer.util.pip_install(\"asltk==1.1.3\")\n    from asltk.asldata import ASLData",
+   "explanation": "When the script is imported or executed and an asltk import fails, it immediately downloads and installs asltk and its dependencies into the shared Slicer Python environment, without asking the user. This can change packages used by other extensions; a missing transitive import also triggers the same installation. Multi_Echo_ASL/Multi_Echo_ASL.py:28-37 contains the same pattern. The precise discovery/startup behavior and transitive packages could not be verified.",
+   "suggestion": "Move dependency installation out of module import into an explicit, informed user-confirmed setup step; inspect its dependencies and avoid modifying Slicer-bundled packages incompatibly.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Multi-echo T2 values are accepted and printed but not used",
+   "file": "Multi_Echo_ASL/Multi_Echo_ASL.py",
+   "line_start": 125,
+   "line_end": 134,
+   "evidence": "    print('<filter-progress>0.5</filter-progress>')\n    print('<filter-comment>Computing T blood-GM map...</filter-comment>')\n    recon = MultiTE_ASLMapping(data)\n    recon.set_brain_mask(mask_img)\n    \n    # This is the long-running operation\n    maps = recon.create_map(\n       cores=numThreads,\n       smoothing=smoothMethod,\n       smoothing_params=smoothParameter)",
+   "explanation": "The XML exposes T2 Blood and T2 Gray Matter controls, and the script parses and logs them, but neither value is passed to ASLData, MultiTE_ASLMapping or create_map. Changing these controls therefore cannot affect the computed map, potentially misleading researchers about the parameters used. This is a non-blocking correctness issue under the index policy.",
+   "suggestion": "Pass both values through the appropriate asltk API, or remove the controls if they are unsupported; add a test showing that non-default values reach reconstruction.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Documented outputFolder option does not control output location",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 127,
+   "line_end": 133,
+   "evidence": "  print('<filter-progress>0.9</filter-progress>')\n  print('<filter-comment>Saving output files...</filter-comment>')\n  if args.norm_cbf:\n    maps['cbf_norm'].save_image(args.out_cbf)\n  else:\n    maps['cbf'].save_image(args.out_cbf)\n  maps['att'].save_image(args.out_att)",
+   "explanation": "The XML's command-line example specifies --outputFolder and relative output names, but the script only checks that folder exists and saves directly to the output arguments. Relative names thus resolve against the process working directory, not the selected output folder. The multi-echo script has the same issue.",
+   "suggestion": "Join relative output paths to the chosen output folder, or remove the option and correct the documentation.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "CBF smoothing parameter validation never matches accepted method names",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 180,
+   "line_end": 187,
+   "evidence": "  # Checks the smoothing Method and Parameters\n  valid_smooth_methods = ['None', 'Gaussian', 'Median']\n  if args.smoothMethod not in valid_smooth_methods:\n    print(\n        f'Smoothing method \"{args.smoothMethod}\" is not valid. Please select one of the following methods: {valid_smooth_methods}.'\n    )\n    is_ok = False\n  if args.smoothMethod == 'gaussian' and args.smoothParameter <= 0:",
+   "explanation": "The accepted and GUI-provided names are capitalized, while the Gaussian and Median validation branches test lowercase strings. Consequently invalid sigma or kernel sizes pass this validation and reach reconstruction, potentially failing or producing unintended smoothing.",
+   "suggestion": "Normalize the method once before both validation and dispatch, and test invalid Gaussian and Median parameters.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Mixed vector formats silently truncate timing values",
+   "file": "CBF_ATT_ASL/CBF_ATT_ASL.py",
+   "line_start": 70,
+   "line_end": 75,
+   "evidence": "  try:\n      pld = [float(s) for s in args.pld]\n      ld = [float(s) for s in args.ld]\n  except:\n      pld = [float(s) for s in str(args.pld[0]).split()]\n      ld = [float(s) for s in str(args.ld[0]).split()]",
+   "explanation": "If one timing vector is space-separated and another is comma-separated, conversion of the first triggers the fallback, which reads only element zero of both vectors. For example, a comma-separated LD list loses all but its first value. The multi-echo module uses the same fallback for three vectors.",
+   "suggestion": "Parse each vector independently, supporting the documented separators without discarding elements, and validate its length against the acquisition.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Independent resolution of catalog scm_revision main and confirmation that it points to the supplied b805616adc86eb902505f27dd58764d83647228c snapshot; the commit is provided by the requester, not independently verified.",
+  "Source, distribution license, package metadata and transitive dependencies of downloaded asltk 1.1.3, including any image transmission or environment changes.",
+  "Actual Slicer build, module discovery and execution, CLI argument serialization, numerical results, and platform compatibility; only listing, reading and searching were available.",
+  "Sample-data link, dataset terms and contents, maintenance history, prior catalog revision, submission checklist and CI results."
+ ],
+ "questions_for_author": []
+}

@@ -1,0 +1,50 @@
+{
+ "purpose": "DICOMCBCTRecon is a 3D Slicer DICOM plugin for clinicians and researchers that recognizes rotational C-arm X-ray angiography runs (multi-frame XA/XRF spin acquisitions) in the DICOM browser. Upon loading, it provides an interactive preview dialog and reconstructs 3D cone-beam CT volumes (including 3D DSA subtraction spins and GE 3D calibrated trajectories) using PyTorch-accelerated FDK and ordered-subsets SART algorithms.",
+ "summary": "DICOMCBCTRecon is a well-written, self-contained 3D Slicer DICOM plugin for cone-beam CT reconstruction (FDK and OS-SART) of rotational C-arm X-ray angiography runs. All files at commit `fdc8d856a39562bd282e1d204896297b070ec05f` were inspected. It has no security or safety concerns, performs all processing locally, uses `PyTorchUtils` with user confirmation for PyTorch installation, has a valid MIT license, and has clean CMake packaging matching the catalog entry. 🟢 Recommend merge.",
+ "overall": "no concerns",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all Python files, CMake files, and documentation in commit fdc8d856a39562bd282e1d204896297b070ec05f. There are no network requests, telemetry, shell command executions, unsafe deserialization calls, or prompt-injection strings; temporary preview files use `tempfile.mkdtemp` and are cleaned up properly."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected `DICOMCBCTRecon.py` and all files in `DICOMCBCTReconLib/`. Heavy imports (`torch`, `pydicom`, `SimpleITK`, `numpy`) are deferred to function execution rather than module import, and PyTorch is installed exclusively via `PyTorchUtils` after explicit user confirmation (`confirmOkCancelDisplay`)."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected the catalog entry, root `CMakeLists.txt`, and `DICOMCBCTRecon/CMakeLists.txt`. `EXTENSION_DEPENDS PyTorch` matches `build_dependencies: [\"PyTorch\"]`, and all Python scripts in `DICOMCBCTRecon` and `DICOMCBCTReconLib` as well as the icon resource exist and are listed in `MODULE_PYTHON_SCRIPTS` / `MODULE_PYTHON_RESOURCES`."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE` and all source files. The repository is licensed under the permissive MIT License (Copyright 2026 Burak Demir) and contains no bundled third-party code, proprietary binaries, or restricted weights."
+  },
+  "soundness": {
+   "rating": "ok",
+   "rationale": "Inspected `DICOMCBCTRecon.py`, `DICOMCBCTReconLib/*.py`, and `Testing/Python/test_cbct_reconstruction.py`. The DICOM plugin, geometry math, GE 3D calibration decomposition, FDK with Parker/displaced-detector weights, and SART refinement are well-structured, handle GPU out-of-memory fallback to CPU, support user cancellation, and are backed by unit tests and a Slicer self-test."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md`, `DICOMCBCTRecon.py`, and the test suite. The extension fills a clear need for reconstructing rotational C-arm XA/XRF runs directly from the Slicer DICOM browser, with thorough documentation of geometry conventions, limitations on uncalibrated/display-processed exports, and synthetic phantom tests."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Scripting API `reconstructFile` does not check for PyTorch before running",
+   "file": "DICOMCBCTRecon/DICOMCBCTRecon.py",
+   "line_start": 83,
+   "line_end": 92,
+   "evidence": "    def reconstructFile(self, path, matrix=256, binning=1, filterName=None, truncation=0.25,\n                        geometryOptions=None, sweep=0, log=logging.info):\n        from DICOMCBCTReconLib import geometry as geom\n        from DICOMCBCTReconLib import reconstruction as recon\n        from DICOMCBCTReconLib import xadata\n        import SimpleITK as sitk\n\n        geometry = xadata.sweepGeometry(xadata.readGeometry(xadata.readHeader(path), log=log), sweep)\n        start, stop = geometry[\"frameRange\"]\n        frames = recon.binFrames(xadata.readFrames(path, geometry, log=log)[start:stop], binning)",
+   "explanation": "`reconstructFile()` does not call `ensureDependencies()` before calling `recon.fdk(...)`, which imports `torch`. If a script or test invokes `DICOMCBCTReconLogic().reconstructFile(...)` when PyTorch is not yet installed, it will raise an unhandled `ModuleNotFoundError: No module named 'torch'` rather than prompting or giving a clear dependency error.",
+   "suggestion": "Consider checking `torch` availability or calling `ensureDependencies()` (or raising a descriptive `RuntimeError` in headless/scripted mode) at the start of `reconstructFile`.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Runtime execution inside 3D Slicer with real clinical C-arm XA datasets (only static inspection of all repository source files was performed).",
+  "Binary contents of `screenshot.jpg` and `DICOMCBCTRecon/Resources/Icons/DICOMCBCTRecon.png`."
+ ],
+ "questions_for_author": []
+}

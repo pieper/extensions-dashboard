@@ -1,0 +1,250 @@
+{
+ "purpose": "AblationPlanner is a 3D Slicer scripted module for planning CT-guided tumor ablation: the user places fiducial pairs to position virtual vendor ablation profiles (ellipsoid segmentations), combines them, and computes signed tumor-to-ablation-zone margins via the ModelToModelDistance CLI, displayed as a colored surface model plus a distance table. It also supports intra-procedural re-alignment of a pre-procedure tumor segmentation to a new scan by fiducial registration.",
+ "summary": "No malicious behavior found: no network transmission of user data, no pip installs, no eval/exec/pickle, no obfuscated code, no reviewer-directed text. The Slicer BSD-style license permits distribution and the README carries a research-only disclaimer. The catalog entry is mechanically usable (ModelToModelDistance matches EXTENSION_DEPENDS, CMake installs the .py/.ui/icon). The main problems are ordinary correctness bugs in the module: a button that deletes every markup line node in the scene (including user-created ones), a broken parameter-node observer, in-place overwriting of the computed signed-distance array, and several unguarded None/zero-division paths. Non-blocking, but should be fixed.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Searched the whole tree for network, subprocess, eval/exec/pickle, pip and download calls: only the stock SampleData registration with a SHA256 checksum exists; no user data leaves the machine. However onLineButton (AblationPlanner.py:298-302) removes every vtkMRMLMarkupsLineNode in the scene, including lines the user created for other purposes, while iterating the live node collection."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "AblationPlanner.py imports only Slicer-bundled modules (numpy, vtk, qt, ctk, slicer, vtkSegmentationCorePython) at module level; no pip_install, no sys.path or environment changes, no global logging/warning suppression, no monkey-patching. The only startup hook is the stock slicer.app.connect(\"startupCompleted()\", registerSampleData) at line 37."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "AblationPlanner/CMakeLists.txt installs AblationPlanner.py plus Resources/Icons/AblationPlanner.png and Resources/UI/AblationPlanner.ui, all of which exist; Testing/CMakeLists.txt and Testing/Python/CMakeLists.txt exist and are referenced. CMakeLists.txt:13 EXTENSION_DEPENDS \"ModelToModelDistance\" matches the catalog build_dependencies, and the module declares the same dependency at AblationPlanner.py:24."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "license.txt is the standard 3D Slicer BSD-style contribution/software license granting a royalty-free right to use, reproduce and distribute, and README.md:61 states the software is research-only and not an FDA-approved device. No bundled third-party code, weights or datasets with conflicting terms were found."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read the whole of AblationPlanner.py: the module loads and follows the ScriptedLoadableModule skeleton, but setParameterNode never observes the new parameter node (lines 220-223), the 'Signed' distance array is overwritten in place by the color button (lines 611-621), and several handlers dereference nodes or attributes that may not exist (lines 383-384, 413, 439-444). Long CLI work runs synchronously on the GUI thread (line 815)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md documents the full planning and intra-procedural workflow with screenshots and a research-only disclaimer, and the module has a clear UI. However the automated test (AblationPlanner.py:842-863) asserts nothing, the committed Testing data is unused, and the registered sample data set points at a generic SlicerTestingData blob with a thumbnail that is not in Resources/Icons."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "onLineButton deletes every markup line node in the scene, including user-created ones",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 298,
+   "line_end": 302,
+   "evidence": "    lineNodes = slicer.mrmlScene.GetNodesByClass(\"vtkMRMLMarkupsLineNode\")\n\n    if lineNodes is not None:\n      for lineNode in lineNodes:\n        slicer.mrmlScene.RemoveNode(lineNode)",
+   "explanation": "The handler removes all vtkMRMLMarkupsLineNode objects in the scene, not just the lines this module created. A user who has measurement or trajectory lines in the same scene loses them without confirmation, and Slicer has no undo for node removal. The removal also happens while iterating the live collection returned by GetNodesByClass, which mutates the scene during iteration. This runs on every 'Place Markup Line' click and again from onMarkupEndInteraction (line 462) after each fiducial drag, so the loss can repeat silently.",
+   "suggestion": "Track the IDs of the line nodes the module creates (as is already done for probe nodes) and remove only those; iterate over a copied list of IDs.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "setParameterNode never observes the new parameter node",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 217,
+   "line_end": 226,
+   "evidence": "    if self._parameterNode is not None:\n      self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)\n    if self._parameterNode is not None:\n      self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)",
+   "explanation": "Both guards test the old self._parameterNode instead of inputParameterNode, so the observer is removed from and re-added to the previous node and the incoming parameter node is never observed. After a scene close/reopen or a parameter-node switch, GUI updates from the parameter node stop working, and the module's saved selections are not reflected in the selectors.",
+   "suggestion": "Change the second guard to `if inputParameterNode is not None:` and add the observer to inputParameterNode.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Margin color button overwrites the computed signed-distance array in place",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 611,
+   "line_end": 621,
+   "evidence": "    for i in range(0,VTKFieldDataArray.GetSize()-1):\n        colorval = VTKFieldDataArray.GetValue(i)\n\n        thresholded = False\n        for j in range(0,len(args)):\n            if (colorval < args[j]):\n                thresholded = True\n                VTKFieldDataArray.SetValue(i,j)",
+   "explanation": "changeColorsByMargin_ replaces the 'Signed' distance values on the output model with region indices 0..num_regions, so the distance data that the margin evaluation produced is destroyed on the model. 'Revert Color' (regenerateOriginalModelColors, lines 628-636) only restores len(originalColorArray)-1 values and depends on widget state (self.originalColorArray) that is lost when the scene is reloaded or the module is reopened, leaving a model whose 'Signed' scalars are region indices rather than distances. For a tool whose purpose is reading margins, a model that silently shows wrong distance values is misleading.",
+   "suggestion": "Write the region index into a separate array (e.g. 'MarginRegion') and switch the active scalar, leaving 'Signed' untouched; or store the original array as a node attribute so it survives scene reload.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Native fiducials selection is never restored: role name typo",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 249,
+   "line_end": 251,
+   "evidence": "    wasBlocked = self.ui.nativeFiducialsSelector.blockSignals(True)\n    self.ui.nativeFiducialsSelector.setCurrentNode(self._parameterNode.GetNodeReference(\"NativeFiducialsƒ\"))",
+   "explanation": "The role name contains a stray non-ASCII character, so GetNodeReference always returns None and the 'Native Fiducials' selector is cleared whenever the GUI is refreshed from the parameter node, even though updateParameterNodeFromGUI stores it under \"NativeFiducials\" (line 273). The user's selection is silently lost, which then feeds a None landmark node into the registration in onTumorButton.",
+   "suggestion": "Use the exact string \"NativeFiducials\".",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Handlers use attributes that only exist after 'Place Probes' was pressed",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 379,
+   "line_end": 388,
+   "evidence": "    thisScene = probeNode.GetScene()\n    markupReference = thisScene.GetNodeByID(self.formerMarkupID)\n    markupReference.RemoveObserver(self.observerID)",
+   "explanation": "self.formerMarkupID and self.observerID are only assigned at the end of onProbeButton (lines 446-447). Pressing 'Finalize / Combine Probes' first, or after a scene reload, raises AttributeError; if the markup node was deleted, GetNodeByID returns None and RemoveObserver fails. The same pattern appears in onProbeButton at lines 439-444. Neither handler has error handling, so the user sees a Python traceback instead of guidance.",
+   "suggestion": "Initialise formerMarkupID/observerID to None in setup() and guard the observer removal; report a clear message when probes have not been placed yet.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "onProbeButton dereferences the endpoints markup node without a None check",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 404,
+   "line_end": 413,
+   "evidence": "         endPointsMarkupsNode = self._parameterNode.GetNodeReference(\"EndPoints\")\n         probeNode = self._parameterNode.GetNodeReference(\"InputSurface\")\n         if probeNode is None:\n          print(\"Please enter a valid probe segmentation!\")\n          return",
+   "explanation": "Only probeNode is validated; endPointsMarkupsNode is used at line 413 (GetNumberOfFiducials) and line 428. If the user presses 'Place Probes' without selecting an endpoints markup node, the module raises AttributeError in the GUI thread rather than telling the user what is missing.",
+   "suggestion": "Add the same None check for endPointsMarkupsNode and return with a user-visible message.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Division by zero for coincident or parallel fiducial vectors",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 746,
+   "line_end": 751,
+   "evidence": "    a, b = (vec1 / np.linalg.norm(vec1)).reshape(3), (vec2 / np.linalg.norm(vec2)).reshape(3)\n    v = np.cross(a, b)\n    c = np.dot(a, b)\n    s = np.linalg.norm(v)\n    kmat = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])\n    rotationMatrix = np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2))",
+   "explanation": "When the two probe direction vectors are parallel or antiparallel (a plausible user placement, e.g. two probes along the same needle track), s is 0 and the expression divides by zero, producing NaNs that are then written into the transform matrix. Similarly updateProbePosition (lines 498-504) divides by fiducialDistance1/2, which is zero if the tip and entry fiducials coincide. The resulting transform is silently invalid rather than reported.",
+   "suggestion": "Handle the parallel/antiparallel and zero-length cases explicitly and report an error to the user instead of building a NaN transform.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Off-by-one loop over segments in convertSegmentsToSegment",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 689,
+   "line_end": 694,
+   "evidence": "    for i in range(1, segmentationNode.GetSegmentation().GetNumberOfSegments()+1):  #TWO ADDITIONAL PROBES\n        segmentEditorWidget.setActiveEffectByName(\"Logical operators\")\n        effect = segmentEditorWidget.activeEffect()\n        effect.self().scriptedEffect.setParameter(\"Operation\",\"UNION\")\n        effect.self().scriptedEffect.setParameter(\"ModifierSegmentID\",segmentationNode.GetSegmentation().GetNthSegmentID(i))",
+   "explanation": "GetNthSegmentID is 0-based, so the last iteration passes an out-of-range index and returns None, which is then set as ModifierSegmentID. Depending on the effect implementation this either unions nothing or errors, and the segment count also changes as segments are merged, so the loop bound is stale. The subsequent removal loop (lines 706-708) always removes index 1, which is fragile.",
+   "suggestion": "Iterate over a snapshot of segment IDs (excluding the target segment) and remove segments by their captured IDs.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Probe and tumor display nodes are swapped when setting opacity",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 537,
+   "line_end": 542,
+   "evidence": "    tumorDisplayNode = probeNode.GetDisplayNode()\n    #tumorDisplayNode.SetVisibility(False) # Hide all points\n    tumorDisplayNode.SetOpacity(0.2)\n    probeDisplayNode = tumorNode.GetDisplayNode()",
+   "explanation": "The variable names are inverted relative to the nodes they come from, so the opacity intended for the tumor is applied to the probe segmentation and vice versa. This is cosmetic but makes the documented output appearance (README step 6) unreliable and confuses later maintenance.",
+   "suggestion": "Assign tumorDisplayNode = tumorNode.GetDisplayNode() and probeDisplayNode = probeNode.GetDisplayNode().",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Long-running CLI executed synchronously on the GUI thread without progress",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 809,
+   "line_end": 816,
+   "evidence": "    parameters = {}\n    parameters[\"vtkFile1\"] = modelNode2\n    parameters[\"vtkFile2\"] = modelNode1\n    parameters['distanceType'] = \"signed_closest_point\"\n    parameters[\"vtkOutput\"] = vtkOutput\n\n    cliNode = slicer.cli.runSync(slicer.modules.modeltomodeldistance, None, parameters)",
+   "explanation": "README.md:28 states the margin evaluation takes 2-5 minutes. runSync blocks the GUI for that whole time with no progress bar and no cancel, so Slicer appears frozen during the module's central operation. The CLI status is also never checked, so a failed run leaves an empty output model and the failure surfaces only as a generic exception in onMarginButton.",
+   "suggestion": "Use slicer.cli.run with a completion callback (or run the work in a background thread with progress), and check cliNode.GetStatusString() before reading the output arrays.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Fiducial registration runs without validating inputs or CLI status",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 277,
+   "line_end": 291,
+   "evidence": "       nativeFiducials = self._parameterNode.GetNodeReference(\"NativeFiducials\")\n       tableFiducials = self._parameterNode.GetNodeReference(\"NewFiducials\")\n       tumorNode = self._parameterNode.GetNodeReference(\"InputTumor\")",
+   "explanation": "None of the three nodes is checked before being passed to the FiducialRegistration CLI, and the returned CLI node status is ignored. If a selector is empty or the two fiducial sets have different point counts, the registration fails silently and the tumor is still attached to a transform node (line 291), so the user may believe the tumor was moved when it was not.",
+   "suggestion": "Validate that both fiducial nodes exist and have equal, >=3 point counts, check the CLI status, and report failures with slicer.util.errorDisplay.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Module forces a white 3D background on the user's views",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 100,
+   "line_end": 111,
+   "evidence": "      threeDViewNode1 = slicer.app.layoutManager().threeDWidget(0).threeDController()\n      threeDViewNode1.setWhiteBackground()",
+   "explanation": "Opening the module changes the background color of the first two 3D views, a persistent view setting saved with the scene, without asking the user. It is a side effect on shared application state unrelated to the module's function.",
+   "suggestion": "Remove this, or make it an explicit user option.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Automated test asserts nothing; committed test data is unused",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 842,
+   "line_end": 863,
+   "evidence": "    self.delayDisplay(\"Starting the test\")\n    \n    # Get/create input data\n\n   \n    self.delayDisplay('Loaded test data set')",
+   "explanation": "test_AblationPlanner1 only shows delay dialogs and always reports 'Test passed', so the ctest registered by slicer_add_python_unittest (AblationPlanner/CMakeLists.txt:27) can never detect a regression. The committed files AblationPlanner/Testing/tumor.seg.nrrd and Endpoints.mrk.json are not loaded by any code, and Testing/Python/CMakeLists.txt contains only a commented-out line.",
+   "suggestion": "Load the committed tumor segmentation and endpoints, run the probe placement and margin logic, and assert on the resulting model/table contents.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Registered sample data points to a generic test blob and a missing thumbnail",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 57,
+   "line_end": 72,
+   "evidence": "    SampleData.SampleDataLogic.registerCustomSampleDataSource(\n      # Category and sample name displayed in Sample Data module\n      category='AblationPlanner',\n      sampleName='AblationPlanner1',",
+   "explanation": "The template registration was left in place: the URI is a SlicerTestingData SHA256 blob (not ablation data), and thumbnailFileName points to Resources/Icons/AblationPlanner1.png, which does not exist (the only icon in that folder is AblationPlanner.png). Users opening Sample Data > AblationPlanner get an unrelated volume and a broken thumbnail, which is worse than offering no sample data.",
+   "suggestion": "Either register real ablation sample data (tumor segmentation plus an ablation profile) with a matching thumbnail, or remove registerSampleData and the startupCompleted connection.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Legacy .s4ext screenshot URLs use a different case than the committed files",
+   "file": "AblationPlanner.s4ext",
+   "line_start": 41,
+   "line_end": 41,
+   "evidence": "screenshoturls https://github.com/naterex23/SlicerAblationPlanner/raw/main/Screenshots/minimum_required_inputs.png https://github.com/naterex23/SlicerAblationPlanner/raw/main/Screenshots/minimum_required_placement.png",
+   "explanation": "The committed files are minimum_required_inputs.PNG / minimum_required_placement.PNG (upper-case extension), so these URLs 404 on GitHub raw. The index uses the JSON entry and CMakeLists.txt:12 (which references existing files), so this only affects the legacy .s4ext metadata.",
+   "suggestion": "Fix the case or drop the stale .s4ext file.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "UI file still carries the ExtractCenterline template class name",
+   "file": "AblationPlanner/Resources/UI/AblationPlanner.ui",
+   "line_start": 3,
+   "line_end": 4,
+   "evidence": " <class>ExtractCenterline</class>\n <widget class=\"qMRMLWidget\" name=\"ExtractCenterline\">",
+   "explanation": "The top-level widget and the parameterNodeSelector baseName (line 38) are leftovers from the ExtractCenterline template. Loading works because childWidgetVariables looks up child names, but the parameter node combo box will suggest the name 'ExtractCenterline' to users.",
+   "suggestion": "Rename the top-level widget and baseName to AblationPlanner.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Large binary assets committed; scanner-reported 10 MB STL not present at this revision",
+   "file": "AblationPlanner/Testing/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "add_subdirectory(Python)",
+   "explanation": "The automated scan flagged AblationPlanner/Testing/solid_LT6015.stl (10 MB), but a full listing of the tree at this revision shows no such file; the largest committed binaries are the icon (139 KB) and roughly 2.8 MB of screenshots. The screenshots are documentation assets, not build inputs, so this is informational only.",
+   "suggestion": "No action required for the STL; consider moving screenshots to the README's hosted images if repository size matters.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Could not execute the module or run its ctest in a Slicer installation, so runtime behavior (deprecated markups API such as GetNthFiducialPosition/GetNumberOfFiducials, vtkSegmentationCorePython import, and the Logical operators effect calls) was assessed by reading only.",
+  "Could not verify the exact upstream commit 5b9622a808096cb2d1a7b14410c8b50b1b6f29a3 against GitHub; the catalog entry pins scm_revision \"main\", so the reviewed content is the snapshot provided, not a fixed commit.",
+  "Did not inspect the ModelToModelDistance dependency extension's source or license.",
+  "Did not inspect the linked ablation-profile repository (https://github.com/naterex23/SlicerAblationPlannerProfiles) referenced in README.md:19.",
+  "Could not read the binary assets (icon PNG, screenshots, tumor.seg.nrrd) to check for embedded metadata or patient identifiers.",
+  "Could not verify whether the SlicerTestingData SHA256 blob used by registerSampleData actually resolves, or whether the missing AblationPlanner1.png thumbnail breaks the Sample Data entry at runtime."
+ ],
+ "questions_for_author": [
+  "Should 'Place Markup Line' really delete every vtkMRMLMarkupsLineNode in the scene, or only the lines this module created?",
+  "Is the 'Signed' distance array intended to be overwritten by 'Apply Margin Color', and how should a user recover the original distances after reloading the scene?",
+  "Do you plan to add a real automated test using the committed Testing/tumor.seg.nrrd and Endpoints.mrk.json, and real sample data instead of the SlicerTestingData placeholder?"
+ ]
+}

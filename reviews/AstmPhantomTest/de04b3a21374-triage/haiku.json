@@ -1,0 +1,117 @@
+{
+ "purpose": "An ASTM F2554 tracking-accuracy assistant for 3D Slicer. It guides a user through phantom calibration, working-volume placement, single-point, rotation and multi-point measurements from an OpenIGTLink tracker, then writes JSON and HTML reports to a user-selected folder.",
+ "summary": "I read the catalog entry, CMakeLists, the main module, Utils.py, the parts of Pointer.py and Phantom.py that matter, and the License.txt. I found no network calls, no exfiltration, no package installs and no shell/eval use, so there is no safety block. Issues: a NameError (`msgBoxsgBox`) in the no-sample error path, a hidden developer unlock that can bypass calibration and inject simulated hits into reports, and global side effects on the main window and root logger. The license is the 3D Slicer BSD-style agreement, which permits distribution. I could not run the module or inspect the other class files in full.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "No network, telemetry, subprocess, eval/exec or pickle use found in the files read. Concerns are a client-side developer unlock (salted SHA-256 check) that enables calibration-bypass and simulated-hit shortcuts, which can yield reports that look valid but are not measured."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "No pip installs or sys.path changes found. The module changes the main window size and maximizes it (AstmPhantomTest.py:73-75) and adds a root-logger FileHandler on every setup (line 129-131), both global side effects."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMakeLists lists every .py class file and the resources, and EXTENSION_DEPENDS SlicerOpenIGTLink matches build_dependencies. scm_revision is the branch 'master', which is not reproducible and was not resolved."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "License.txt is the 3D Slicer Contribution and Software License Agreement, which permits redistribution. Part B §4 states the software is for research only, which should be shown to users. Third-party provenance of the STL models is not documented."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "A NameError on line 282-284 breaks the no-sample error path. Cancelling the startup save dialog (line 124) leaves the module silently uninitialised. The HTML writer and log handling have smaller issues."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README documents setup, tests and output, and the module targets a real standard. There are no automated tests in the repo that I saw, and the clinical/research disclaimer is only in the license."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "NameError in no-sample error path of point acquisition",
+   "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+   "line_start": 279,
+   "line_end": 284,
+   "evidence": "msgBox.setText(\"No sample taken during timer duration for point acquisition. Restart module and try again with increased duration.\")\nmsgBoxsgBox.setIcon(qt.QMessageBox().Warning)",
+   "explanation": "When the acquisition timer ends with zero samples, the code references `msgBoxsgBox`, which is never defined (the variable is `msgBox`). The result is an uncaught NameError inside a Qt timer callback, so the user never sees the intended warning and the acquisition state is not reset.",
+   "suggestion": "Replace `msgBoxsgBox` with `msgBox` on both lines, and add a test or manual check for the zero-sample case.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Hidden developer unlock that bypasses calibration and injects simulated target hits",
+   "file": "AstmPhantomTest/AstmPhantomTest.py",
+   "line_start": 638,
+   "line_end": 660,
+   "evidence": "pw = '8ee930e3474f1b9a4a0d7524f3527b93f1ff2e4fa89a385f1ede01a15d7cc9e4'\nsalt = '68835c9b8f744414b1e1d2f262e7a911'\nif pw == hashlib.sha256(salt.encode() + opId.encode()).hexdigest():",
+   "explanation": "Typing a passphrase into the operator field unlocks 'dev shortcuts' (hackCalib, hackCL/BL/TL/LL/RL, skipTest). The SkipCalib operator ID also sets skipCalibMode. These paths fire calibration and target-hit events with values from a local file or from the phantom's nominal positions, not from the tracker. A session run with them can produce a report that looks like a valid ASTM F2554 test. The check is a client-side hash, so it is an access control in name only. This is not a data exfiltration risk, but it is a concealed behaviour in a shipped measurement tool and the reports carry no marker that shortcuts were used.",
+   "suggestion": "Remove the dev shortcuts from production builds or gate them behind a developer-only build flag. If kept, record in the report JSON and HTML that shortcuts were used, and document the unlock in the README.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Global UI and logging side effects at widget setup",
+   "file": "AstmPhantomTest/AstmPhantomTest.py",
+   "line_start": 73,
+   "line_end": 75,
+   "evidence": "slicer.util.mainWindow().setMaximumHeight(1080)\nslicer.util.mainWindow().setMaximumWidth(1920)\nslicer.util.mainWindow().showMaximized()",
+   "explanation": "Setup forces the Slicer main window to a fixed maximum size and maximizes it, changing the host application for all modules. It also adds a root-logger FileHandler each time setup runs, with no removal on cleanup, so logging is duplicated and redirected for the whole Slicer session.",
+   "suggestion": "Do not change the main window geometry or constrain it globally. Attach the FileHandler to a module-specific logger and remove it in cleanup().",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Cancelling the startup save dialog leaves the module silently uninitialised",
+   "file": "AstmPhantomTest/AstmPhantomTest.py",
+   "line_start": 121,
+   "line_end": 129,
+   "evidence": "self.saveDialog = qt.QFileDialog()\n self.saveDialog.setFileMode(qt.QFileDialog().DirectoryOnly)\n\n if self.saveDialog.exec():",
+   "explanation": "The whole module setup, including the logic object and all signal connections, runs only inside `if self.saveDialog.exec():`. If the user cancels, no error is shown and the module UI is non-functional with no guidance on how to recover.",
+   "suggestion": "Show an explicit message when the dialog is cancelled, or move the output-folder choice into a parameter-node setting that the user can change later.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Research-only restriction is only in the license text",
+   "file": "License.txt",
+   "line_start": 147,
+   "line_end": 150,
+   "evidence": "The Software has been designed for research purposes only and has\n not been reviewed or approved by the Food and Drug Administration",
+   "explanation": "Part B §4 of the Slicer agreement says the software is for research use and not clinically approved. The README and module help text do not carry a visible disclaimer, so users may take reports as clinical results.",
+   "suggestion": "Add a short research-use disclaimer to the module help text and README.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "scm_revision tracks a moving branch",
+   "file": "",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "",
+   "explanation": "The catalog entry uses scm_revision 'master', so the built code can change without a catalog update. I could not resolve the commit, so the reviewed source is only the one named in the task.",
+   "suggestion": "Pin scm_revision to a tag or commit hash that was reviewed.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Pointer.py, Targets.py, Measurements.py and WorkingVolume.py were only partly read, so their logic and any further bugs are unverified.",
+  "The UI .ui file, the CI workflow and the README beyond the search hits were not read in full.",
+  "Binary assets (STL models, WAV sounds, PNG icons) were not inspected for content or provenance.",
+  "No revision was resolved and the module was not loaded or run in Slicer, so behaviour was judged from the code alone.",
+  "The large files flagged by the scan (phantom STL, GIFs) were not read."
+ ],
+ "questions_for_author": [
+  "Should the dev shortcuts and SkipCalib mode exist in the released extension? If so, will reports record that they were used?",
+  "Please confirm the source of the bundled STL models and whether their licence allows redistribution.",
+  "Is there an intended pinned revision rather than 'master'?"
+ ]
+}
