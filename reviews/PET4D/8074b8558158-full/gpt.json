@@ -1,0 +1,90 @@
+{
+ "purpose": "PET4D loads static, gated, and dynamic PET DICOM series into 3D Slicer with activity, SUV, and timing metadata. It provides researchers with frame review and editing, motion correction, registration, and kinetic modeling tools.",
+ "summary": "The source includes documentation, synthetic tests, and an MIT license; CMake lists the modules that the scan suggested were missing. Two export/result paths can silently destroy existing user data and should be fixed. The exact revision selected by the moving catalog branch and the licensing of copied color tables could not be independently verified. 🔴 Do not merge yet: fix the unintended overwrites and verify the selected revision and copied-material permissions.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected DICOM loading and export, modeling CSV export and table creation, and repository-wide searches for network, execution and deletion operations. CSV companion-file and scene-table overwrites have concrete data-loss paths."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Searched for package installation and process-wide modifications; the module scripts prepend their own directory to sys.path at import, but no dependency installation was found in the search."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "Compared CMake script and resource lists with the repository listing and the catalog dependencies; the separately declared visible modules are installed. Network and build execution were unavailable, so main could not be resolved and the package could not be built or loaded."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "The root LICENSE grants MIT distribution rights and sitkreg identifies an MIT source by the same author. Colortables says it was copied from Tarvos, but the source license and any required attribution could not be independently inspected."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected the DICOM loader, modeling state and result handling, export logic, registration CLI invocation, and synthetic tests. Result-table reuse is based on names rather than provenance, and registration runs synchronously."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "README describes workflows and a research-only disclaimer; the repository contains Slicer self-tests and separate synthetic helper tests. Their execution and validation on real data were not checked."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "CSV export silently overwrites the companion TAC file",
+   "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+   "line_start": 399,
+   "line_end": 402,
+   "evidence": "            tacPath = os.path.splitext(path)[0] + \"_TACs.csv\"\n            with open(tacPath, \"w\", encoding=\"utf-8\", newline=\"\") as stream:\n                stream.write(kin.tacCsv(analysis.frames, curves, analysis.units))",
+   "explanation": "The save dialog selects only the results CSV. Even if that file does not yet exist, exporting also opens the derived _TACs.csv in write mode without checking whether it exists, silently truncating an unrelated existing file in the chosen directory.",
+   "suggestion": "Check both output paths before writing and explicitly confirm each overwrite, or let the user select a new companion path; avoid writing either file if the user declines.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Fit all can erase an unrelated scene table with the same name",
+   "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+   "line_start": 1882,
+   "line_end": 1886,
+   "evidence": "        if self.tableCheck.checked:\n            name = f\"{analysis.sequence.GetName()} {key} results\"\n            existing = slicer.mrmlScene.GetFirstNodeByName(name)\n            table = existing if existing is not None and existing.IsA(\"vtkMRMLTableNode\") else None\n            self.logic.resultsTable(analysis, results, key, name, table)",
+   "explanation": "Any existing table with this name is treated as this module's results table, even if it belongs to another dataset or was created by the user. resultsTable calls table.Initialize() at line 362, clearing its prior contents without confirmation when Fit all is pressed; the results-table option is enabled by default.",
+   "suggestion": "Reuse only a table explicitly associated with the current sequence and module, otherwise create a uniquely named table; confirm before replacing unrelated data.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Module directory is prepended to the shared Python import path",
+   "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+   "line_start": 45,
+   "line_end": 47,
+   "evidence": "_MODULE_DIR = os.path.dirname(os.path.abspath(globals().get(\"__file__\", \"\") or \".\"))\nif globals().get(\"__file__\") and _MODULE_DIR not in sys.path:\n    sys.path.insert(0, _MODULE_DIR)",
+   "explanation": "At module import this changes import resolution for the entire Slicer process, potentially shadowing other modules with files in this directory. Other PET4D module scripts use the same pattern.",
+   "suggestion": "Use the module loading and package paths provided by Slicer where possible rather than prepending a directory globally.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Registration uses a synchronous CLI call",
+   "file": "DICOMGatedDynamicPET/DynamicPETRegistration.py",
+   "line_start": 282,
+   "line_end": 284,
+   "evidence": "    @staticmethod\n    def _runCli(module, parameters):\n        cliNode = slicer.cli.runSync(module, None, parameters, update_display=False)",
+   "explanation": "During a long BRAINSFit invocation, this synchronous call can leave the Slicer interface unresponsive until the CLI returns, limiting progress feedback and cancellation during that invocation.",
+   "suggestion": "Use an asynchronous CLI with status observers and cancellation where feasible.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The catalog entry uses main; network access was unavailable, so the branch could not be resolved to the stated commit 8074b8558158b7a4e9ba7f4d2adf4a589b7fa92b or checked for accessibility.",
+  "The upstream Tarvos color table license and attribution requirements, and the upstream EasyReg source license, could not be independently verified.",
+  "No extension build, Slicer session, test execution, external dependencies, CI results, or real-patient-data validation could be inspected.",
+  "The source is large; targeted searches and selected execution paths were inspected, not every line."
+ ],
+ "questions_for_author": [
+  "Can you provide the Tarvos color-table source and its distribution terms and required attribution?"
+ ]
+}

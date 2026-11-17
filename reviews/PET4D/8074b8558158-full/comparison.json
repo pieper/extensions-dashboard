@@ -1,0 +1,505 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "CSV export silently overwrites the companion TAC file",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+   "line": 400,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "CSV export silently overwrites the companion TAC file",
+     "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+     "line_start": 399,
+     "line_end": 402,
+     "evidence": "            tacPath = os.path.splitext(path)[0] + \"_TACs.csv\"\n            with open(tacPath, \"w\", encoding=\"utf-8\", newline=\"\") as stream:\n                stream.write(kin.tacCsv(analysis.frames, curves, analysis.units))",
+     "explanation": "The save dialog selects only the results CSV. Even if that file does not yet exist, exporting also opens the derived _TACs.csv in write mode without checking whether it exists, silently truncating an unrelated existing file in the chosen directory.",
+     "suggestion": "Check both output paths before writing and explicitly confirm each overwrite, or let the user select a new companion path; avoid writing either file if the user declines.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+      "line": 400
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "DynamicPETModeling.py:400-402 opens the derived <name>_TACs.csv with 'w' without checking whether it exists. The save dialog (1897-1898) only confirms the main CSV. This is real, but it only affects a file the extension names itself, next to a path the user chose, and the status label lists both files (1905). That is a small UX gap, not a concrete path to harm, so it is not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DICOMGatedDynamicPET/DynamicPETModeling.py:1895-1903 asks only for the results path and calls exportCsv with its default tacs=True. Lines 400-401 say `tacPath = os.path.splitext(path)[0] + \"_TACs.csv\"` and `with open(tacPath, \"w\", encoding=\"utf-8\", newline=\"\") as stream:`. A distinct pre-existing companion file is truncated without an existence check or confirmation, even when the chosen results path is new. The tooltip at 1154-1155 discloses a companion export, but not an overwrite. Confirm both destinations before writing."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In DICOMGatedDynamicPET/DynamicPETModeling.py lines 389-404 and 1892-1906, `onExport()` asks the user for a single CSV save path via `QFileDialog.getSaveFileName` and passes it to `exportCsv()`, which writes both `path` and `tacPath = os.path.splitext(path)[0] + \"_TACs.csv\"` with `open(tacPath, \"w\", ...)` without checking if `<stem>_TACs.csv` already exists. While this behavior is real, it is a minor UX/soundness detail (writing a companion `<stem>_TACs.csv` next to a user-chosen export file) rather than a blocking safety vulnerability."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Fit all can erase an unrelated scene table with the same name",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+   "line": 1882,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Fit all can erase an unrelated scene table with the same name",
+     "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+     "line_start": 1882,
+     "line_end": 1886,
+     "evidence": "        if self.tableCheck.checked:\n            name = f\"{analysis.sequence.GetName()} {key} results\"\n            existing = slicer.mrmlScene.GetFirstNodeByName(name)\n            table = existing if existing is not None and existing.IsA(\"vtkMRMLTableNode\") else None\n            self.logic.resultsTable(analysis, results, key, name, table)",
+     "explanation": "Any existing table with this name is treated as this module's results table, even if it belongs to another dataset or was created by the user. resultsTable calls table.Initialize() at line 362, clearing its prior contents without confirmation when Fit all is pressed; the results-table option is enabled by default.",
+     "suggestion": "Reuse only a table explicitly associated with the current sequence and module, otherwise create a uniquely named table; confirm before replacing unrelated data.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+      "line": 1882
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 1882-1886 reuse any vtkMRMLTableNode with the name '<sequence> <key> results', and resultsTable line 362 calls table.Initialize(). That clears the node's contents. The name is module-specific, the node is a scene object (not a file) and is regenerated on each fit, and the option is user-visible. Collision with an unrelated table is unlikely, so this is a minor overwrite-without-confirmation bug, not a safety issue."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DICOMGatedDynamicPET/DynamicPETModeling.py:1151-1153 defaults the scene-table option on. Lines 1883-1886 use `existing = slicer.mrmlScene.GetFirstNodeByName(name)` and select any first matching table without checking provenance. Lines 361-362 then execute `table = tableNode.GetTable()` and `table.Initialize()`, destroying its previous contents. A same-named unrelated unsaved table can therefore be erased on Fit all; reuse only a verified owned table or create a unique one. If the first matching node is not a table, the code creates a new one instead."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In DICOMGatedDynamicPET/DynamicPETModeling.py lines 1882-1886 and 356-387, when `self.tableCheck.checked` is True, `onFitAll()` looks up `slicer.mrmlScene.GetFirstNodeByName(f\"{analysis.sequence.GetName()} {key} results\")` without checking its `KM_PREFIX` attributes (`DynamicPET.Modeling.Sequence` / `DynamicPET.Modeling.Model`) and passes it to `resultsTable()`, which calls `table.Initialize()` at line 362. This is real, and checking the node attribute or matching the sequence ID before reusing the table node is a good soundness improvement, but overwriting an in-memory MRML table node specifically named `<sequence name> <model> results` when re-running kinetic fitting is minor and not a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Module directory is prepended to the shared Python import path",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+   "line": 45,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Module directory is prepended to the shared Python import path",
+     "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+     "line_start": 45,
+     "line_end": 47,
+     "evidence": "_MODULE_DIR = os.path.dirname(os.path.abspath(globals().get(\"__file__\", \"\") or \".\"))\nif globals().get(\"__file__\") and _MODULE_DIR not in sys.path:\n    sys.path.insert(0, _MODULE_DIR)",
+     "explanation": "At module import this changes import resolution for the entire Slicer process, potentially shadowing other modules with files in this directory. Other PET4D module scripts use the same pattern.",
+     "suggestion": "Use the module loading and package paths provided by Slicer where possible rather than prepending a directory globally.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+      "line": 45
+     }
+    }
+   ]
+  },
+  {
+   "title": "Registration uses a synchronous CLI call",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DICOMGatedDynamicPET/DynamicPETRegistration.py",
+   "line": 245,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Registration uses a synchronous CLI call",
+     "file": "DICOMGatedDynamicPET/DynamicPETRegistration.py",
+     "line_start": 282,
+     "line_end": 284,
+     "evidence": "    @staticmethod\n    def _runCli(module, parameters):\n        cliNode = slicer.cli.runSync(module, None, parameters, update_display=False)",
+     "explanation": "During a long BRAINSFit invocation, this synchronous call can leave the Slicer interface unresponsive until the CLI returns, limiting progress feedback and cancellation during that invocation.",
+     "suggestion": "Use an asynchronous CLI with status observers and cancellation where feasible.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "DICOMGatedDynamicPET/DynamicPETRegistration.py",
+      "line": 245
+     }
+    }
+   ]
+  },
+  {
+   "title": "Catalog entry PET4D.json committed in extension source repository",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "PET4D.json",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Catalog entry PET4D.json committed in extension source repository",
+     "file": "PET4D.json",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "PET4D.json  (365 bytes)",
+     "explanation": "The catalog entry file `PET4D.json` belongs in the Slicer Extensions Index repository rather than inside the extension's own source repository. It is harmless, but unnecessary in the source repository.",
+     "suggestion": "Optionally remove `PET4D.json` from the extension source repository, as the catalog entry is maintained in `Slicer/ExtensionsIndex`.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "CSV export silently overwrites the companion TAC file",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+   "line": 400,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "CSV export silently overwrites the companion TAC file",
+     "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+     "line_start": 399,
+     "line_end": 402,
+     "evidence": "            tacPath = os.path.splitext(path)[0] + \"_TACs.csv\"\n            with open(tacPath, \"w\", encoding=\"utf-8\", newline=\"\") as stream:\n                stream.write(kin.tacCsv(analysis.frames, curves, analysis.units))",
+     "explanation": "The save dialog selects only the results CSV. Even if that file does not yet exist, exporting also opens the derived _TACs.csv in write mode without checking whether it exists, silently truncating an unrelated existing file in the chosen directory.",
+     "suggestion": "Check both output paths before writing and explicitly confirm each overwrite, or let the user select a new companion path; avoid writing either file if the user declines.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+      "line": 400
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "DynamicPETModeling.py:400-402 opens the derived <name>_TACs.csv with 'w' without checking whether it exists. The save dialog (1897-1898) only confirms the main CSV. This is real, but it only affects a file the extension names itself, next to a path the user chose, and the status label lists both files (1905). That is a small UX gap, not a concrete path to harm, so it is not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DICOMGatedDynamicPET/DynamicPETModeling.py:1895-1903 asks only for the results path and calls exportCsv with its default tacs=True. Lines 400-401 say `tacPath = os.path.splitext(path)[0] + \"_TACs.csv\"` and `with open(tacPath, \"w\", encoding=\"utf-8\", newline=\"\") as stream:`. A distinct pre-existing companion file is truncated without an existence check or confirmation, even when the chosen results path is new. The tooltip at 1154-1155 discloses a companion export, but not an overwrite. Confirm both destinations before writing."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In DICOMGatedDynamicPET/DynamicPETModeling.py lines 389-404 and 1892-1906, `onExport()` asks the user for a single CSV save path via `QFileDialog.getSaveFileName` and passes it to `exportCsv()`, which writes both `path` and `tacPath = os.path.splitext(path)[0] + \"_TACs.csv\"` with `open(tacPath, \"w\", ...)` without checking if `<stem>_TACs.csv` already exists. While this behavior is real, it is a minor UX/soundness detail (writing a companion `<stem>_TACs.csv` next to a user-chosen export file) rather than a blocking safety vulnerability."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Fit all can erase an unrelated scene table with the same name",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+   "line": 1882,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Fit all can erase an unrelated scene table with the same name",
+     "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+     "line_start": 1882,
+     "line_end": 1886,
+     "evidence": "        if self.tableCheck.checked:\n            name = f\"{analysis.sequence.GetName()} {key} results\"\n            existing = slicer.mrmlScene.GetFirstNodeByName(name)\n            table = existing if existing is not None and existing.IsA(\"vtkMRMLTableNode\") else None\n            self.logic.resultsTable(analysis, results, key, name, table)",
+     "explanation": "Any existing table with this name is treated as this module's results table, even if it belongs to another dataset or was created by the user. resultsTable calls table.Initialize() at line 362, clearing its prior contents without confirmation when Fit all is pressed; the results-table option is enabled by default.",
+     "suggestion": "Reuse only a table explicitly associated with the current sequence and module, otherwise create a uniquely named table; confirm before replacing unrelated data.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DICOMGatedDynamicPET/DynamicPETModeling.py",
+      "line": 1882
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 1882-1886 reuse any vtkMRMLTableNode with the name '<sequence> <key> results', and resultsTable line 362 calls table.Initialize(). That clears the node's contents. The name is module-specific, the node is a scene object (not a file) and is regenerated on each fit, and the option is user-visible. Collision with an unrelated table is unlikely, so this is a minor overwrite-without-confirmation bug, not a safety issue."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DICOMGatedDynamicPET/DynamicPETModeling.py:1151-1153 defaults the scene-table option on. Lines 1883-1886 use `existing = slicer.mrmlScene.GetFirstNodeByName(name)` and select any first matching table without checking provenance. Lines 361-362 then execute `table = tableNode.GetTable()` and `table.Initialize()`, destroying its previous contents. A same-named unrelated unsaved table can therefore be erased on Fit all; reuse only a verified owned table or create a unique one. If the first matching node is not a table, the code creates a new one instead."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In DICOMGatedDynamicPET/DynamicPETModeling.py lines 1882-1886 and 356-387, when `self.tableCheck.checked` is True, `onFitAll()` looks up `slicer.mrmlScene.GetFirstNodeByName(f\"{analysis.sequence.GetName()} {key} results\")` without checking its `KM_PREFIX` attributes (`DynamicPET.Modeling.Sequence` / `DynamicPET.Modeling.Model`) and passes it to `resultsTable()`, which calls `table.Initialize()` at line 362. This is real, and checking the node attribute or matching the sequence ID before reusing the table node is a good soundness improvement, but overwriting an in-memory MRML table node specifically named `<sequence name> <model> results` when re-running kinetic fitting is minor and not a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D3",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (ok, blocking, ok)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "no",
+     "severity": "info",
+     "rating": "ok",
+     "reason": "A search for pip_install, subprocess, network, eval, exec, pickle and socket found nothing. The only deletions are shutil.rmtree on mkdtemp folders under the Slicer temporary path (DynamicPETEditor.py:2147-2157, plus atexit cleanup). File writes go to user-chosen CSV paths. I found no data exfiltration and no concrete path to harm. The D1 and D2 overwrites are minor behaviors, not safety blockers."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": null,
+     "rating": "blocking",
+     "reason": "Blocking because the verified D1 file truncation and D2 scene-table data loss have concrete paths to unintended destruction. In DICOMGatedDynamicPET/DynamicPETModeling.py:400-401, `with open(tacPath, \"w\", encoding=\"utf-8\", newline=\"\") as stream:` writes the unchecked companion; lines 1883-1886 and 361-362 show same-name table reuse and initialization. I also searched source for network, execution, deserialization and deletion APIs and inspected temporary DICOM export cleanup (DynamicPETEditor.py:2147-2157); this was not an exhaustive audit. The supplied commit identifier was not independently resolved, and no code was executed."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Inspected DICOMGatedDynamicPET/*.py and DICOMGatedDynamicPET/DICOMGatedDynamicPETLib/*.py. There are no network requests, telemetry, subprocess calls, dynamic code execution, unsafe deserialization, or hidden side effects. File writes occur only in temporary directories or user-selected export paths. The two issues raised as blocking safety findings (D1 and D2) are minor soundness/UX details."
+    }
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "concern"
+   },
+   "outcome": "still disputed (minor, concern, ok)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": "minor",
+     "reason": "I only inspected part of this large code base. The silent overwrite of the _TACs.csv companion file (399-402) and the reuse and clearing of a same-named table (1882-1886 with 362) are minor soundness issues. Errors are guarded (_guard) and reported to the user, and fit failures are recorded per segment. I saw no concern-level defects."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": null,
+     "rating": "concern",
+     "reason": "DICOMGatedDynamicPET/DynamicPETModeling.py:335-349 returns accumulated partial results after cancellation: `if progress is not None and progress(i + 1, len(ids), analysis.name(segmentId)) is False:` followed by `break` and `return results`. Lines 1872-1886 treat this as a completed fit, report the count fitted and can overwrite the scene results table with partial results without identifying cancellation. This can mislead users and discard prior results; it is an ordinary correctness concern separate from the safety issue. The inspected implementation does provide a progress dialog and reports per-segment errors (lines 343-346 and 1852-1860). No runtime or scientific validation was possible."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Inspected the module and library implementations across DICOMGatedDynamicPET/ (including DynamicPETModeling.py, DynamicPETEditor.py, DynamicPETMotionCorrection.py, DynamicPETRegistration.py, DICOMGatedDynamicPET.py) and Testing/. The extension follows 3D Slicer conventions well (`ScriptedLoadableModule` classes, `VTKObservationMixin`, progress dialogs, error handling, and unit tests). Minor UX edge cases like D1 and D2 do not rise to a concern rating."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "no concerns",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 4,
+  "single": 5,
+  "unverified": 1,
+  "total": 5,
+  "open_disputes": 2
+ }
+}

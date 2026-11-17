@@ -1,0 +1,1027 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Grad-CAM can overwrite an unrelated scene volume",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line": 748,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Grad-CAM can overwrite an unrelated scene volume",
+     "file": "GliomaClassifier/GliomaClassifier.py",
+     "line_start": 748,
+     "line_end": 752,
+     "evidence": "            xaiNodeName = f\"{displayReferenceNode.GetName()}_GradCAM\"\n\n            xaiNode = slicer.mrmlScene.GetFirstNodeByName(xaiNodeName)\n            if not xaiNode or not xaiNode.IsA(\"vtkMRMLScalarVolumeNode\"):\n                xaiNode = slicer.mrmlScene.AddNewNodeByClass(\"vtkMRMLScalarVolumeNode\", xaiNodeName)",
+     "explanation": "If a scene already contains an unrelated scalar volume with the derived name, it is reused; lines 754–757 replace its image array and orientation with the heatmap. This can destroy unsaved image data or lead the user to save the replacement over their data.",
+     "suggestion": "Create a new uniquely named output node, or reuse only a node explicitly recorded as this module's own generated heatmap.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/GliomaClassifier.py",
+      "line": 748
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "GliomaClassifier/GliomaClassifier.py:748-757 constructs the name, searches the whole scene, and reuses any matching scalar volume: `xaiNode = slicer.mrmlScene.GetFirstNodeByName(xaiNodeName)` followed by `slicer.util.updateVolumeFromArray(xaiNode, heatmap_kji)` and `xaiNode.CopyOrientation(displayReferenceNode)`. When XAI is requested, a name collision can destroy unrelated unsaved volume contents; disk overwrite requires a subsequent save."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked GliomaClassifier/GliomaClassifier.py:748-757. The code looks up a MRML node by name f\"{displayReferenceNode.GetName()}_GradCAM\" with GetFirstNodeByName() and reuses it if it is a vtkMRMLScalarVolumeNode, updating its voxel array in-place via updateVolumeFromArray. However, reusing a specifically named output node (<InputName>_GradCAM) in the in-memory MRML scene is standard Slicer module behavior for re-running an algorithm without cluttering the scene, not a blocking safety issue or disk file overwrite."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "All three volume selectors in UI are bound to the same `inputVolume` parameter node property",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "GliomaClassifier/Resources/UI/GliomaClassifier.ui",
+   "line": 279,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "All three volume selectors in UI are bound to the same `inputVolume` parameter node property",
+     "file": "GliomaClassifier/Resources/UI/GliomaClassifier.ui",
+     "line_start": 279,
+     "line_end": 310,
+     "evidence": "            <widget class=\"qMRMLNodeComboBox\" name=\"inputSelector_1\">\n...\n             <property name=\"SlicerParameterName\" stdset=\"0\">\n              <string>inputVolume</string>\n             </property>\n            </widget>",
+     "explanation": "In `GliomaClassifier.ui`, `inputSelector` (line 78), `inputSelector_1` (line 308), and `inputSelector_2` (line 349) all have the dynamic property `SlicerParameterName` set to `inputVolume`. Because `self._parameterNode.connectGui(self.ui)` binds all three combo boxes to the same `inputVolume` parameter on `GliomaClassifierParameterNode`, selecting a FLAIR volume in `inputSelector_2` overwrites `inputSelector_1` (T1-CE) and `inputSelector` with the same node.",
+     "suggestion": "Remove `SlicerParameterName` from `inputSelector_1` and `inputSelector_2`, or add distinct `t1cVolume` and `flairVolume` fields to `GliomaClassifierParameterNode`.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "GliomaClassifier/Resources/UI/GliomaClassifier.ui",
+      "line": 279
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "still disputed",
+   "positions": {
+    "gpt": {
+     "item": "D2",
+     "real": "unsure",
+     "severity": null,
+     "rating": null,
+     "reason": "GliomaClassifier/Resources/UI/GliomaClassifier.ui:77-78, 307-308, 348-349 each specify `<string>inputVolume</string>`, and GliomaClassifier/GliomaClassifier.py:308-310 calls `self._parameterNodeGuiTag = self._parameterNode.connectGui(self.ui)`. Classification then reads both selectors separately (lines 610-611). Duplicate parameter names are verified, but Slicer's connectGui implementation is not in this checkout; without it or a runtime test I cannot establish whether all three are synchronized, only one is connected, or duplicate mappings fail."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked GliomaClassifier/Resources/UI/GliomaClassifier.ui:77-79, 307-309, and 348-350, and GliomaClassifier/GliomaClassifier.py:114-129, 310. All three qMRMLNodeComboBox widgets (inputSelector, inputSelector_1, inputSelector_2) set SlicerParameterName to \"inputVolume\", and self._parameterNode.connectGui(self.ui) connects all three to the single inputVolume property on GliomaClassifierParameterNode, causing selection in one to overwrite the others."
+    }
+   }
+  },
+  {
+   "title": "First classification installs TensorFlow without confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "GliomaClassifier/PreProcessing/apply_classification.py",
+   "line": 19,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Large TensorFlow package installed via pip without user confirmation",
+     "file": "GliomaClassifier/PreProcessing/apply_classification.py",
+     "line_start": 44,
+     "line_end": 46,
+     "evidence": "        try:\n            slicer.util.pip_install(\"tensorflow==2.19.1\")\n            importlib.invalidate_caches()",
+     "explanation": "When the user runs classification with the default H5 model (`proposed_model_final.h5`), `ensure_tensorflow_installed()` immediately calls `slicer.util.pip_install(\"tensorflow==2.19.1\")` without asking the user for confirmation. TensorFlow is a very large download (hundreds of megabytes) that also pulls in or updates shared Python packages in Slicer's environment (such as `numpy`, `h5py`, `protobuf`, etc.), which can block the GUI thread for a long time and potentially alter packages bundled by Slicer.",
+     "suggestion": "Prompt the user with `slicer.util.confirmOkCancelDisplay` before installing `tensorflow==2.19.1` (and `nipreps-synthstrip` in `apply_skull.py`), or consider converting `proposed_model_final.h5` to PyTorch/TorchScript or ONNX so the extension only needs the declared `PyTorch` dependency.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "GliomaClassifier/PreProcessing/apply_classification.py",
+      "line": 17
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "First classification installs TensorFlow without confirmation",
+     "file": "GliomaClassifier/PreProcessing/apply_classification.py",
+     "line_start": 40,
+     "line_end": 46,
+     "evidence": "        logging.info(\n            \"TensorFlow not found. Installing tensorflow==2.19.1...\"\n        )\n\n        try:\n            slicer.util.pip_install(\"tensorflow==2.19.1\")\n            importlib.invalidate_caches()",
+     "explanation": "When TensorFlow is missing, classification of the default model downloads and installs it and its dependencies into Slicer's shared Python environment without asking the user. This can consume significant storage and change packages used by other extensions.",
+     "suggestion": "Explain the installation and its size and request explicit confirmation before installing; avoid replacing Slicer-bundled dependencies.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "GliomaClassifier/PreProcessing/apply_classification.py",
+      "line": 19
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "GliomaClassifier/PreProcessing/apply_classification.py:17-18, 24-28, 40-45 installs if TensorFlow itself is missing: `slicer.util.pip_install(\"tensorflow==2.19.1\")`. Lines 173-175 and 285-295 show the H5 inference path calls it. No confirmation is present before the pip call; the large install can alter the shared Python environment. README.md:65 discloses first-use installation but is not an interactive consent prompt."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked GliomaClassifier/PreProcessing/apply_classification.py:44-46. ensure_tensorflow_installed() calls slicer.util.pip_install(\"tensorflow==2.19.1\") without user confirmation when running classification with a TensorFlow model. TensorFlow is a large download and installing a pinned version into Slicer's shared Python environment without confirmation can alter bundled packages (such as numpy) and freeze the UI during installation. Per the review policy, package installation without user confirmation for large downloads or modifying bundled packages in the shared environment warrants requesting changes."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Packaged model destination differs from runtime lookup",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "GliomaClassifier/CMakeLists.txt",
+   "line": 35,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Packaged model destination differs from runtime lookup",
+     "file": "GliomaClassifier/CMakeLists.txt",
+     "line_start": 35,
+     "line_end": 39,
+     "evidence": "# Install model files\ninstall(\n  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Resources/Models\n  DESTINATION ${Slicer_INSTALL_QTSCRIPTEDMODULES_LIB_DIR}/${MODULE_NAME}/Resources\n)",
+     "explanation": "The install rule puts models beneath GliomaClassifier/Resources, whereas GliomaClassifier.py lines 949–966 resolves them as Resources/Models relative to the script directory. In a standard scripted-module installation the script is in the parent qt-scripted-modules directory, so the bundled default classifier and skull-strip model are not found. The same lookup also places optional downloads outside the module resource directory.",
+     "suggestion": "Resolve models using Slicer's module resource path, and put optional downloaded models in a writable user cache; test an installed package.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/CMakeLists.txt",
+      "line": 35
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "GliomaClassifier/CMakeLists.txt:35-39 uses `DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Resources/Models` and `DESTINATION ${Slicer_INSTALL_QTSCRIPTEDMODULES_LIB_DIR}/${MODULE_NAME}/Resources`, while GliomaClassifier/GliomaClassifier.py:949-966 uses `moduleDir = os.path.dirname(os.path.abspath(__file__))` then joins `\"Resources\", \"Models\"`. With the usual scripted-module install layout these paths differ. More immediately, the inspected Resources listing has no Models directory at all; the non-OPTIONAL install rule references a missing source directory, so packaging/install is expected to fail, and neither claimed bundled model is present. I could not run the build or independently inspect Slicer's build macro."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Checked GliomaClassifier/CMakeLists.txt:35-39, list_files output, and GliomaClassifier/GliomaClassifier.py:949-988. First, GliomaClassifier/Resources/Models does not exist in the repository at all (list_files shows only Resources/Icons and Resources/UI), so CMake configure/install will fail on `install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Resources/Models ...)` and neither synthstrip.1.pt nor proposed_model_final.h5 are present in the repo or downloaded by model_manager.py. Second, CMakeLists.txt installs Models to `${Slicer_INSTALL_QTSCRIPTEDMODULES_LIB_DIR}/${MODULE_NAME}/Resources` (which creates `.../GliomaClassifier/Resources/Models`), whereas `slicerMacroBuildScriptedModule` installs `GliomaClassifier.py` directly in `${Slicer_INSTALL_QTSCRIPTEDMODULES_LIB_DIR}`, so `os.path.join(moduleDir, \"Resources\", \"Models\", ...)` looks in `.../qt-scripted-modules/Resources/Models` instead of using `self.resourcePath(...)`. This is a blocking packaging defect."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Skull stripping installs a Python package without confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "GliomaClassifier/PreProcessing/apply_skull.py",
+   "line": 12,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Skull stripping installs a Python package without confirmation",
+     "file": "GliomaClassifier/PreProcessing/apply_skull.py",
+     "line_start": 12,
+     "line_end": 17,
+     "evidence": "    try:\n        from nipreps.synthstrip.cli import main as synthstrip_main\n        return synthstrip_main\n    except ModuleNotFoundError:\n        slicer.util.pip_install(\"nipreps-synthstrip\")\n        from nipreps.synthstrip.cli import main as synthstrip_main",
+     "explanation": "First use of skull stripping installs an unpinned package and its dependencies into the shared environment without a user confirmation. Its dependency metadata was not available here, so effects on PyTorch or Slicer-bundled packages cannot be established.",
+     "suggestion": "Ask before installation and verify the package's dependency requirements do not install PyTorch outside PyTorchUtils or disrupt bundled packages.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/PreProcessing/apply_skull.py",
+      "line": 12
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, minor (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "GliomaClassifier/PreProcessing/apply_skull.py:12-17 catches `ModuleNotFoundError` and executes `slicer.util.pip_install(\"nipreps-synthstrip\")` without confirmation; lines 37-39 call this during skull stripping. This changes Slicer's shared environment, and the broad exception can also catch a missing transitive dependency. Package size, dependency metadata, and actual conflicts were unavailable, so greater harm is not established."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked GliomaClassifier/PreProcessing/apply_skull.py (quoted in prompt lines 12-17; read_file on apply_skull.py timed out) and GliomaClassifier/GliomaClassifier.py:18, 1111. When skull stripping is run, apply_skull.py calls `slicer.util.pip_install(\"nipreps-synthstrip\")` without user confirmation and unpinned, which pulls dependencies (including torch from PyPI if not satisfied) into Slicer's shared Python environment."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "UnboundLocalError for `suffix` in `process()` when `applyRAS` is False",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line": 1022,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "UnboundLocalError for `suffix` in `process()` when `applyRAS` is False",
+     "file": "GliomaClassifier/GliomaClassifier.py",
+     "line_start": 1022,
+     "line_end": 1034,
+     "evidence": "        if applyRAS:\n            suffix = \"_RAS\"\n            \n        if applySkullStrip:\n            suffix += \"_Strip\"\n\n        if applyN4:\n            suffix += \"_N4\"\n\n        if applyNormalization:\n            suffix += \"_Norm\"\n\n        outputName = inputVolume.GetName() + suffix",
+     "explanation": "In `GliomaClassifierLogic.process()`, `suffix` is only initialized if `applyRAS` is `True`. If the user runs preprocessing with `applyRAS` unchecked (whether or not other options are checked), `suffix += ...` or `inputVolume.GetName() + suffix` raises `UnboundLocalError: cannot access local variable 'suffix' where it is not associated with a value`.",
+     "suggestion": "Initialize `suffix = \"\"` before the `if applyRAS:` block.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/GliomaClassifier.py",
+      "line": 1022
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Preprocessing fails when RAS orientation is disabled",
+     "file": "GliomaClassifier/GliomaClassifier.py",
+     "line_start": 1022,
+     "line_end": 1028,
+     "evidence": "        if applyRAS:\n            suffix = \"_RAS\"\n            \n        if applySkullStrip:\n            suffix += \"_Strip\"\n\n        if applyN4:",
+     "explanation": "suffix is initialized only when applyRAS is true. With RAS unchecked, any other operation attempts to append to an uninitialized local, and with no operations selected the later outputName calculation also fails. This prevents the documented independent preprocessing choices.",
+     "suggestion": "Initialize suffix to an empty string before the conditional branches and test each operation independently.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/GliomaClassifier.py",
+      "line": 1022
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "GliomaClassifier/GliomaClassifier.py:1022-1034 has `if applyRAS:` followed by `suffix = \"_RAS\"`, but later unconditionally uses `outputName = inputVolume.GetName() + suffix`; the append operations also use suffix first. Consequently every valid input with RAS unchecked raises UnboundLocalError, preventing independent preprocessing options. The UI passes its checkbox state at lines 599-604. This is an ordinary correctness issue, not a safety admission blocker."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked GliomaClassifier/GliomaClassifier.py:1022-1034. `suffix` is only assigned (`suffix = \"_RAS\"`) inside `if applyRAS:`. When `applyRAS` is False, any subsequent `suffix += ...` or `outputName = inputVolume.GetName() + suffix` raises `UnboundLocalError`."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Downloaded models are written to the module installation directory",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line": 969,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Downloaded models are written to the module installation directory",
+     "file": "GliomaClassifier/GliomaClassifier.py",
+     "line_start": 969,
+     "line_end": 974,
+     "evidence": "        self.resnet10ModelPath = os.path.join(\n            moduleDir,\n            \"Resources\",\n            \"Models\",\n            \"resnet10_full_torchscript_ep25.pt\"\n        )",
+     "explanation": "Optional models downloaded at runtime by `model_manager.ensure_model()` are saved directly into `moduleDir/Resources/Models`. When Slicer is installed in a system or read-only directory (e.g. `/opt` or `C:\\Program Files`), writing into the installed module folder can fail with `PermissionError`, and any downloaded models will be wiped when the extension is updated.",
+     "suggestion": "Store downloaded models in a user-writable cache directory (for example under `slicer.app.cachePath`) rather than the installed module's `Resources/Models` directory.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/GliomaClassifier.py",
+      "line": 969
+     }
+    }
+   ]
+  },
+  {
+   "title": "Module category is set to 'Examples' instead of 'Neuroimaging' or 'Informatics'",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line": 38,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Module category is set to 'Examples' instead of 'Neuroimaging' or 'Informatics'",
+     "file": "GliomaClassifier/GliomaClassifier.py",
+     "line_start": 38,
+     "line_end": 40,
+     "evidence": "        self.parent.title = _(\"GliomaAI\")  # TODO: make this more human readable by adding spaces\n        # TODO: set categories (folders where the module shows up in the module selector)\n        self.parent.categories = [translate(\"qSlicerAbstractCoreModule\", \"Examples\")]",
+     "explanation": "The module sets `self.parent.categories` to `\"Examples\"`, whereas `CMakeLists.txt` and the catalog entry use `\"Neuroimaging\"` and `README.md` instructs users to open `Informatics > GliomaAI`. Users following the README or looking under Neuroimaging will not find the module there.",
+     "suggestion": "Set `self.parent.categories = [translate(\"qSlicerAbstractCoreModule\", \"Neuroimaging\")]` (or `\"Informatics\"`) to match the documentation and catalog entry.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/GliomaClassifier.py",
+      "line": 38
+     }
+    }
+   ]
+  },
+  {
+   "title": "Self-test uses leftover template signature and assertions",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line": 1295,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Self-test uses leftover template signature and assertions",
+     "file": "GliomaClassifier/GliomaClassifier.py",
+     "line_start": 1295,
+     "line_end": 1300,
+     "evidence": "        # Test algorithm with non-inverted threshold\n        logic.process(inputVolume, outputVolume, threshold, True)\n        outputScalarRange = outputVolume.GetImageData().GetScalarRange()\n        self.assertEqual(outputScalarRange[0], inputScalarRange[0])\n        self.assertEqual(outputScalarRange[1], threshold)",
+     "explanation": "`GliomaClassifierTest.test_GliomaClassifier1` still contains the boilerplate threshold test from the Slicer module template. It calls `logic.process(inputVolume, outputVolume, threshold, True)` where the boolean parameters `applyRAS`, `applySkullStrip`, and `applyN4` receive `outputVolume`, `100`, and `True`, and then asserts that `outputVolume` (which `process()` does not write to) was thresholded to `100`. This test will fail when run.",
+     "suggestion": "Update `test_GliomaClassifier1` to call `logic.process()` with boolean flags and check the returned volume node.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/GliomaClassifier.py",
+      "line": 1295
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Registered test still exercises the old thresholding API",
+     "file": "GliomaClassifier/GliomaClassifier.py",
+     "line_start": 1291,
+     "line_end": 1299,
+     "evidence": "        # Test the module logic\n\n        logic = GliomaClassifierLogic()\n\n        # Test algorithm with non-inverted threshold\n        logic.process(inputVolume, outputVolume, threshold, True)\n        outputScalarRange = outputVolume.GetImageData().GetScalarRange()\n        self.assertEqual(outputScalarRange[0], inputScalarRange[0])\n        self.assertEqual(outputScalarRange[1], threshold)",
+     "explanation": "The current process method accepts boolean preprocessing options and creates its own output node, so this test passes a volume and threshold as flags and checks an unrelated empty node. It does not verify the current workflow and is likely to fail rather than detect regressions.",
+     "suggestion": "Replace the template with tests of independent preprocessing options, model loading and prediction, and output geometry.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/GliomaClassifier.py",
+      "line": 1291
+     }
+    }
+   ]
+  },
+  {
+   "title": "UnboundLocalError when '3D Render' is checked without 'Generate XAI'",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line": 817,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "UnboundLocalError when '3D Render' is checked without 'Generate XAI'",
+     "file": "GliomaClassifier/GliomaClassifier.py",
+     "line_start": 817,
+     "line_end": 819,
+     "evidence": "            if hasattr(self.ui, \"renderXAIin3DcheckBox\") and self.ui.renderXAIin3DcheckBox.checked:\n                if heatmap_kji is None or xaiNode is None:\n                    raise RuntimeError(\"Enable and run XAI heatmap generation before 3D XAI rendering.\")",
+     "explanation": "In `onApplyButton_1()`, `heatmap_kji` and `xaiNode` are only defined inside the `if hasattr(self.ui, \"provideXAIcheckBox\") and self.ui.provideXAIcheckBox.checked:` block. If the user checks `renderXAIin3DcheckBox` (\"3D Render\") without checking `provideXAIcheckBox` (\"Generate XAI\"), evaluating `if heatmap_kji is None` raises `UnboundLocalError` instead of the intended `RuntimeError` (or automatically enabling XAI generation as stated in README line 101).",
+     "suggestion": "Initialize `heatmap_kji = None` and `xaiNode = None` before line 730, or automatically check/run XAI generation when `renderXAIin3DcheckBox` is checked.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/GliomaClassifier.py",
+      "line": 817
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Grad-CAM can overwrite an unrelated scene volume",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line": 748,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Grad-CAM can overwrite an unrelated scene volume",
+     "file": "GliomaClassifier/GliomaClassifier.py",
+     "line_start": 748,
+     "line_end": 752,
+     "evidence": "            xaiNodeName = f\"{displayReferenceNode.GetName()}_GradCAM\"\n\n            xaiNode = slicer.mrmlScene.GetFirstNodeByName(xaiNodeName)\n            if not xaiNode or not xaiNode.IsA(\"vtkMRMLScalarVolumeNode\"):\n                xaiNode = slicer.mrmlScene.AddNewNodeByClass(\"vtkMRMLScalarVolumeNode\", xaiNodeName)",
+     "explanation": "If a scene already contains an unrelated scalar volume with the derived name, it is reused; lines 754–757 replace its image array and orientation with the heatmap. This can destroy unsaved image data or lead the user to save the replacement over their data.",
+     "suggestion": "Create a new uniquely named output node, or reuse only a node explicitly recorded as this module's own generated heatmap.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/GliomaClassifier.py",
+      "line": 748
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "GliomaClassifier/GliomaClassifier.py:748-757 constructs the name, searches the whole scene, and reuses any matching scalar volume: `xaiNode = slicer.mrmlScene.GetFirstNodeByName(xaiNodeName)` followed by `slicer.util.updateVolumeFromArray(xaiNode, heatmap_kji)` and `xaiNode.CopyOrientation(displayReferenceNode)`. When XAI is requested, a name collision can destroy unrelated unsaved volume contents; disk overwrite requires a subsequent save."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked GliomaClassifier/GliomaClassifier.py:748-757. The code looks up a MRML node by name f\"{displayReferenceNode.GetName()}_GradCAM\" with GetFirstNodeByName() and reuses it if it is a vtkMRMLScalarVolumeNode, updating its voxel array in-place via updateVolumeFromArray. However, reusing a specifically named output node (<InputName>_GradCAM) in the in-memory MRML scene is standard Slicer module behavior for re-running an algorithm without cluttering the scene, not a blocking safety issue or disk file overwrite."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "All three volume selectors in UI are bound to the same `inputVolume` parameter node property",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "GliomaClassifier/Resources/UI/GliomaClassifier.ui",
+   "line": 279,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "All three volume selectors in UI are bound to the same `inputVolume` parameter node property",
+     "file": "GliomaClassifier/Resources/UI/GliomaClassifier.ui",
+     "line_start": 279,
+     "line_end": 310,
+     "evidence": "            <widget class=\"qMRMLNodeComboBox\" name=\"inputSelector_1\">\n...\n             <property name=\"SlicerParameterName\" stdset=\"0\">\n              <string>inputVolume</string>\n             </property>\n            </widget>",
+     "explanation": "In `GliomaClassifier.ui`, `inputSelector` (line 78), `inputSelector_1` (line 308), and `inputSelector_2` (line 349) all have the dynamic property `SlicerParameterName` set to `inputVolume`. Because `self._parameterNode.connectGui(self.ui)` binds all three combo boxes to the same `inputVolume` parameter on `GliomaClassifierParameterNode`, selecting a FLAIR volume in `inputSelector_2` overwrites `inputSelector_1` (T1-CE) and `inputSelector` with the same node.",
+     "suggestion": "Remove `SlicerParameterName` from `inputSelector_1` and `inputSelector_2`, or add distinct `t1cVolume` and `flairVolume` fields to `GliomaClassifierParameterNode`.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "GliomaClassifier/Resources/UI/GliomaClassifier.ui",
+      "line": 279
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "still disputed",
+   "positions": {
+    "gpt": {
+     "item": "D2",
+     "real": "unsure",
+     "severity": null,
+     "rating": null,
+     "reason": "GliomaClassifier/Resources/UI/GliomaClassifier.ui:77-78, 307-308, 348-349 each specify `<string>inputVolume</string>`, and GliomaClassifier/GliomaClassifier.py:308-310 calls `self._parameterNodeGuiTag = self._parameterNode.connectGui(self.ui)`. Classification then reads both selectors separately (lines 610-611). Duplicate parameter names are verified, but Slicer's connectGui implementation is not in this checkout; without it or a runtime test I cannot establish whether all three are synchronized, only one is connected, or duplicate mappings fail."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked GliomaClassifier/Resources/UI/GliomaClassifier.ui:77-79, 307-309, and 348-350, and GliomaClassifier/GliomaClassifier.py:114-129, 310. All three qMRMLNodeComboBox widgets (inputSelector, inputSelector_1, inputSelector_2) set SlicerParameterName to \"inputVolume\", and self._parameterNode.connectGui(self.ui) connects all three to the single inputVolume property on GliomaClassifierParameterNode, causing selection in one to overwrite the others."
+    }
+   }
+  },
+  {
+   "title": "First classification installs TensorFlow without confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "GliomaClassifier/PreProcessing/apply_classification.py",
+   "line": 19,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Large TensorFlow package installed via pip without user confirmation",
+     "file": "GliomaClassifier/PreProcessing/apply_classification.py",
+     "line_start": 44,
+     "line_end": 46,
+     "evidence": "        try:\n            slicer.util.pip_install(\"tensorflow==2.19.1\")\n            importlib.invalidate_caches()",
+     "explanation": "When the user runs classification with the default H5 model (`proposed_model_final.h5`), `ensure_tensorflow_installed()` immediately calls `slicer.util.pip_install(\"tensorflow==2.19.1\")` without asking the user for confirmation. TensorFlow is a very large download (hundreds of megabytes) that also pulls in or updates shared Python packages in Slicer's environment (such as `numpy`, `h5py`, `protobuf`, etc.), which can block the GUI thread for a long time and potentially alter packages bundled by Slicer.",
+     "suggestion": "Prompt the user with `slicer.util.confirmOkCancelDisplay` before installing `tensorflow==2.19.1` (and `nipreps-synthstrip` in `apply_skull.py`), or consider converting `proposed_model_final.h5` to PyTorch/TorchScript or ONNX so the extension only needs the declared `PyTorch` dependency.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "GliomaClassifier/PreProcessing/apply_classification.py",
+      "line": 17
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "First classification installs TensorFlow without confirmation",
+     "file": "GliomaClassifier/PreProcessing/apply_classification.py",
+     "line_start": 40,
+     "line_end": 46,
+     "evidence": "        logging.info(\n            \"TensorFlow not found. Installing tensorflow==2.19.1...\"\n        )\n\n        try:\n            slicer.util.pip_install(\"tensorflow==2.19.1\")\n            importlib.invalidate_caches()",
+     "explanation": "When TensorFlow is missing, classification of the default model downloads and installs it and its dependencies into Slicer's shared Python environment without asking the user. This can consume significant storage and change packages used by other extensions.",
+     "suggestion": "Explain the installation and its size and request explicit confirmation before installing; avoid replacing Slicer-bundled dependencies.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "GliomaClassifier/PreProcessing/apply_classification.py",
+      "line": 19
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "GliomaClassifier/PreProcessing/apply_classification.py:17-18, 24-28, 40-45 installs if TensorFlow itself is missing: `slicer.util.pip_install(\"tensorflow==2.19.1\")`. Lines 173-175 and 285-295 show the H5 inference path calls it. No confirmation is present before the pip call; the large install can alter the shared Python environment. README.md:65 discloses first-use installation but is not an interactive consent prompt."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked GliomaClassifier/PreProcessing/apply_classification.py:44-46. ensure_tensorflow_installed() calls slicer.util.pip_install(\"tensorflow==2.19.1\") without user confirmation when running classification with a TensorFlow model. TensorFlow is a large download and installing a pinned version into Slicer's shared Python environment without confirmation can alter bundled packages (such as numpy) and freeze the UI during installation. Per the review policy, package installation without user confirmation for large downloads or modifying bundled packages in the shared environment warrants requesting changes."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Packaged model destination differs from runtime lookup",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "GliomaClassifier/CMakeLists.txt",
+   "line": 35,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Packaged model destination differs from runtime lookup",
+     "file": "GliomaClassifier/CMakeLists.txt",
+     "line_start": 35,
+     "line_end": 39,
+     "evidence": "# Install model files\ninstall(\n  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Resources/Models\n  DESTINATION ${Slicer_INSTALL_QTSCRIPTEDMODULES_LIB_DIR}/${MODULE_NAME}/Resources\n)",
+     "explanation": "The install rule puts models beneath GliomaClassifier/Resources, whereas GliomaClassifier.py lines 949–966 resolves them as Resources/Models relative to the script directory. In a standard scripted-module installation the script is in the parent qt-scripted-modules directory, so the bundled default classifier and skull-strip model are not found. The same lookup also places optional downloads outside the module resource directory.",
+     "suggestion": "Resolve models using Slicer's module resource path, and put optional downloaded models in a writable user cache; test an installed package.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/CMakeLists.txt",
+      "line": 35
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "GliomaClassifier/CMakeLists.txt:35-39 uses `DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Resources/Models` and `DESTINATION ${Slicer_INSTALL_QTSCRIPTEDMODULES_LIB_DIR}/${MODULE_NAME}/Resources`, while GliomaClassifier/GliomaClassifier.py:949-966 uses `moduleDir = os.path.dirname(os.path.abspath(__file__))` then joins `\"Resources\", \"Models\"`. With the usual scripted-module install layout these paths differ. More immediately, the inspected Resources listing has no Models directory at all; the non-OPTIONAL install rule references a missing source directory, so packaging/install is expected to fail, and neither claimed bundled model is present. I could not run the build or independently inspect Slicer's build macro."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Checked GliomaClassifier/CMakeLists.txt:35-39, list_files output, and GliomaClassifier/GliomaClassifier.py:949-988. First, GliomaClassifier/Resources/Models does not exist in the repository at all (list_files shows only Resources/Icons and Resources/UI), so CMake configure/install will fail on `install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Resources/Models ...)` and neither synthstrip.1.pt nor proposed_model_final.h5 are present in the repo or downloaded by model_manager.py. Second, CMakeLists.txt installs Models to `${Slicer_INSTALL_QTSCRIPTEDMODULES_LIB_DIR}/${MODULE_NAME}/Resources` (which creates `.../GliomaClassifier/Resources/Models`), whereas `slicerMacroBuildScriptedModule` installs `GliomaClassifier.py` directly in `${Slicer_INSTALL_QTSCRIPTEDMODULES_LIB_DIR}`, so `os.path.join(moduleDir, \"Resources\", \"Models\", ...)` looks in `.../qt-scripted-modules/Resources/Models` instead of using `self.resourcePath(...)`. This is a blocking packaging defect."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Skull stripping installs a Python package without confirmation",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "GliomaClassifier/PreProcessing/apply_skull.py",
+   "line": 12,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Skull stripping installs a Python package without confirmation",
+     "file": "GliomaClassifier/PreProcessing/apply_skull.py",
+     "line_start": 12,
+     "line_end": 17,
+     "evidence": "    try:\n        from nipreps.synthstrip.cli import main as synthstrip_main\n        return synthstrip_main\n    except ModuleNotFoundError:\n        slicer.util.pip_install(\"nipreps-synthstrip\")\n        from nipreps.synthstrip.cli import main as synthstrip_main",
+     "explanation": "First use of skull stripping installs an unpinned package and its dependencies into the shared environment without a user confirmation. Its dependency metadata was not available here, so effects on PyTorch or Slicer-bundled packages cannot be established.",
+     "suggestion": "Ask before installation and verify the package's dependency requirements do not install PyTorch outside PyTorchUtils or disrupt bundled packages.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/PreProcessing/apply_skull.py",
+      "line": 12
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, minor (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "GliomaClassifier/PreProcessing/apply_skull.py:12-17 catches `ModuleNotFoundError` and executes `slicer.util.pip_install(\"nipreps-synthstrip\")` without confirmation; lines 37-39 call this during skull stripping. This changes Slicer's shared environment, and the broad exception can also catch a missing transitive dependency. Package size, dependency metadata, and actual conflicts were unavailable, so greater harm is not established."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked GliomaClassifier/PreProcessing/apply_skull.py (quoted in prompt lines 12-17; read_file on apply_skull.py timed out) and GliomaClassifier/GliomaClassifier.py:18, 1111. When skull stripping is run, apply_skull.py calls `slicer.util.pip_install(\"nipreps-synthstrip\")` without user confirmation and unpinned, which pulls dependencies (including torch from PyPI if not satisfied) into Slicer's shared Python environment."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "UnboundLocalError for `suffix` in `process()` when `applyRAS` is False",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line": 1022,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "UnboundLocalError for `suffix` in `process()` when `applyRAS` is False",
+     "file": "GliomaClassifier/GliomaClassifier.py",
+     "line_start": 1022,
+     "line_end": 1034,
+     "evidence": "        if applyRAS:\n            suffix = \"_RAS\"\n            \n        if applySkullStrip:\n            suffix += \"_Strip\"\n\n        if applyN4:\n            suffix += \"_N4\"\n\n        if applyNormalization:\n            suffix += \"_Norm\"\n\n        outputName = inputVolume.GetName() + suffix",
+     "explanation": "In `GliomaClassifierLogic.process()`, `suffix` is only initialized if `applyRAS` is `True`. If the user runs preprocessing with `applyRAS` unchecked (whether or not other options are checked), `suffix += ...` or `inputVolume.GetName() + suffix` raises `UnboundLocalError: cannot access local variable 'suffix' where it is not associated with a value`.",
+     "suggestion": "Initialize `suffix = \"\"` before the `if applyRAS:` block.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/GliomaClassifier.py",
+      "line": 1022
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Preprocessing fails when RAS orientation is disabled",
+     "file": "GliomaClassifier/GliomaClassifier.py",
+     "line_start": 1022,
+     "line_end": 1028,
+     "evidence": "        if applyRAS:\n            suffix = \"_RAS\"\n            \n        if applySkullStrip:\n            suffix += \"_Strip\"\n\n        if applyN4:",
+     "explanation": "suffix is initialized only when applyRAS is true. With RAS unchecked, any other operation attempts to append to an uninitialized local, and with no operations selected the later outputName calculation also fails. This prevents the documented independent preprocessing choices.",
+     "suggestion": "Initialize suffix to an empty string before the conditional branches and test each operation independently.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GliomaClassifier/GliomaClassifier.py",
+      "line": 1022
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "GliomaClassifier/GliomaClassifier.py:1022-1034 has `if applyRAS:` followed by `suffix = \"_RAS\"`, but later unconditionally uses `outputName = inputVolume.GetName() + suffix`; the append operations also use suffix first. Consequently every valid input with RAS unchecked raises UnboundLocalError, preventing independent preprocessing options. The UI passes its checkbox state at lines 599-604. This is an ordinary correctness issue, not a safety admission blocker."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked GliomaClassifier/GliomaClassifier.py:1022-1034. `suffix` is only assigned (`suffix = \"_RAS\"`) inside `if applyRAS:`. When `applyRAS` is False, any subsequent `suffix += ...` or `outputName = inputVolume.GetName() + suffix` raises `UnboundLocalError`."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (blocking, ok)",
+   "positions": {
+    "gpt": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "GliomaClassifier/GliomaClassifier.py:748-757 reuses a matching named volume and calls `slicer.util.updateVolumeFromArray(xaiNode, heatmap_kji)`, creating a concrete path to loss of unrelated unsaved image data. Model downloads in GliomaClassifier/PreProcessing/model_manager.py:65-70 use `checksum=checksum`, but external package payloads, execution behavior, and the exact revision could not be independently verified. Blocking reflects the verified overwrite, not an exhaustive safety audit."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Checked GliomaClassifier/GliomaClassifier.py, GliomaClassifier/PreProcessing/apply_classification.py, apply_XAI.py, model_manager.py, and CMakeLists.txt. There is no malicious behavior, unauthorized data exfiltration, or unsafe code execution; optional models are downloaded from the author's GitHub releases with SHA-256 verification (model_manager.py:5-70). The in-memory MRML node reuse in D1 is ordinary Slicer scene behavior, not a safety vulnerability."
+    }
+   }
+  },
+  {
+   "title": "Rating of packaging",
+   "category": "packaging",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D8",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "concern"
+   },
+   "outcome": "settled: blocking (blocking, blocking)",
+   "positions": {
+    "gpt": {
+     "item": "D8",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "GliomaClassifier/CMakeLists.txt:35-39 declares `DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Resources/Models` without OPTIONAL, but the inspected Resources tree contains only Icons and UI. This makes the install step expected to fail on the missing directory and also leaves the default and SynthStrip weights absent. Lines 5-17 list the Python support files, and the root CMakeLists.txt:23 says `set(EXTENSION_DEPENDS \"PyTorch\")`; catalog metadata, source revision, actual build and external Slicer macro were unavailable."
+    },
+    "gemini": {
+     "item": "D8",
+     "real": "yes",
+     "severity": null,
+     "rating": "blocking",
+     "reason": "Checked GliomaClassifier/CMakeLists.txt:35-39, GliomaClassifier/GliomaClassifier.py:949-988, and the repository file tree via list_files. `GliomaClassifier/CMakeLists.txt` line 37 attempts to install `${CMAKE_CURRENT_SOURCE_DIR}/Resources/Models`, which does not exist in the repository, causing CMake installation to fail; furthermore, the destination path `${Slicer_INSTALL_QTSCRIPTEDMODULES_LIB_DIR}/${MODULE_NAME}/Resources` does not match `os.path.join(moduleDir, \"Resources\", \"Models\")` in an installed scripted module, and the default models (`proposed_model_final.h5` and `synthstrip.1.pt`) are neither committed nor downloaded on demand."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "concern"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "concern"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "concern",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "needs fixes",
+  "gemini": "minor issues",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 8,
+  "single": 7,
+  "unverified": 0,
+  "total": 10,
+  "open_disputes": 2
+ }
+}

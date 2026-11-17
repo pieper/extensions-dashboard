@@ -1,0 +1,116 @@
+{
+ "purpose": "GliomaAI preprocesses brain MRI and classifies gliomas as low- or high-grade using pretrained models, with optional Grad-CAM visualization. It is intended for researchers and educators using 3D Slicer.",
+ "summary": "The extension documents a research workflow, but Grad-CAM can overwrite an unrelated scene volume, and first-use Python installations run without confirmation. Packaged model paths also appear inconsistent with the CMake installation destination, and preprocessing fails when RAS is unchecked. The source snapshot and license notices were inspected, but the moving catalog revision and external payloads could not be independently verified. 🔴 Do not merge yet: prevent scene-data overwrites, obtain informed consent before dependency installation, and resolve the remaining source and payload verification gaps.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected scene writes, model retrieval and deserialization, temporary files, and network-related calls. The Grad-CAM output can overwrite an unrelated existing volume selected solely by name; external model binaries and dependency code were not available to inspect."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Inspected both pip-install paths and PyTorch initialization. TensorFlow and SynthStrip are installed into Slicer's shared environment on first use without a confirmation prompt; PyTorch inference otherwise uses PyTorchUtils."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "Inspected both CMake files, module resource paths and the supplied catalog entry. Dependencies match and Python sources are listed, but the model installation location appears inconsistent with the paths used at runtime; the moving revision could not be resolved independently."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected LICENSE.txt, THIRD_PARTY_NOTICES.md, the SynthStrip license and README licensing scope. They state MIT distribution terms for the project-trained weights and the bundled SynthStrip weights; upstream payload provenance and packaged notice inclusion were not independently verified."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected preprocessing, classification, UI bindings, model path construction and Grad-CAM. Preprocessing has an uninitialized suffix when RAS is disabled, and the model installation and runtime paths do not match."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README provides usage steps, a research-only disclaimer, model information and a publication. The registered test is a stale thresholding template rather than a meaningful test of the current pipeline."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Grad-CAM can overwrite an unrelated scene volume",
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line_start": 748,
+   "line_end": 752,
+   "evidence": "            xaiNodeName = f\"{displayReferenceNode.GetName()}_GradCAM\"\n\n            xaiNode = slicer.mrmlScene.GetFirstNodeByName(xaiNodeName)\n            if not xaiNode or not xaiNode.IsA(\"vtkMRMLScalarVolumeNode\"):\n                xaiNode = slicer.mrmlScene.AddNewNodeByClass(\"vtkMRMLScalarVolumeNode\", xaiNodeName)",
+   "explanation": "If a scene already contains an unrelated scalar volume with the derived name, it is reused; lines 754–757 replace its image array and orientation with the heatmap. This can destroy unsaved image data or lead the user to save the replacement over their data.",
+   "suggestion": "Create a new uniquely named output node, or reuse only a node explicitly recorded as this module's own generated heatmap.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "First classification installs TensorFlow without confirmation",
+   "file": "GliomaClassifier/PreProcessing/apply_classification.py",
+   "line_start": 40,
+   "line_end": 46,
+   "evidence": "        logging.info(\n            \"TensorFlow not found. Installing tensorflow==2.19.1...\"\n        )\n\n        try:\n            slicer.util.pip_install(\"tensorflow==2.19.1\")\n            importlib.invalidate_caches()",
+   "explanation": "When TensorFlow is missing, classification of the default model downloads and installs it and its dependencies into Slicer's shared Python environment without asking the user. This can consume significant storage and change packages used by other extensions.",
+   "suggestion": "Explain the installation and its size and request explicit confirmation before installing; avoid replacing Slicer-bundled dependencies.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Skull stripping installs a Python package without confirmation",
+   "file": "GliomaClassifier/PreProcessing/apply_skull.py",
+   "line_start": 12,
+   "line_end": 17,
+   "evidence": "    try:\n        from nipreps.synthstrip.cli import main as synthstrip_main\n        return synthstrip_main\n    except ModuleNotFoundError:\n        slicer.util.pip_install(\"nipreps-synthstrip\")\n        from nipreps.synthstrip.cli import main as synthstrip_main",
+   "explanation": "First use of skull stripping installs an unpinned package and its dependencies into the shared environment without a user confirmation. Its dependency metadata was not available here, so effects on PyTorch or Slicer-bundled packages cannot be established.",
+   "suggestion": "Ask before installation and verify the package's dependency requirements do not install PyTorch outside PyTorchUtils or disrupt bundled packages.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Packaged model destination differs from runtime lookup",
+   "file": "GliomaClassifier/CMakeLists.txt",
+   "line_start": 35,
+   "line_end": 39,
+   "evidence": "# Install model files\ninstall(\n  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Resources/Models\n  DESTINATION ${Slicer_INSTALL_QTSCRIPTEDMODULES_LIB_DIR}/${MODULE_NAME}/Resources\n)",
+   "explanation": "The install rule puts models beneath GliomaClassifier/Resources, whereas GliomaClassifier.py lines 949–966 resolves them as Resources/Models relative to the script directory. In a standard scripted-module installation the script is in the parent qt-scripted-modules directory, so the bundled default classifier and skull-strip model are not found. The same lookup also places optional downloads outside the module resource directory.",
+   "suggestion": "Resolve models using Slicer's module resource path, and put optional downloaded models in a writable user cache; test an installed package.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Preprocessing fails when RAS orientation is disabled",
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line_start": 1022,
+   "line_end": 1028,
+   "evidence": "        if applyRAS:\n            suffix = \"_RAS\"\n            \n        if applySkullStrip:\n            suffix += \"_Strip\"\n\n        if applyN4:",
+   "explanation": "suffix is initialized only when applyRAS is true. With RAS unchecked, any other operation attempts to append to an uninitialized local, and with no operations selected the later outputName calculation also fails. This prevents the documented independent preprocessing choices.",
+   "suggestion": "Initialize suffix to an empty string before the conditional branches and test each operation independently.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Registered test still exercises the old thresholding API",
+   "file": "GliomaClassifier/GliomaClassifier.py",
+   "line_start": 1291,
+   "line_end": 1299,
+   "evidence": "        # Test the module logic\n\n        logic = GliomaClassifierLogic()\n\n        # Test algorithm with non-inverted threshold\n        logic.process(inputVolume, outputVolume, threshold, True)\n        outputScalarRange = outputVolume.GetImageData().GetScalarRange()\n        self.assertEqual(outputScalarRange[0], inputScalarRange[0])\n        self.assertEqual(outputScalarRange[1], threshold)",
+   "explanation": "The current process method accepts boolean preprocessing options and creates its own output node, so this test passes a volume and threshold as flags and checks an unrelated empty node. It does not verify the current workflow and is likely to fail rather than detect regressions.",
+   "suggestion": "Replace the template with tests of independent preprocessing options, model loading and prediction, and output geometry.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No commands, Slicer builds or runtime tests were run.",
+  "The catalog's main branch was not independently resolved to the supplied commit 2058fd8c3c9473112ca8c52721a00865672b0b35; source revision and repository accessibility remain unverified.",
+  "Bundled model binaries, downloaded release assets, their checksums and external dependency source and metadata could not be inspected.",
+  "Upstream SynthStrip weight license assertion and inclusion of license notices in the generated package were not independently verified.",
+  "No PR checklist, previous review baseline or CI results were available."
+ ],
+ "questions_for_author": [
+  "Can you confirm the installed-package model paths and provide an installation test for the default classifier and SynthStrip?",
+  "Can you provide the dependency metadata for the SynthStrip package and confirm its installation cannot replace Slicer-managed PyTorch or bundled libraries?"
+ ]
+}
