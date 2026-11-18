@@ -1,0 +1,253 @@
+{
+ "purpose": "A two-module 3D Slicer extension for the UCSF Breast Imaging Research Group that loads the pre-, early- and late-contrast phases of a bilateral axial breast DCE-MRI exam and computes functional tumor volume (FTV) from a user-drawn ROI, with an SER-colourised report. It targets breast-MRI researchers and I-SPY-style trial sites.",
+ "summary": "The extension does what it claims (DCE phase selection + FTV segmentation + PDF report) and ships a Slicer BSD license, but it has serious environment and safety problems: six pip packages (including non-headless opencv-python) are installed at module import, i.e. at Slicer startup for users who never open the module; shell commands are built by string concatenation from user-controlled folder/file names and run with os.system; one code path deletes original DICOMs from the user's exam folder; and module 2 cannot be opened unless module 1 was run first. Packaging is mostly consistent (all imported plugin files are installed by CMake). Needs fixes before being offered to users.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Read gzip_gunzip_pyfuncs.py, ftv_plots.py, DCE_IDandPhaseSelect.py and DCE_TumorMapProcess.py: shell commands are assembled from user-controlled paths and run via os.system, and one branch deletes original DICOMs from the exam folder. No network transmission of image data was found (no requests/urllib/socket use)."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "DCE_TumorMapProcess.py lines 83-89 and DCE_IDandPhaseSelect.py lines 54-58 call pip at module import for nibabel, cv2, pynrrd, yattag, matplotlib and scikit-image; pyproject.toml line 8 lists opencv-python (bundles its own Qt). Module 2 also permanently disables DataProbe slice annotations via QSettings."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Both module CMakeLists.txt files install every plugin file that is imported, and EXTENSION_DEPENDS \"NA\" matches build_dependencies []. However the runtime pip dependencies are not declared anywhere the build uses, and the icon/screenshot/homepage URLs point to a different repository (rnadkarni2/...) than scm_url."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "license.txt is the 3D Slicer BSD-style contribution and software license, which permits redistribution; copyright.txt adds an 'All rights reserved' notice and a request (not a prohibition) to inform UCSF about derivative works. The bundled 3DSlicerLogo.PNG is Slicer's own logo."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read DCE_IDandPhaseSelect.py and the first 730 lines of DCE_TumorMapProcess.py: progressBar is used outside the branch that creates it, module 2's setup() hard-requires module 1's 'path node' and pickle file, a QFileDialog is opened during widget setup, and distutils is imported (removed in Python 3.12)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README explains purpose, modules and a publication, and a 13 MB step-by-step PDF is included, but there is no sample data, the ctest entries are commented out and the module helpText is still the Slicer template text."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Shell commands built from user-controlled folder names and run with os.system",
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line_start": 74,
+   "line_end": 99,
+   "evidence": "cmd_base = r'\"C:\\Program Files\\7-Zip\\7z\" x '\ncmd1_7z = cmd_base + str(os.path.join(curr_path,file1)) + ' -o' + new_path   #command for file 1 uncompressed\nos.system(cmd1_7z) #execute above command",
+   "explanation": "extractGZ() is called from module 1 (DCE_IDandPhaseSelect.py lines 655 and 766) on the exam folder the user selected. Folder and file names from that directory are concatenated into a command string without quoting and passed to os.system, so a DICOM folder or file named with a shell metacharacter (e.g. '1 & calc', '\"; ...') executes arbitrary commands with the user's privileges. This is reachable with any downloaded or shared DICOM dataset whose folder names are not sanitised. The same pattern is repeated at lines 153-175.",
+   "suggestion": "Use subprocess.run with an argument list (no shell), or better, decompress with Python's gzip module instead of shelling out to 7-Zip.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "os.system with user-chosen report filename (img2dcm)",
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line_start": 789,
+   "line_end": 790,
+   "evidence": "command = \"img2dcm\" + \" \" + savenamejpeg + \" \" + savenamedcm #use img2dcm to create dicom report from jpeg\nos.system(command)",
+   "explanation": "savenamejpeg derives from the path the user picked in qt.QFileDialog.getSaveFileName (DCE_TumorMapProcess.py line 2576). A save name containing shell metacharacters is executed as a shell command. In addition img2dcm is not bundled with Slicer or the extension, so on typical installs this silently produces no DICOM report and the user gets no error.",
+   "suggestion": "Use subprocess.run([...]) with a list, check the return code, and report failure to the user (or drop the DICOM export).",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Original DICOMs deleted from the user's exam folder without verification",
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line_start": 163,
+   "line_end": 170,
+   "evidence": "gzcmd = gzcmd_base + fullfile + '.gz' + ' ' + fullfile\nos.system(gzcmd) #create a gzipped copy of the file\nos.remove(fullfile) #delete the original, non-gzipped copy of the file",
+   "explanation": "In the mixed gzipped/non-gzipped branch, each original DICOM in the user's exam directory is gzipped with a hardcoded 7-Zip path and then unconditionally deleted. If 7-Zip is missing or the command fails (the path is hardcoded to 'C:\\Program Files\\7-Zip\\7z', and line 30 even contains the typo 'C:\\Program Fileszz\\7-Zip'), the original image is removed with no copy left - permanent loss of source medical images. I found no call site for gunzipAllFilesDCE in the files I read, so this may currently be dead code, but it is shipped and reachable.",
+   "suggestion": "Never delete source DICOMs; write decompressed copies to a separate output folder and verify success before any removal, or remove this function.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "pickle.load of a file at a fixed path in the extension install directory",
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line_start": 267,
+   "line_end": 270,
+   "evidence": "wkspc_savepath = os.path.join(extension_path,'current_exam_workspace.pickle')\nwith open(wkspc_savepath,'rb') as f:\n  self.tempres, self.all_folders_info, self.dce_folders, self.dce_ind, self.fsort, self.studydate, self.nslice, self.earlyPostContrastNum, self.latePostContrastNum, self.earlydiffmm, self.earlydiffss, self.latediffmm, self.latediffss = pickle.load(f)",
+   "explanation": "Module 1 writes this pickle (DCE_IDandPhaseSelect.py lines 147-150) into the extension installation directory and module 2 unpickles it. Anyone able to write that file gets code execution in Slicer, and on a normal install the extension directory is read-only, so module 1 fails for non-admin users. It also stores patient-identifying exam metadata in the install tree.",
+   "suggestion": "Store the workspace in a vtkMRMLScriptedModuleNode parameter node or in the user's temp/settings directory, and use JSON instead of pickle.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "pip installs executed at module import (Slicer startup)",
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line_start": 83,
+   "line_end": 89,
+   "evidence": "nib = _importOptional('nibabel')\ncv2 = _importOptional('cv2', 'cv2')\nnrrd = _importOptional('pynrrd', 'nrrd')\nyattag = _importOptional('yattag')\nmatplotlib = _importOptional('matplotlib')",
+   "explanation": "Slicer imports every installed scripted module file at startup to register it, so these module-level calls run pip_ensure/pip_install for nibabel, opencv, pynrrd, yattag, matplotlib and scikit-image for every user who has the extension installed, even if they never open the module, and without asking. DCE_IDandPhaseSelect.py lines 54-58 does the same for nibabel. This mutates Slicer's shared Python environment silently and can break other extensions.",
+   "suggestion": "Move the imports inside the functions that need them and ask the user for confirmation before installing anything; declare the dependencies in the extension metadata instead.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "opencv-python (non-headless) declared as a dependency",
+   "file": "pyproject.toml",
+   "line_start": 6,
+   "line_end": 12,
+   "evidence": "dependencies = [\n    \"nibabel\",\n    \"opencv-python\",",
+   "explanation": "opencv-python bundles its own Qt libraries, which conflicts with the Qt that Slicer ships and can crash or destabilise the application for all modules. The extension only uses cv2.imread/cvtColor (ftv_plots.py lines 46-48), which opencv-python-headless provides.",
+   "suggestion": "Use opencv-python-headless, or avoid cv2 entirely (matplotlib.image / PIL are already available).",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Persistent global change to Slicer's DataProbe settings",
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line_start": 231,
+   "line_end": 235,
+   "evidence": "slicer.modules.DataProbeInstance.infoWidget.sliceAnnotations.sliceViewAnnotationsEnabled=False\nslicer.modules.DataProbeInstance.infoWidget.sliceAnnotations.updateSliceViewFromGUI()\n# Disable slice annotations persistently (after Slicer restarts)\nsettings = qt.QSettings()\nsettings.setValue('DataProbe/sliceViewAnnotations.enabled', 0)",
+   "explanation": "Opening module 2 permanently disables the DataProbe slice annotations in the user's Slicer settings. This survives restarts and affects every other module and workflow, including for users who only tried this extension once.",
+   "suggestion": "Do not write global QSettings; if the annotations must be hidden, restore the previous value in cleanup().",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Extension metadata URLs point to a different repository than scm_url",
+   "file": "CMakeLists.txt",
+   "line_start": 7,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_HOMEPAGE \"https://github.com/rnadkarni2/SlicerBreast_DCEMRI_FTV\")",
+   "explanation": "The catalog entry points at https://github.com/radiology-research/SlicerBreast_DCEMRI_FTV, while homepage, icon and screenshot URLs point at rnadkarni2/SlicerBreast_DCEMRI_FTV. If the old repository is deleted or diverges, the Extension Manager shows broken icons/screenshots and users are sent to the wrong project.",
+   "suggestion": "Point EXTENSION_HOMEPAGE/ICONURL/SCREENSHOTURLS at the radiology-research repository.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Runtime pip dependencies are not declared where the build can see them",
+   "file": "pyproject.toml",
+   "line_start": 1,
+   "line_end": 12,
+   "evidence": "name = \"slicer-ext-breast-dcemri-ftv\"",
+   "explanation": "The Slicer extension build does not consume pyproject.toml, and the catalog entry has build_dependencies []. The real dependencies (nibabel, opencv, pynrrd, yattag, scikit-image, matplotlib) are therefore satisfied by silent pip installs at import time rather than by declared requirements, so the packaged extension has no reproducible dependency set.",
+   "suggestion": "Declare the dependencies in the extension metadata / documentation and install them with explicit user consent.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Large binaries committed to the source repository",
+   "file": "README.md",
+   "line_start": 73,
+   "line_end": 74,
+   "evidence": "For complete, step-by-step user instructions on how to use this extension, please read the document <br>\n**[UserInstructionsFor_Breast_DCEMRI_FTV.pdf](StepByStepInstructionsForSlicerFTV_12_14_2022_FINAL_Rdcd.pdf)**, which has been included in this repository.",
+   "explanation": "A 13 MB PDF plus ~2 MB of screenshots are committed. This bloats every clone and the extension package; documentation of this size is normally hosted externally and linked.",
+   "suggestion": "Host the PDF externally (or in a release asset) and link it from the README.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "progressBar used outside the branch that creates it",
+   "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+   "line_start": 138,
+   "line_end": 153,
+   "evidence": "if(len(dce_folders) > 0):\n  progbarttl = \"Visit: \" + nodevisstr\n  progressBar = slicer.util.createProgressDialog(windowTitle = progbarttl)",
+   "explanation": "progressBar is only created when at least one DCE folder was identified, but it is dereferenced unconditionally a few lines later (line 153, 'progressBar.value = 25'). When automatic DCE identification finds nothing, the user gets a NameError traceback instead of an actionable error message, and the progress dialog is never closed on the success path either.",
+   "suggestion": "Create the dialog unconditionally (or guard every use) and close it in a finally block; report 'no DCE series found' to the user.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Module 2 cannot be opened unless module 1 was run first",
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line_start": 240,
+   "line_end": 242,
+   "evidence": "exampath_node = slicer.util.getNode(\"path node\")\n#2. Read exampath from current node in pathSelector\nself.exampath = exampath_node.GetParameter(\"exampath\")",
+   "explanation": "setup() immediately looks up the 'path node' created by module 1 and then unpickles the workspace file (lines 267-270). If the user opens module 2 first, or after restarting Slicer, slicer.util.getNode raises and the module widget fails to build, leaving a broken panel with no explanation.",
+   "suggestion": "Check for the node/file and show a clear message ('run Module 1 first') instead of raising.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "distutils imported (removed in Python 3.12)",
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line_start": 26,
+   "line_end": 26,
+   "evidence": "from distutils.dir_util import copy_tree",
+   "explanation": "distutils was removed from the standard library in Python 3.12, which recent Slicer versions use. On such builds importing this plugin module raises ImportError, and because DCE_TumorMapProcess.py imports it at module level (line 101) the whole module fails to load.",
+   "suggestion": "Use shutil.copytree(dirs_exist_ok=True) instead.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "File dialog opened during widget setup and blocking sleep on the GUI thread",
+   "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+   "line_start": 295,
+   "line_end": 295,
+   "evidence": "self.exampath = qt.QFileDialog.getExistingDirectory(0,(\"Select folder for DCE-MRI exam\"))",
+   "explanation": "A modal folder dialog is opened as soon as the module widget is constructed, so merely selecting the module in the module list pops a dialog and the rest of setup() runs against whatever the user picked (or an empty string). Combined with time.sleep(1) at line 239 and the long DICOM loading done on the GUI thread with processEvents, the UI is unresponsive during processing.",
+   "suggestion": "Move folder selection to a button, and run the loading in a CLI logic call with a proper progress dialog.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Module test downloads sample data and does not test the module",
+   "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+   "line_start": 856,
+   "line_end": 861,
+   "evidence": "SampleData.downloadFromURL(\n  nodeNames='FA',\n  fileNames='FA.nrrd',\n  uris='http://slicer.kitware.com/midas3/download?items=5767')",
+   "explanation": "The only test is the Slicer template test: it downloads an unrelated FA volume over plain HTTP and asserts nothing about the extension, so it cannot catch regressions in the DCE loading or FTV logic. The Testing/Python/CMakeLists.txt files have their unittest lines commented out.",
+   "suggestion": "Add a test that exercises the logic with a small anonymised DICOM series or synthetic volume.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Template help text and no sample data",
+   "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+   "line_start": 261,
+   "line_end": 263,
+   "evidence": "self.parent.helpText = \"\"\"\nThis is an example of scripted loadable module bundled in an extension.\n\"\"\"  # TODO: update with short description of the module",
+   "explanation": "Both modules still show the Slicer template help text and acknowledgement, so the in-application documentation does not describe what the module does; there is also no sample dataset, so a new user cannot try the workflow without their own DICOM exam.",
+   "suggestion": "Replace the template helpText with the README description and link the step-by-step PDF.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Clinical-use disclaimer only appears on the generated report",
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line_start": 767,
+   "line_end": 767,
+   "evidence": "txtplot = plt.text(0.1,0.7,'NOT FOR DIAGNOSIS', fontsize = 14)",
+   "explanation": "The generated report is marked 'NOT FOR DIAGNOSIS', which is good, but the README and module help do not state that the FTV values are research-only and not validated for clinical decision making.",
+   "suggestion": "Add a short research-use-only statement to the README and module helpText.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Most of DCE_TumorMapProcess.py beyond line 730 (the remaining ~1900 lines, including the segmentation/report button handlers) was not read.",
+  "Plugin modules not read: Get_header_info_all_manufacturer.py, chooseEarly_LateByManufacturer.py/.new.py, Exam_Ident_and_timing.py/.new.py, timing_info_class_all_manufacturer.py, compute_lps_to_rcs.py (both copies), multivolume_folder_sort.py (both), read_DCE_images_to_numpy.py (both), create2DimgAll",
+  "Whether gunzipAllFilesDCE (the function containing the os.remove of original DICOMs) has any call site - I found none in the files I read, so it may be dead code.",
+  "The 13 MB StepByStepInstructionsForSlicerFTV_12_14_2022_FINAL_Rdcd.pdf could not be read.",
+  "The catalog entry uses scm_revision 'master'; I could not verify that commit 271ece80ce3db9cc79596ee5436dd5d44ed1a50c exists or that the branch tip matches what I reviewed.",
+  "No build or CI results were available, so I could not confirm the extension builds or that the modules load in a real Slicer.",
+  "Whether the pip packages installed at import (nibabel, opencv, pynrrd, yattag, matplotlib, scikit-image) pull in versions that downgrade or pin packages Slicer bundles (e.g. numpy) was not verified."
+ ],
+ "questions_for_author": [
+  "Why are nibabel, opencv, pynrrd, yattag, matplotlib and scikit-image installed with pip at module import instead of being declared as dependencies and installed with user consent?",
+  "Can the 7-Zip shell calls be replaced with Python's gzip module (or subprocess without a shell), and can the hardcoded 'C:\\Program Files\\7-Zip\\7z' path be removed?",
+  "Is gunzipAllFilesDCE still used? It deletes original DICOMs from the user's exam folder after a gzip command that may fail.",
+  "Can the module-1 workspace be stored in a parameter node or the user's temp directory instead of a pickle inside the extension install directory?",
+  "Can module 2 show a clear message instead of raising when module 1 has not been run yet?"
+ ]
+}

@@ -1,0 +1,100 @@
+{
+ "purpose": "AnomalousFiltersExtension provides four C++ ITK-based CLI modules for denoising medical images (particularly structural MRI, EPI/fMRI, and DWI/DTI volumes) using isotropic and anisotropic anomalous diffusion filters based on the porous media (Tsallis Fokker-Planck) equation. It is intended for researchers and neuroimaging users performing noise attenuation as a pre-processing step in 3D Slicer.",
+ "summary": "AnomalousFiltersExtension is a C++ CLI extension providing four ITK-based anomalous diffusion denoising filters for structural MRI, EPI, and DWI data. It is licensed under Apache 2.0, has no external dependencies beyond Slicer/ITK, does not modify the Python environment, and poses no security or safety concerns. Several non-blocking soundness and testing issues were noted (such as performing multiple iterations inside `ThreadedGenerateData` without thread synchronization, `homoLevel` not being wired up in `AADImageFilter.cxx`, and unadapted `--sigma` flags in the CTest files).\n\n🟢 Recommend merge",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all C++ source files (`.cxx`, `.h`, `.hxx`), XML descriptors, CMake files, and documentation. The code performs only local ITK image reading, mathematical filtering, and writing with no network activity, subprocess execution, or unsafe file operations."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected all `CMakeLists.txt` files and `requirements.txt`. This is a pure C++ CLI extension using `SlicerExecutionModel` and `ITK`; it does not touch Slicer's Python environment (`requirements.txt` is only used by `.readthedocs.yaml` to build documentation)."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected root `CMakeLists.txt` and all four module `CMakeLists.txt` and `.xml` files. All four CLI modules (`AADImageFilter`, `IADImageFilter`, `AADDiffusionWeightedData`, `AADEPIData`) are properly configured with `SEMMacroBuildCLI` and match the catalog entry."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE`, `README.md`, `docs/index.md`, and source headers. The extension is licensed under the Apache License 2.0, which clearly permits distribution."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Inspected the ITK filter implementations and CLI entry points across all four modules. There are minor bugs including multi-iteration updates inside `ThreadedGenerateData` without inter-thread synchronization, an unused CLI parameter (`homoLevel`), and template leftovers in CTest files."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md`, `docs/index.md`, and the four CLI XML descriptions. The algorithms are backed by peer-reviewed publications and provide useful MRI denoising filters with documentation and example images."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Data race and unsynchronized boundary reads across iterations in ThreadedGenerateData",
+   "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+   "line_start": 113,
+   "line_end": 115,
+   "evidence": "        for(int i=0; i<m_Iterations; i++){\n            auxIt.GoToBegin();\n            laplaceIt.GoToBegin();",
+   "explanation": "In `AnisotropicAnomalousDiffusionImageFilter` (across `AADImageFilter`, `AADEPIData`, and `AADDiffusionWeightedData`) and `IsotropicAnomalousDiffusionImageFilter`, the filter implements `ThreadedGenerateData`, meaning ITK splits the output image into subregions across worker threads. Inside `ThreadedGenerateData`, the filter performs multiple diffusion iterations (`m_Iterations`) copying `aux` back to `output` within each thread's subregion without inter-thread synchronization between iterations, and reads boundary neighbors from adjacent thread regions concurrently while other threads are writing to `output`. This causes a data race along thread region boundaries and mathematically inconsistent multi-iteration results when `m_Iterations > 1` and multiple threads are used.",
+   "suggestion": "Either override `GenerateData()` (single-threaded outer iteration loop invoking a single-step `ThreadedGenerateData` or `FiniteDifferenceImageFilter` pattern) or set `this->SetNumberOfWorkUnits(1)` in the constructor so that multi-iteration updates are synchronized across the whole image.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "CLI parameter `homoLevel` is never passed to the filter in AADImageFilter.cxx",
+   "file": "AADImageFilter/AADImageFilter.cxx",
+   "line_start": 97,
+   "line_end": 105,
+   "evidence": "    //Selecting the edge function\n    if (edgeFunction==\"Exponential\") {\n        filter->SetEdgeFunction(FilterType::EXPONENTIAL);\n    }else if (edgeFunction==\"Fractional\") {\n        filter->SetEdgeFunction(FilterType::FRACTIONAL);\n    }else if (edgeFunction==\"Logistic\") {\n        filter->SetEdgeFunction(FilterType::LOGISTIC);\n    }\n    filter->SetIterations(iterations);",
+   "explanation": "`AADImageFilter.xml` defines the `homoLevel` (`--homogeneity`) parameter for the Logistic edge function, and `itkAnisotropicAnomalousDiffusionImageFilter.h` defines `itkSetMacro(H, float)`, but `AADImageFilter.cxx` never passes `homoLevel` to `filter->SetH(homoLevel)`. Consequently, changes to \"Homogeneity Level\" in the GUI have no effect (it always uses the default `0.98`).",
+   "suggestion": "Call `filter->SetH(homoLevel);` when configuring `filter` in `AADImageFilter.cxx`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Unconstrained conductance and regularization factor allow division by zero",
+   "file": "AADImageFilter/AADImageFilter.cxx",
+   "line_start": 88,
+   "line_end": 90,
+   "evidence": "        if (useConductanceRegularization) {\n            filter->SetConductance(optKappa->GetKappa()/kappaRegFactor);\n        }",
+   "explanation": "In `AADImageFilter.xml`, `conductance` and `kappaRegFactor` have no `<constraints>` preventing `0.0`. In `AADImageFilter.cxx`, dividing by `kappaRegFactor` when it is `0` or setting `conductance` to `0` results in division by zero in `EdgeWeightedController` (`.../ static_cast<InputPixelType>(m_Conductance)`).",
+   "suggestion": "Add positive minimum constraints in the XML files for `conductance` and `kappaRegFactor`, and guard against zero in the C++ code.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Histogram lowerBound and upperBound sized to binsPerDimension instead of MeasurementVectorSize",
+   "file": "AADImageFilter/itkAutomaticConductanceImageCalculator.hxx",
+   "line_start": 94,
+   "line_end": 99,
+   "evidence": "    typedef itk::Statistics::ImageToHistogramFilter< TInputImage >        ImageToHistogramFilterType;\n    typename ImageToHistogramFilterType::HistogramType::MeasurementVectorType     lowerBound(binsPerDimension);\n    lowerBound.Fill(0);\n\n    typename ImageToHistogramFilterType::HistogramType::MeasurementVectorType     upperBound(binsPerDimension);",
+   "explanation": "In `AutomaticConductanceImageCalculator::ComputeCanny`, `lowerBound` and `upperBound` are initialized with size `binsPerDimension` (256) instead of `MeasurementVectorSize` (1), whereas `size` has length `MeasurementVectorSize` (1). In ITK's `ImageToHistogramFilter`, the measurement vector length must match the number of components (1 for scalar images).",
+   "suggestion": "Initialize `lowerBound(MeasurementVectorSize)` and `upperBound(MeasurementVectorSize)` instead of `binsPerDimension`.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "CTest configurations pass non-existent `--sigma` flag from CLI template",
+   "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+   "line_start": 16,
+   "line_end": 21,
+   "evidence": "  ExternalData_add_test(${CLP}Data NAME ${testname} COMMAND ${SEM_LAUNCH_COMMAND} $<TARGET_FILE:${CLP}Test>\n    --compare DATA{${BASELINE}/${CLP}Test.nhdr,${CLP}Test.raw}\n    ${TEMP}/${CLP}Test.nhdr\n    ModuleEntryPoint\n    --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nhdr\n    )",
+   "explanation": "All four module `Testing/Cxx/CMakeLists.txt` files retain the template test invocation passing `--sigma 2.5`, which is not a valid CLI flag for any of the four modules (`AADImageFilter`, `IADImageFilter`, `AADEPIData`, `AADDiffusionWeightedData`). Running CTest will fail on argument parsing.",
+   "suggestion": "Update the test command arguments in each module's `Testing/Cxx/CMakeLists.txt` to pass flags defined in the respective module XML (and appropriate 4D/DWI test inputs for `AADEPIData` and `AADDiffusionWeightedData`).",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Build and runtime execution of the C++ CLI modules against Slicer superbuild",
+  "ExternalData test payloads referenced by .md5 files"
+ ],
+ "questions_for_author": [
+  "In `AADImageFilter.cxx`, was `homoLevel` (`--homogeneity`) intended to be passed to `filter->SetH(homoLevel)`?"
+ ]
+}

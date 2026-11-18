@@ -1,0 +1,143 @@
+{
+ "purpose": "CarreraSlice is a Slicer scripted Editor effect plus C++ wrapped logic (KSlice, fast GrowCut, local Chan-Vese) for interactive 3D label segmentation, aimed at researchers using the Segmentation/Editor workflow. The catalog entry is a tier-1 Segmentation entry that points to the master branch of the ikolesov/CarreraSlice GitHub repository.",
+ "summary": "I reviewed the catalog entry and the repository files shown, including the top-level and src CMake files, the scripted Editor effect, and helper scripts. I found no malicious code, no network transmission, and no package installation at import. The main problems are: no top-level license file for a repo that bundles GPL code; the main Python module uses Python 2 syntax, so it will not load on current Slicer; destroy() has a NameError that skips restoring Editor shortcuts; and a helper script can move root-level files if run without arguments. Overall this needs fixes before admission. I could not run anything or fetch the source revision.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Inspected the scripted module, CMake, and scripts. No network calls, telemetry, or runtime package installs are in the loaded module. The destructive helper force_clean.sh (unguarded $1 expansion) and hardcoded personal paths are concerns for users who run the scripts, not the loaded extension."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "CarreraSliceEffect.py and KUtil.py are the only Python files CMake installs. No pip installs, sys.path changes, or torch use were found. It does toggle Editor shortcuts globally (KSliceEffectLogic.__init__ removes them), which is restored only on a clean destroy."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "build_dependencies is empty and EXTENSION_DEPENDS is \"NA\" (src/CMakeLists.txt:13) even though the build needs Slicer, VTK, and ITK. The Slicer-side CMake installs the two scripted files. The KSlice_python subtree is not added by the build. I did not verify the scm_revision 'master' or any build."
+  },
+  "license": {
+   "rating": "blocking",
+   "rationale": "No LICENSE or COPYING file appears in the repository file listing or in searches. The only license text is GPLv3 in src/util/getopt and src/sfm_local_chanvese/util/getopt, plus Apache-style headers in the Logic sources. Distribution permission for the combined work is therefore unclear."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "CarreraSliceEffect.py uses Python 2 syntax throughout (print statements, xrange, has_key, except X, e). destroy() calls an undefined getNode (line 1224), so cleanup raises before installShortcutKeys() runs. Several paths reference names that are not defined. I did not run the code."
+  },
+  "utility": {
+   "rating": "concern",
+   "rationale": "Documentation is a 3-line README from 2013 and the Documentation/ folder is developer notes. The sample data needs an scp from a private host (data/get_data_from_web_download.sh:1), and no tests run in the scripted module (KSlice.py tests are in a different, unbuilt subtree). Tier 1 is reasonable, but a user cannot reproduce the demo."
+  }
+ },
+ "findings": [
+  {
+   "category": "license",
+   "severity": "blocking",
+   "title": "No top-level license for the repository; bundled GPL code and undeclared terms for the extension",
+   "file": "src/util/getopt/getopt_pp.h",
+   "line_start": 9,
+   "line_end": 10,
+   "evidence": "it under the terms of the GNU General Public License as published by\nthe Free Software Foundation, either version 3 of the License, or",
+   "explanation": "The repository has no LICENSE/COPYING file in its listing. It bundles GPLv3 code (getopt_pp in src/util/getopt and src/sfm_local_chanvese/util/getopt), and several Logic sources carry Apache-style headers. Without an explicit license for the extension, the index cannot confirm that distribution to Slicer users is permitted, so the admission requirement for clear distribution permission is not met.",
+   "suggestion": "Add a LICENSE file at the repo root that covers the extension itself, and state how the GPLv3 getopt sources and the Apache-headed sources are licensed in the combined work.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Scripted module uses Python 2 syntax and will not load on Python 3 Slicer builds",
+   "file": "src/carreraslice_wrap/CarreraSliceEffect.py",
+   "line_start": 260,
+   "line_end": 261,
+   "evidence": "print \"Warning, unexpected view orientation!?\"\n      if event == 'EnterEvent':",
+   "explanation": "CarreraSliceEffect.py (installed by src/carreraslice_wrap/CMakeLists.txt) uses Python 2 print statements, xrange, has_key, and 'except X, e'. Current Slicer releases run Python 3 only, so the module will fail with SyntaxError when loaded. The target Slicer version is not stated in the entry; the code only works on Slicer 4.x with Python 2.",
+   "suggestion": "Port the scripted module to Python 3 (print(), range, dict methods, 'except ... as e'), state the supported Slicer versions, and test the module loads in a current Slicer.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "destroy() raises NameError before restoring Editor shortcuts and observers",
+   "file": "src/carreraslice_wrap/CarreraSliceEffect.py",
+   "line_start": 1224,
+   "line_end": 1233,
+   "evidence": "slicer.mrmlScene.RemoveNode( getNode(self.uiName) )\n\n      # destroy\n      self.ksliceMod=None #self.ksliceMod.FastDelete()",
+   "explanation": "getNode is not imported in CarreraSliceEffect.py (only vtk, qt, ctk, slicer come from __main__). When the KSlice effect is destroyed, the call at line 1224 raises NameError. The code that follows (lines 1227-1233), including the call that reinstalls Editor shortcut keys, never runs, so the Editor's shortcuts stay disabled after the effect is removed and the uiName volume is not removed.",
+   "suggestion": "Use slicer.util.getNode(self.uiName) (or check for None), and put the shortcut restoration in a try/finally so it runs even if an earlier cleanup step fails.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "force_clean.sh moves the contents of unchecked directories, which can hit root if run without arguments",
+   "file": "scripts/force_clean.sh",
+   "line_start": 13,
+   "line_end": 17,
+   "evidence": "touch $1/bogus1\ntouch $2/bogus2\n\nmv  `ls $1/*`  \"$tmp_dir\"\nmv  `ls $2/*`  \"$tmp_dir\"",
+   "explanation": "The script does not check that $1 and $2 are set. With no arguments, \"$1/*\" expands to \"/*\" and the mv moves root-level entries to a temp folder, which can break the system or move user-owned files. Also, the backticked ls output is unquoted, so names with spaces are split.",
+   "suggestion": "Validate that $1 and $2 are non-empty directories before moving anything, quote the glob expansion, and replace the mv of ls output with a checked loop or rm of build outputs.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "EXTENSION_DEPENDS and build_dependencies do not describe the real build requirements",
+   "file": "src/CMakeLists.txt",
+   "line_start": 13,
+   "line_end": 13,
+   "evidence": "set(EXTENSION_DEPENDS \"NA\")",
+   "explanation": "The entry lists no build dependencies and src/CMakeLists.txt sets EXTENSION_DEPENDS to \"NA\", yet the build needs Slicer's CMake macros, VTK, ITK, and the Editor module at runtime (CarreraSliceEffect.py parent.dependencies = [\"Editor\"]). The index cannot configure the extension from this metadata alone.",
+   "suggestion": "Set EXTENSION_DEPENDS to the real dependencies (for example Editor/ITK-dependent modules, if any) and list required build dependencies in the catalog entry.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Hardcoded developer-machine CMake path in the KSlice_python subtree",
+   "file": "src/KViewerMain/KSlice_python/CMakeLists.txt",
+   "line_start": 58,
+   "line_end": 58,
+   "evidence": "set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${VTK_DIR}/../VTK/CMake/ /home/ikolesov3/source/Slicer4SuperBuildSource/CMake/)",
+   "explanation": "KSlice_python/CMakeLists.txt adds a path under /home/ikolesov3, which breaks configuration on other machines if the subtree is built. The subtree is not referenced by src/KViewerMain/CMakeLists.txt, so this is probably dead code, but it reveals a personal path and an execute_process echo.",
+   "suggestion": "Remove the unused subtree or replace the hardcoded path with a variable supplied by the user.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Sample data is fetched from a private host that users cannot reach",
+   "file": "data/get_data_from_web_download.sh",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "scp tsfat:/u4/public/karasev/data_medical/kslice_data/*.mha  ./",
+   "explanation": "The only documented data source is an scp command to a university-internal host, and the test DS004 volume is commented out (src/KSegmentor/tests/CMakeLists.txt lines 34-35). A new user cannot reproduce the tests or the demo from the repository alone.",
+   "suggestion": "Provide a public download URL with checksums (and a license for the data), or ship a small public sample.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Editor shortcuts are removed globally when the effect starts and may not be restored",
+   "file": "src/carreraslice_wrap/CarreraSliceEffect.py",
+   "line_start": 357,
+   "line_end": 358,
+   "evidence": "slicer.modules.EditorWidget.removeShortcutKeys()",
+   "explanation": "KSliceEffectLogic.__init__ calls removeShortcutKeys() on the Editor widget, and only a successful destroy() restores them. Combined with the NameError described above, a user who uses the effect and then closes or reloads the module can be left with Editor shortcuts disabled.",
+   "suggestion": "Pair the removal with a guaranteed restore in a finally or cleanup path, and document the global side effect.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "The source repository at scm_revision 'master' was not fetched; I reviewed only the file listing and contents supplied in the prompt, so the exact commit is unverified.",
+  "No build, load, or test was run; Slicer and VTK/ITK behavior is inferred from the code.",
+  "The large binary files (data/*.mha) were not inspected beyond size, and the 7 MB DS004.mha was not visible.",
+  "Remaining C++ sources (KSegmentor, sfm_local_chanvese, fastGrowCut, vtkKSlice) and the Documentation scripts were not read for memory safety or other issues.",
+  "KSlice.py (src/KViewerMain/KSlice_python) contains a urllib download from slicer.kitware.com; I did not confirm whether it is built or installed, and the top-level build does not seem to include it.",
+  "Upstream license and provenance of the included fast GrowCut and getopt code were not verified beyond the header text."
+ ],
+ "questions_for_author": [
+  "Which Slicer version (and Python version) is the extension intended for? The scripted module uses Python 2 syntax.",
+  "Under what license is the repository distributed, and are the GPLv3 getopt sources and the Apache-headed sources compatible with that license?",
+  "Is the DS004.mha test volume (listed as 7 MB in the scan hint) present in the repository? It is not in the file list shown.",
+  "Is src/KViewerMain/KSlice_python meant to be built? It is not added by the build, and it contains a personal CMake path."
+ ]
+}

@@ -1,0 +1,742 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "DWI gradient metadata can drive an out-of-bounds image read",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+   "line": 157,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "DWI gradient metadata can drive an out-of-bounds image read",
+     "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+     "line_start": 157,
+     "line_end": 161,
+     "evidence": "        while (!it.IsAtEnd())\n        {\n            it.Set(dwiit.Get()[i]);\n            ++it;\n            ++dwiit;",
+     "explanation": "The loop's i is bounded by numberOfImages, counted from DWMRI_gradient metadata at lines 99–109, rather than by the VectorImage component count. A malformed or untrusted NRRD with more gradient keys than actual components makes this access cross pixel boundaries and eventually the image allocation, causing undefined behavior, potentially a crash or disclosure of process memory through derived output.",
+     "suggestion": "Before indexing, require an exact match between valid, sequential gradient entries and img->GetNumberOfComponentsPerPixel(), and reject malformed gradient values; add malformed-input tests.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+      "line": 157
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "AADDiffusionWeightedData.cxx:99-109 counts numberOfImages from DWMRI_gradient keys, and lines 147-162 index `dwiit.Get()[i]` with no check against img->GetNumberOfComponentsPerPixel(). A malformed NRRD with more gradient keys than components would read out of bounds. Impact is a crash or garbage in the output file the user asked for. The input is a local file the user chose, and there is no network path or privilege boundary. It is an input-validation bug, not a blocking safety issue."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx:99-109 counts keys containing \"DWMRI_gradient\" with \"++numberOfImages;\"; lines 146-159 loop on that count and read \"it.Set(dwiit.Get()[i]);\" without checking the vector component count. If the ITK reader accepts a NRRD with excess gradient keys, this indexes beyond the pixel vector and, for the final pixel, potentially beyond the image buffer: undefined behavior and a concrete memory-safety risk. Validate the count before splitting. I could not run a crafted input or inspect the specific ITK reader/indexing implementation; a crash or memory disclosure is possible, not demonstrated, and the later pipeline cycle may prevent output."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In AADDiffusionWeightedData/AADDiffusionWeightedData.cxx lines 99-109, numberOfImages is incremented for every metadata key matching \"DWMRI_gradient\". At lines 147-162, the loop runs for i < numberOfImages and indexes dwiit.Get()[i] without checking img->GetNumberOfComponentsPerPixel(). However, this is an ordinary missing-bounds-check bug on local file metadata rather than malicious behavior or an exploitable security vulnerability under the rubric, so its severity is minor (and belongs under soundness rather than blocking safety)."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "DWI and EPI filters create a cyclic ITK pipeline",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+   "line": 214,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "DWI and EPI filters create a cyclic ITK pipeline",
+     "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+     "line_start": 214,
+     "line_end": 217,
+     "evidence": "        rescaler->SetInput(filter->GetOutput());\n        rescaler->SetOutputMaximum(imgValues->GetMaximum());\n        rescaler->SetOutputMinimum(imgValues->GetMinimum());\n        rescaler->Update();",
+     "explanation": "The same filter was connected to rescaler->GetOutput() at line 186. Reconnecting that rescaler to the filter output creates a cycle, so updating it can recurse rather than produce an output. AADEPIData/AADEPIData.cxx lines 114 and 142–145 constructs the same cycle.",
+     "suggestion": "Use separate input and output rescalers, or disconnect a materialized intermediate image from its pipeline, and test both modules with representative 4D data.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+      "line": 214
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "AADDiffusionWeightedData.cxx:186 sets filter input to rescaler->GetOutput(). Lines 214-217 then call rescaler->SetInput(filter->GetOutput()), which makes a rescaler->filter->rescaler cycle. AADEPIData.cxx:114 and 142-145 do the same. The cycle is real. I could not confirm the consequence, because ITK's pipeline has loop handling and I cannot run it. The likely effect is a redundant re-execution or odd rescaling, not a definite failure. It is a bad pattern that should be fixed with a second rescaler, but I have no evidence that it breaks."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx:186 connects \"filter->SetInput(rescaler->GetOutput());\", and lines 214-217 reconnect the same rescaler with \"rescaler->SetInput(filter->GetOutput());\" followed by \"rescaler->Update();\". AADEPIData/AADEPIData.cxx:114,142-145 does the same; its DisconnectPipeline at 147-148 is after the update. The resulting cyclic graph is a serious functional defect affecting both modules. Infinite recursion versus another ITK failure mode was not runtime-verified; use a second rescaler or disconnect the first output before reconnecting. This is a non-blocking correctness issue under the index admission policy."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AADDiffusionWeightedData/AADDiffusionWeightedData.cxx lines 180-217 and AADEPIData/AADEPIData.cxx lines 108-145, the same RescaleIntensityImageFilter instance (`rescaler`) has its output connected as the input to `filter` (`filter->SetInput(rescaler->GetOutput())`), and then after `filter->Update()`, `rescaler->SetInput(filter->GetOutput())` is called followed by `rescaler->Update()`. Because `filter`'s input is still `rescaler->GetOutput()`, this forms a cycle in the ITK pipeline (`rescaler -> filter -> rescaler`), which causes infinite recursion in `PropagateRequestedRegion` / `UpdateOutputInformation` when `rescaler->Update()` is invoked. This is a major soundness bug."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Parallel iterations read output while other threads write it",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+   "line": 105,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Data race and unsynchronized boundary reads across iterations in ThreadedGenerateData",
+     "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+     "line_start": 113,
+     "line_end": 115,
+     "evidence": "        for(int i=0; i<m_Iterations; i++){\n            auxIt.GoToBegin();\n            laplaceIt.GoToBegin();",
+     "explanation": "In `AnisotropicAnomalousDiffusionImageFilter` (across `AADImageFilter`, `AADEPIData`, and `AADDiffusionWeightedData`) and `IsotropicAnomalousDiffusionImageFilter`, the filter implements `ThreadedGenerateData`, meaning ITK splits the output image into subregions across worker threads. Inside `ThreadedGenerateData`, the filter performs multiple diffusion iterations (`m_Iterations`) copying `aux` back to `output` within each thread's subregion without inter-thread synchronization between iterations, and reads boundary neighbors from adjacent thread regions concurrently while other threads are writing to `output`. This causes a data race along thread region boundaries and mathematically inconsistent multi-iteration results when `m_Iterations > 1` and multiple threads are used.",
+     "suggestion": "Either override `GenerateData()` (single-threaded outer iteration loop invoking a single-step `ThreadedGenerateData` or `FiniteDifferenceImageFilter` pattern) or set `this->SetNumberOfWorkUnits(1)` in the constructor so that multi-iteration updates are synchronized across the whole image.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+      "line": 113
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Parallel iterations read output while other threads write it",
+     "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+     "line_start": 105,
+     "line_end": 110,
+     "evidence": "    typedef itk::LaplacianOperator< OutputPixelType , OutputImageDimension > LaplacianOperatorType;\n    LaplacianOperatorType laplaceOp;\n    itk::Size<OutputImageDimension> radius;\n    radius.Fill(1);\n    laplaceOp.CreateToRadius(radius);\n    NeighborIteratorType      laplaceIt(laplaceOp.GetRadius(), output,  region);",
+     "explanation": "ThreadedGenerateData runs on separate regions but the neighborhood iterator reads the shared output across region boundaries while each thread initializes and later overwrites its region at lines 97–103 and 144–150. With multiple work units, the result can depend on scheduling and contain seams or inconsistent values; the other filter implementations use the same pattern.",
+     "suggestion": "Use synchronized full-image iteration buffers, or restrict the filter to one work unit until a thread-safe implementation is available. Compare outputs across thread counts.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+      "line": 105
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "itkAnisotropicAnomalousDiffusionImageFilter.hxx:32 calls DynamicMultiThreadingOff and line 38 implements ThreadedGenerateData(region). Lines 97-103 copy input into the shared output within the thread's region. Line 110 builds a neighborhood iterator over the shared `output`, which reads across region borders. Lines 113-150 run all iterations inside each thread and write back to output. Nothing synchronizes threads between iterations or before reads, so boundary pixels can be uninitialized or stale. The result depends on thread scheduling and can show seams. It is a real correctness bug, but not a safety issue."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx:32,38 uses legacy threaded generation; lines 97-110 initialize the shared output per region and create a neighborhood iterator on it, lines 122-124 read neighbors, and lines 144-150 copy each worker's results back without an iteration barrier: \"outputIt.Set(auxIt.Get());\". Other workers can still initialize or read adjacent regions, producing data races and schedule-dependent image values even on the first iteration. IADImageFilter/itkIsotropicAnomalousDiffusionImageFilter.hxx:28-34,56-68,71-100 and both DWI/EPI filter copies show the same pattern. This affects core results when multiple work units are used; it is a non-blocking correctness issue under the admission policy. Runtime behavior was not tested."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx (lines 38, 89-103, 110-151), AADDiffusionWeightedData/itkAnisotropicAnomalousDiffusionImageFilter.hxx (lines 33, 48-62, 69-110), AADEPIData/itkAnisotropicAnomalousDiffusionImageFilter.hxx, and IADImageFilter/itkIsotropicAnomalousDiffusionImageFilter.hxx (lines 34, 49-62, 68-101), the filters implement `ThreadedGenerateData` over thread subregions while performing `m_Iterations` diffusion steps in a loop. Each thread reads neighbor pixels from the shared `output` image via `laplaceIt` (which crosses subregion boundaries into adjacent threads' regions) while other threads concurrently initialize and overwrite their regions of `output` without any barrier synchronization between iterations. Furthermore, in AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx line 83, `maxGrad` (a member variable) is written unsynchronized across threads. This causes data races and thread-scheduling-dependent artifacts along subregion boundaries, making it a major soundness issue."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "CLI parameter `homoLevel` is never passed to the filter in AADImageFilter.cxx",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AADImageFilter/AADImageFilter.cxx",
+   "line": 97,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "CLI parameter `homoLevel` is never passed to the filter in AADImageFilter.cxx",
+     "file": "AADImageFilter/AADImageFilter.cxx",
+     "line_start": 97,
+     "line_end": 105,
+     "evidence": "    //Selecting the edge function\n    if (edgeFunction==\"Exponential\") {\n        filter->SetEdgeFunction(FilterType::EXPONENTIAL);\n    }else if (edgeFunction==\"Fractional\") {\n        filter->SetEdgeFunction(FilterType::FRACTIONAL);\n    }else if (edgeFunction==\"Logistic\") {\n        filter->SetEdgeFunction(FilterType::LOGISTIC);\n    }\n    filter->SetIterations(iterations);",
+     "explanation": "`AADImageFilter.xml` defines the `homoLevel` (`--homogeneity`) parameter for the Logistic edge function, and `itkAnisotropicAnomalousDiffusionImageFilter.h` defines `itkSetMacro(H, float)`, but `AADImageFilter.cxx` never passes `homoLevel` to `filter->SetH(homoLevel)`. Consequently, changes to \"Homogeneity Level\" in the GUI have no effect (it always uses the default `0.98`).",
+     "suggestion": "Call `filter->SetH(homoLevel);` when configuring `filter` in `AADImageFilter.cxx`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/AADImageFilter.cxx",
+      "line": 97
+     }
+    }
+   ]
+  },
+  {
+   "title": "CTest configurations pass non-existent `--sigma` flag from CLI template",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+   "line": 16,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "CTest configurations pass non-existent `--sigma` flag from CLI template",
+     "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+     "line_start": 16,
+     "line_end": 21,
+     "evidence": "  ExternalData_add_test(${CLP}Data NAME ${testname} COMMAND ${SEM_LAUNCH_COMMAND} $<TARGET_FILE:${CLP}Test>\n    --compare DATA{${BASELINE}/${CLP}Test.nhdr,${CLP}Test.raw}\n    ${TEMP}/${CLP}Test.nhdr\n    ModuleEntryPoint\n    --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nhdr\n    )",
+     "explanation": "All four module `Testing/Cxx/CMakeLists.txt` files retain the template test invocation passing `--sigma 2.5`, which is not a valid CLI flag for any of the four modules (`AADImageFilter`, `IADImageFilter`, `AADEPIData`, `AADDiffusionWeightedData`). Running CTest will fail on argument parsing.",
+     "suggestion": "Update the test command arguments in each module's `Testing/Cxx/CMakeLists.txt` to pass flags defined in the respective module XML (and appropriate 4D/DWI test inputs for `AADEPIData` and `AADDiffusionWeightedData`).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+      "line": 16
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Tests use an option not declared by any CLI",
+     "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+     "line_start": 16,
+     "line_end": 20,
+     "evidence": "ExternalData_add_test(${CLP}Data NAME ${testname} COMMAND ${SEM_LAUNCH_COMMAND} $<TARGET_FILE:${CLP}Test>\n  --compare DATA{${BASELINE}/${CLP}Test.nhdr,${CLP}Test.raw}\n  ${TEMP}/${CLP}Test.nhdr\n  ModuleEntryPoint\n  --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nhdr",
+     "explanation": "AADImageFilter.xml does not declare --sigma, so the generated CLI parser cannot accept this test invocation. The same test command is copied to the other modules, and the 3D CT fixture is not representative of the DWI and EPI inputs.",
+     "suggestion": "Replace the copied invocation with valid module-specific arguments and fixtures, and execute the tests in CI.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/Testing/Cxx/CMakeLists.txt",
+      "line": 16
+     }
+    }
+   ]
+  },
+  {
+   "title": "Histogram lowerBound and upperBound sized to binsPerDimension instead of MeasurementVectorSize",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AADImageFilter/itkAutomaticConductanceImageCalculator.hxx",
+   "line": 94,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Histogram lowerBound and upperBound sized to binsPerDimension instead of MeasurementVectorSize",
+     "file": "AADImageFilter/itkAutomaticConductanceImageCalculator.hxx",
+     "line_start": 94,
+     "line_end": 99,
+     "evidence": "    typedef itk::Statistics::ImageToHistogramFilter< TInputImage >        ImageToHistogramFilterType;\n    typename ImageToHistogramFilterType::HistogramType::MeasurementVectorType     lowerBound(binsPerDimension);\n    lowerBound.Fill(0);\n\n    typename ImageToHistogramFilterType::HistogramType::MeasurementVectorType     upperBound(binsPerDimension);",
+     "explanation": "In `AutomaticConductanceImageCalculator::ComputeCanny`, `lowerBound` and `upperBound` are initialized with size `binsPerDimension` (256) instead of `MeasurementVectorSize` (1), whereas `size` has length `MeasurementVectorSize` (1). In ITK's `ImageToHistogramFilter`, the measurement vector length must match the number of components (1 for scalar images).",
+     "suggestion": "Initialize `lowerBound(MeasurementVectorSize)` and `upperBound(MeasurementVectorSize)` instead of `binsPerDimension`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/itkAutomaticConductanceImageCalculator.hxx",
+      "line": 94
+     }
+    }
+   ]
+  },
+  {
+   "title": "Homogeneity control is not passed to the anisotropic filter",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AADImageFilter/AADImageFilter.xml",
+   "line": 45,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Homogeneity control is not passed to the anisotropic filter",
+     "file": "AADImageFilter/AADImageFilter.xml",
+     "line_start": 130,
+     "line_end": 135,
+     "evidence": "    <double>\n      <name>homoLevel</name>\n      <longflag>--homogeneity</longflag>\n      <label>Homogeneity Level</label>\n      <description><![CDATA[A double value that regulates how much the logistic curve will smooth the non-edge structures in the image. Value close to 1.0 will strongly smooth those homogenous ares in the image, which, on the other hand, values close to 0.5 will flat the contrast of the image (i.e. vanishs the image contrast levels)]]></description>\n      <default>0.98</default>",
+     "explanation": "The CLI advertises this parameter, but AADImageFilter.cxx never calls the filter's SetH with homoLevel. Users selecting the logistic edge function get the hard-coded default regardless of their chosen homogeneity level.",
+     "suggestion": "Pass homoLevel to filter->SetH and test that changing it affects the logistic result.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "AADImageFilter/AADImageFilter.xml",
+      "line": 45
+     }
+    }
+   ]
+  },
+  {
+   "title": "Integer images are quantized before the original intensity range is restored",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AADImageFilter/AADImageFilter.cxx",
+   "line": 118,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Integer images are quantized before the original intensity range is restored",
+     "file": "AADImageFilter/AADImageFilter.cxx",
+     "line_start": 118,
+     "line_end": 121,
+     "evidence": "    typename RescalerOutputFilterType::Pointer output_rescaler = RescalerOutputFilterType::New();\n    output_rescaler->SetInput(cast->GetOutput());\n    output_rescaler->SetOutputMinimum(imgValues->GetMinimum());\n    output_rescaler->SetOutputMaximum(imgValues->GetMaximum());",
+     "explanation": "The filter operates on values rescaled to 0–255, but lines 110–111 cast those floating-point results to the original output type before this rescaling. For integer inputs, fractional values are discarded before expansion to the original range, reducing output precision; IADImageFilter uses the same ordering.",
+     "suggestion": "Restore the original range in floating point and cast only as the final output step.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/AADImageFilter.cxx",
+      "line": 118
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unconstrained conductance and regularization factor allow division by zero",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AADImageFilter/AADImageFilter.cxx",
+   "line": 88,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Unconstrained conductance and regularization factor allow division by zero",
+     "file": "AADImageFilter/AADImageFilter.cxx",
+     "line_start": 88,
+     "line_end": 90,
+     "evidence": "        if (useConductanceRegularization) {\n            filter->SetConductance(optKappa->GetKappa()/kappaRegFactor);\n        }",
+     "explanation": "In `AADImageFilter.xml`, `conductance` and `kappaRegFactor` have no `<constraints>` preventing `0.0`. In `AADImageFilter.cxx`, dividing by `kappaRegFactor` when it is `0` or setting `conductance` to `0` results in division by zero in `EdgeWeightedController` (`.../ static_cast<InputPixelType>(m_Conductance)`).",
+     "suggestion": "Add positive minimum constraints in the XML files for `conductance` and `kappaRegFactor`, and guard against zero in the C++ code.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/AADImageFilter.cxx",
+      "line": 88
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "DWI gradient metadata can drive an out-of-bounds image read",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+   "line": 157,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "DWI gradient metadata can drive an out-of-bounds image read",
+     "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+     "line_start": 157,
+     "line_end": 161,
+     "evidence": "        while (!it.IsAtEnd())\n        {\n            it.Set(dwiit.Get()[i]);\n            ++it;\n            ++dwiit;",
+     "explanation": "The loop's i is bounded by numberOfImages, counted from DWMRI_gradient metadata at lines 99–109, rather than by the VectorImage component count. A malformed or untrusted NRRD with more gradient keys than actual components makes this access cross pixel boundaries and eventually the image allocation, causing undefined behavior, potentially a crash or disclosure of process memory through derived output.",
+     "suggestion": "Before indexing, require an exact match between valid, sequential gradient entries and img->GetNumberOfComponentsPerPixel(), and reject malformed gradient values; add malformed-input tests.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+      "line": 157
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "AADDiffusionWeightedData.cxx:99-109 counts numberOfImages from DWMRI_gradient keys, and lines 147-162 index `dwiit.Get()[i]` with no check against img->GetNumberOfComponentsPerPixel(). A malformed NRRD with more gradient keys than components would read out of bounds. Impact is a crash or garbage in the output file the user asked for. The input is a local file the user chose, and there is no network path or privilege boundary. It is an input-validation bug, not a blocking safety issue."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx:99-109 counts keys containing \"DWMRI_gradient\" with \"++numberOfImages;\"; lines 146-159 loop on that count and read \"it.Set(dwiit.Get()[i]);\" without checking the vector component count. If the ITK reader accepts a NRRD with excess gradient keys, this indexes beyond the pixel vector and, for the final pixel, potentially beyond the image buffer: undefined behavior and a concrete memory-safety risk. Validate the count before splitting. I could not run a crafted input or inspect the specific ITK reader/indexing implementation; a crash or memory disclosure is possible, not demonstrated, and the later pipeline cycle may prevent output."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In AADDiffusionWeightedData/AADDiffusionWeightedData.cxx lines 99-109, numberOfImages is incremented for every metadata key matching \"DWMRI_gradient\". At lines 147-162, the loop runs for i < numberOfImages and indexes dwiit.Get()[i] without checking img->GetNumberOfComponentsPerPixel(). However, this is an ordinary missing-bounds-check bug on local file metadata rather than malicious behavior or an exploitable security vulnerability under the rubric, so its severity is minor (and belongs under soundness rather than blocking safety)."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "DWI and EPI filters create a cyclic ITK pipeline",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+   "line": 214,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "DWI and EPI filters create a cyclic ITK pipeline",
+     "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+     "line_start": 214,
+     "line_end": 217,
+     "evidence": "        rescaler->SetInput(filter->GetOutput());\n        rescaler->SetOutputMaximum(imgValues->GetMaximum());\n        rescaler->SetOutputMinimum(imgValues->GetMinimum());\n        rescaler->Update();",
+     "explanation": "The same filter was connected to rescaler->GetOutput() at line 186. Reconnecting that rescaler to the filter output creates a cycle, so updating it can recurse rather than produce an output. AADEPIData/AADEPIData.cxx lines 114 and 142–145 constructs the same cycle.",
+     "suggestion": "Use separate input and output rescalers, or disconnect a materialized intermediate image from its pipeline, and test both modules with representative 4D data.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx",
+      "line": 214
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "AADDiffusionWeightedData.cxx:186 sets filter input to rescaler->GetOutput(). Lines 214-217 then call rescaler->SetInput(filter->GetOutput()), which makes a rescaler->filter->rescaler cycle. AADEPIData.cxx:114 and 142-145 do the same. The cycle is real. I could not confirm the consequence, because ITK's pipeline has loop handling and I cannot run it. The likely effect is a redundant re-execution or odd rescaling, not a definite failure. It is a bad pattern that should be fixed with a second rescaler, but I have no evidence that it breaks."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AADDiffusionWeightedData/AADDiffusionWeightedData.cxx:186 connects \"filter->SetInput(rescaler->GetOutput());\", and lines 214-217 reconnect the same rescaler with \"rescaler->SetInput(filter->GetOutput());\" followed by \"rescaler->Update();\". AADEPIData/AADEPIData.cxx:114,142-145 does the same; its DisconnectPipeline at 147-148 is after the update. The resulting cyclic graph is a serious functional defect affecting both modules. Infinite recursion versus another ITK failure mode was not runtime-verified; use a second rescaler or disconnect the first output before reconnecting. This is a non-blocking correctness issue under the index admission policy."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AADDiffusionWeightedData/AADDiffusionWeightedData.cxx lines 180-217 and AADEPIData/AADEPIData.cxx lines 108-145, the same RescaleIntensityImageFilter instance (`rescaler`) has its output connected as the input to `filter` (`filter->SetInput(rescaler->GetOutput())`), and then after `filter->Update()`, `rescaler->SetInput(filter->GetOutput())` is called followed by `rescaler->Update()`. Because `filter`'s input is still `rescaler->GetOutput()`, this forms a cycle in the ITK pipeline (`rescaler -> filter -> rescaler`), which causes infinite recursion in `PropagateRequestedRegion` / `UpdateOutputInformation` when `rescaler->Update()` is invoked. This is a major soundness bug."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Parallel iterations read output while other threads write it",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+   "line": 105,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Data race and unsynchronized boundary reads across iterations in ThreadedGenerateData",
+     "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+     "line_start": 113,
+     "line_end": 115,
+     "evidence": "        for(int i=0; i<m_Iterations; i++){\n            auxIt.GoToBegin();\n            laplaceIt.GoToBegin();",
+     "explanation": "In `AnisotropicAnomalousDiffusionImageFilter` (across `AADImageFilter`, `AADEPIData`, and `AADDiffusionWeightedData`) and `IsotropicAnomalousDiffusionImageFilter`, the filter implements `ThreadedGenerateData`, meaning ITK splits the output image into subregions across worker threads. Inside `ThreadedGenerateData`, the filter performs multiple diffusion iterations (`m_Iterations`) copying `aux` back to `output` within each thread's subregion without inter-thread synchronization between iterations, and reads boundary neighbors from adjacent thread regions concurrently while other threads are writing to `output`. This causes a data race along thread region boundaries and mathematically inconsistent multi-iteration results when `m_Iterations > 1` and multiple threads are used.",
+     "suggestion": "Either override `GenerateData()` (single-threaded outer iteration loop invoking a single-step `ThreadedGenerateData` or `FiniteDifferenceImageFilter` pattern) or set `this->SetNumberOfWorkUnits(1)` in the constructor so that multi-iteration updates are synchronized across the whole image.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+      "line": 113
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Parallel iterations read output while other threads write it",
+     "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+     "line_start": 105,
+     "line_end": 110,
+     "evidence": "    typedef itk::LaplacianOperator< OutputPixelType , OutputImageDimension > LaplacianOperatorType;\n    LaplacianOperatorType laplaceOp;\n    itk::Size<OutputImageDimension> radius;\n    radius.Fill(1);\n    laplaceOp.CreateToRadius(radius);\n    NeighborIteratorType      laplaceIt(laplaceOp.GetRadius(), output,  region);",
+     "explanation": "ThreadedGenerateData runs on separate regions but the neighborhood iterator reads the shared output across region boundaries while each thread initializes and later overwrites its region at lines 97–103 and 144–150. With multiple work units, the result can depend on scheduling and contain seams or inconsistent values; the other filter implementations use the same pattern.",
+     "suggestion": "Use synchronized full-image iteration buffers, or restrict the filter to one work unit until a thread-safe implementation is available. Compare outputs across thread counts.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx",
+      "line": 105
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "itkAnisotropicAnomalousDiffusionImageFilter.hxx:32 calls DynamicMultiThreadingOff and line 38 implements ThreadedGenerateData(region). Lines 97-103 copy input into the shared output within the thread's region. Line 110 builds a neighborhood iterator over the shared `output`, which reads across region borders. Lines 113-150 run all iterations inside each thread and write back to output. Nothing synchronizes threads between iterations or before reads, so boundary pixels can be uninitialized or stale. The result depends on thread scheduling and can show seams. It is a real correctness bug, but not a safety issue."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx:32,38 uses legacy threaded generation; lines 97-110 initialize the shared output per region and create a neighborhood iterator on it, lines 122-124 read neighbors, and lines 144-150 copy each worker's results back without an iteration barrier: \"outputIt.Set(auxIt.Get());\". Other workers can still initialize or read adjacent regions, producing data races and schedule-dependent image values even on the first iteration. IADImageFilter/itkIsotropicAnomalousDiffusionImageFilter.hxx:28-34,56-68,71-100 and both DWI/EPI filter copies show the same pattern. This affects core results when multiple work units are used; it is a non-blocking correctness issue under the admission policy. Runtime behavior was not tested."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx (lines 38, 89-103, 110-151), AADDiffusionWeightedData/itkAnisotropicAnomalousDiffusionImageFilter.hxx (lines 33, 48-62, 69-110), AADEPIData/itkAnisotropicAnomalousDiffusionImageFilter.hxx, and IADImageFilter/itkIsotropicAnomalousDiffusionImageFilter.hxx (lines 34, 49-62, 68-101), the filters implement `ThreadedGenerateData` over thread subregions while performing `m_Iterations` diffusion steps in a loop. Each thread reads neighbor pixels from the shared `output` image via `laplaceIt` (which crosses subregion boundaries into adjacent threads' regions) while other threads concurrently initialize and overwrite their regions of `output` without any barrier synchronization between iterations. Furthermore, in AADImageFilter/itkAnisotropicAnomalousDiffusionImageFilter.hxx line 83, `maxGrad` (a member variable) is written unsynchronized across threads. This causes data races and thread-scheduling-dependent artifacts along subregion boundaries, making it a major soundness issue."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "concern"
+   },
+   "outcome": "still disputed (blocking, ok)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "no",
+     "severity": "info",
+     "rating": null,
+     "reason": "I searched for network, subprocess, eval/exec, pip_install and download. The only URLs are metadata, docs and icons in CMakeLists.txt and README. The code is C++ ITK CLI filters that read and write local files. There is no telemetry, no downloading, no secrets, and no obfuscation. The LICENSE is Apache 2.0. The only memory-safety issue is the malformed-NRRD index (D1), which is an ordinary bug. I rate safety ok."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "The D1 unchecked metadata-derived component index is a concrete memory-safety concern, not merely an ordinary imaging correctness bug: AADDiffusionWeightedData/AADDiffusionWeightedData.cxx:103-109 counts gradient metadata and lines 146-159 use \"it.Set(dwiit.Get()[i]);\" without checking actual component count. This warrants a blocking safety rating pending a bounds check; successful exploitation or disclosure was not demonstrated. I also inspected the four CLI entry points, filter implementations, top-level and module CMake files, and repository-wide searches for network, execution and deletion APIs. I could not run the extension, verify behavior of the external ITK implementation, or independently resolve the supplied commit."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "I inspected the C++ CLI modules and headers across the repository (AADDiffusionWeightedData, AADEPIData, AADImageFilter, IADImageFilter). There is no malicious or concealed behavior, no network communication, no telemetry, no command injection or unsafe deserialization, and no environment manipulation. The out-of-bounds read in D1 if a NRRD header has more DWMRI_gradient keys than pixel components is an ordinary input-validation bug on a local image file, not a safety concern under the rubric."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "concern"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "minor issues",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 4,
+  "single": 7,
+  "unverified": 0,
+  "total": 9,
+  "open_disputes": 1
+ }
+}

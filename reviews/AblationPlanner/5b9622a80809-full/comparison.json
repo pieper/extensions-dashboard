@@ -1,0 +1,825 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Generating probe lines deletes all line markups in the scene",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 298,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Generating probe lines deletes all line markups in the scene",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 298,
+     "line_end": 302,
+     "evidence": "    lineNodes = slicer.mrmlScene.GetNodesByClass(\"vtkMRMLMarkupsLineNode\")\n\n    if lineNodes is not None:\n      for lineNode in lineNodes:\n        slicer.mrmlScene.RemoveNode(lineNode)",
+     "explanation": "Pressing Place Markup Line removes every line markup, including pre-existing measurements and annotations belonging to the user or other modules. The endpoint drag handler also calls onLineButton, so routine probe adjustment can silently destroy unsaved scene data without confirmation.",
+     "suggestion": "Track only lines created by this module using node references or a dedicated attribute, and update or remove only those lines.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 298
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AblationPlanner.py:298-302 removes every vtkMRMLMarkupsLineNode in the scene with no confirmation or filtering. Line 462 calls onLineButton again after endpoint drags. Only in-memory scene nodes are removed, not files, and the user can recreate the lines. This is a real data-loss bug that should be fixed. I don't consider it a blocking safety issue, because it isn't malicious or exfiltrating."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "AblationPlanner/AblationPlanner.py:298-302 obtains all scene line nodes and unconditionally removes them: `lineNodes = slicer.mrmlScene.GetNodesByClass(\"vtkMRMLMarkupsLineNode\")` and `slicer.mrmlScene.RemoveNode(lineNode)`. The button is connected at line 159, and the endpoint interaction handler calls `self.onLineButton()` at line 462. Unrelated, unsaved line measurements can be lost without confirmation, even if subsequent line creation fails."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AblationPlanner/AblationPlanner.py lines 298-302, onLineButton() fetches all vtkMRMLMarkupsLineNode instances from slicer.mrmlScene and removes them without filtering for nodes created by the module. Also, onMarkupEndInteraction() (line 462) calls self.onLineButton(). However, this is an ordinary MRML scene-node management bug (deleting MRML line markup nodes in the active Slicer scene rather than user filesystem files), so under the rubric and policy (\"Do not label ordinary bugs as safety issues merely because the extension processes medical images\"), it is a major soundness issue rather than a blocking safety vulnerability."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Applying margin colors overwrites signed distance data and revert is incomplete",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 595,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Applying margin colors overwrites signed distance data and revert is incomplete",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 615,
+     "line_end": 621,
+     "evidence": "        for j in range(0,len(args)):\n            if (colorval < args[j]):\n                thresholded = True\n                VTKFieldDataArray.SetValue(i,j)\n                break\n        if (not thresholded):\n            VTKFieldDataArray.SetValue(i,num_regions)",
+     "explanation": "The color button replaces the model's Signed distance values with bin numbers rather than creating a separate display scalar. Revert iterates only to len(originalColorArray)-1, while the snapshot itself omits the final value, so at least one modified value is never restored; the original values are also kept only in widget memory. Subsequent use or saving of the model can therefore retain incorrect distance data.",
+     "suggestion": "Keep Signed unchanged, create a separate color-bin array, and test the full apply/revert and scene-reload workflow.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 595
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "AblationPlanner.py:611-621 overwrites the 'Signed' array in place with bin indices. The snapshot (353-357) and the loops at 591/611/633 all stop at size-1, and the revert loop at 633 runs to len-1 over a list that is already one entry short. So the last two values are never restored. The snapshot is only in widget memory. It affects a derived margin model, not the user's source data, so I rate it minor."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AblationPlanner/AblationPlanner.py:367-376 calls `self.logic.changeColorsByMargin_(outputMarginModel,-10,-5,-2)` and later restores from `self.originalColorArray`. Lines 603-621 overwrite the `Signed` array with bin values, including `VTKFieldDataArray.SetValue(i,j)`. The snapshot at lines 351-359 and the recoloring loop at line 611 both omit the final element, but the restore at line 633 uses `range(0, len(originalColorArray)-1)`, omitting one additional element. Thus, for an array of at least two elements, the penultimate value remains binned after revert. This corrupts calculated distance data in the output model, not merely its appearance."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AblationPlanner/AblationPlanner.py lines 604-621, changeColorsByMargin_() mutates the \"Signed\" array of the model's field data in-place with bin indices (0..num_regions). In onMarginButton() (lines 350-359), originalColorArray only records range(0, VTKFieldDataArray.GetSize()-1) in self.originalColorArray, and regenerateOriginalModelColors() (lines 633-636) only iterates over range(0, len(originalColorArray)-1). This is a real soundness defect, though it only affects the generated outputMarginModel and is minor/major in severity (major is reasonable since the distance array and table column on the output model are corrupted)."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Parallel probe endpoints yield a singular rotation",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 747,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Parallel probe endpoints yield a singular rotation",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 747,
+     "line_end": 752,
+     "evidence": "    v = np.cross(a, b)\n    c = np.dot(a, b)\n    s = np.linalg.norm(v)\n    kmat = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])\n    rotationMatrix = np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2))\n    return rotationMatrix",
+     "explanation": "When a probe's endpoints are aligned or anti-aligned with the reference direction [0,0,-1], the cross product is zero and the rotation formula divides by zero. Probe placement can then fail or propagate non-finite transform values for an otherwise valid axis-aligned input.",
+     "suggestion": "Handle parallel and antiparallel vectors explicitly, reject coincident endpoints, and test these cases.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 747
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "AblationPlanner.py:747-751 divides by s**2 with no check for s==0. The reference direction is [0,0,-1] (line 435). A probe whose endpoints are exactly parallel or anti-parallel to it gives s=0, so the matrix becomes NaN or inf. This is a real edge-case bug, but it needs exactly axis-aligned input."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AblationPlanner/AblationPlanner.py:435 uses the reference endpoints `[0,0,0], [0,0,-1]`; lines 502-506 pass the normalized target vector into the rotation calculation. At lines 747-751, `v = np.cross(a, b)`, `s = np.linalg.norm(v)`, and `rotationMatrix = np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2))` give division by zero for parallel or antiparallel vectors. Lines 715-733 then use the resulting matrix in a transform and harden it. Axis-aligned placements can fail or yield non-finite geometry; actual runtime behavior was not tested."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In AblationPlanner/AblationPlanner.py lines 740-752, rotationMatrixFromVectors(vec1, vec2) computes s = np.linalg.norm(v) where v = np.cross(a, b), and divides by (s ** 2) on line 751 without checking for s == 0 (when the probe vector is parallel or anti-parallel to [0, 0, -1]). This produces NaN/Inf in the rotation matrix for vertical probes."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Use of removed Slicer 4 Markups fiducial API methods",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 307,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Use of removed Slicer 4 Markups fiducial API methods",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 307,
+     "line_end": 309,
+     "evidence": "    for i in range(0,numNodePoints,2):\n        fiducialLabel = endPointsMarkupsNode.GetNthFiducialLabel(i)        \n        ras1 = vtk.vtkVector3d(0,0,0)",
+     "explanation": "`vtkMRMLMarkupsNode.GetNthFiducialLabel()` was deprecated in Slicer 4 and removed in Slicer 5 (replaced by `GetNthControlPointLabel()`). Similarly, `GetNumberOfFiducials()` and `GetNthFiducialPosition()` used in `onProbeButton` (lines 413-428) are removed in Slicer 5. Calling `onLineButton` or `onProbeButton` in Slicer 5 will raise an `AttributeError`.",
+     "suggestion": "Replace `GetNthFiducialLabel`, `GetNumberOfFiducials`, and `GetNthFiducialPosition` with `GetNthControlPointLabel`, `GetNumberOfControlPoints`, and `GetNthControlPointPosition`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 307
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "still disputed",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "no",
+     "severity": "info",
+     "rating": null,
+     "reason": "The EndPoints selector is restricted to vtkMRMLMarkupsFiducialNode (Resources/UI/AblationPlanner.ui:89). From memory, Slicer 5 still provides GetNumberOfFiducials, GetNthFiducialPosition and GetNthFiducialLabel on vtkMRMLMarkupsFiducialNode as legacy methods. I could not check the Slicer source, so this is not verified. The label at AblationPlanner.py:308 is unused anyway. The claim that these methods were removed and raise AttributeError is likely wrong."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "unsure",
+     "severity": null,
+     "rating": null,
+     "reason": "AblationPlanner/AblationPlanner.py:307-308 calls `fiducialLabel = endPointsMarkupsNode.GetNthFiducialLabel(i)`, and lines 413 and 427-428 call `GetNumberOfFiducials()` and `GetNthFiducialPosition(i, xyz[i])`. These legacy calls are verified, but the available repository does not establish whether the targeted Slicer 5 version retains compatibility wrappers. Slicer API source and runtime were unavailable, so removal and the asserted AttributeError could not be verified."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AblationPlanner/AblationPlanner.py line 308 (endPointsMarkupsNode.GetNthFiducialLabel(i)) and lines 413, 416, 418, 419, 422, 427, 428 (GetNumberOfFiducials() and GetNthFiducialPosition()), the code calls legacy Slicer 4 Markups fiducial methods that were removed in Slicer 5 in favor of ControlPoint methods (which are already used on lines 305, 310, 313). Calling onLineButton or onProbeButton in Slicer 5 raises an AttributeError."
+    }
+   }
+  },
+  {
+   "title": "Fragile assumption that child SubjectHierarchy item ID is folderItemID + 1",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 793,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Fragile assumption that child SubjectHierarchy item ID is folderItemID + 1",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 793,
+     "line_end": 798,
+     "evidence": "def convertSegmentToModel(segmentNode, folderName=\"Folder\"):\n\n    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()\n    modelNode = shNode.CreateFolderItem(shNode.GetSceneItemID(), folderName)\n    slicer.modules.segmentations.logic().ExportVisibleSegmentsToModels(segmentNode,modelNode)\n    folder = shNode.GetItemDataNode(modelNode +1)",
+     "explanation": "`convertSegmentToModel` assumes that the exported model's subject hierarchy item ID is `modelNode + 1`. Subject hierarchy item IDs are not guaranteed to be sequential integers (`modelNode + 1`), which can cause `shNode.GetItemDataNode(modelNode + 1)` to return `None` and raise an `AttributeError` on `folder.GetDisplayNode()`.",
+     "suggestion": "Use `vtkIdList` with `shNode.GetItemChildren(modelNode, childIds)` to retrieve the exported child item ID reliably.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 793
+     }
+    }
+   ]
+  },
+  {
+   "title": "Off-by-one segment index in convertSegmentsToSegment union loop",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 689,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Off-by-one segment index in convertSegmentsToSegment union loop",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 689,
+     "line_end": 693,
+     "evidence": "    for i in range(1, segmentationNode.GetSegmentation().GetNumberOfSegments()+1):  #TWO ADDITIONAL PROBES\n        segmentEditorWidget.setActiveEffectByName(\"Logical operators\")\n        effect = segmentEditorWidget.activeEffect()\n        effect.self().scriptedEffect.setParameter(\"Operation\",\"UNION\")\n        effect.self().scriptedEffect.setParameter(\"ModifierSegmentID\",segmentationNode.GetSegmentation().GetNthSegmentID(i))",
+     "explanation": "The loop iterates up to `GetNumberOfSegments() + 1`, so on the last iteration `i == GetNumberOfSegments()`, which is out of bounds for 0-indexed `GetNthSegmentID(i)` (returning an empty/None segment ID). Additionally, `convertSegmentsToSegment` instantiates a GUI widget (`slicer.qMRMLSegmentEditorWidget()`) inside the Logic class and leaks `vtkMRMLSegmentEditorNode` in the scene.",
+     "suggestion": "Iterate over `range(1, segmentationNode.GetSegmentation().GetNumberOfSegments())` and remove the temporary `segmentEditorNode` from `slicer.mrmlScene` when finished.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 689
+     }
+    }
+   ]
+  },
+  {
+   "title": "Parameter node observer is attached to old parameter node instead of new one",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 220,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Parameter node observer is attached to old parameter node instead of new one",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 220,
+     "line_end": 225,
+     "evidence": "    if self._parameterNode is not None:\n      self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)\n    if self._parameterNode is not None:\n      self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)\n\n    self._parameterNode = inputParameterNode",
+     "explanation": "In `setParameterNode`, `self.addObserver(self._parameterNode, ...)` is called before `self._parameterNode = inputParameterNode` is assigned. This re-observes the old parameter node instead of observing the newly set `inputParameterNode`, and when `self._parameterNode` starts as `None`, the new parameter node is never observed at all.",
+     "suggestion": "Assign `self._parameterNode = inputParameterNode` before checking `if self._parameterNode is not None:` to add the observer.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 220
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Parameter node observation and native-fiducial restoration are broken",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 220,
+     "line_end": 225,
+     "evidence": "    if self._parameterNode is not None:\n      self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)\n    if self._parameterNode is not None:\n      self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)\n\n    self._parameterNode = inputParameterNode",
+     "explanation": "The observer is re-added to the old node before the new one is assigned, so the initially selected parameter node is not observed. Separately, updateGUIFromParameterNode reads the role NativeFiducialsƒ whereas selections are stored under NativeFiducials, preventing that selection from being restored correctly.",
+     "suggestion": "Observe inputParameterNode after assignment and use the same reference role for saving and restoring.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 220
+     }
+    }
+   ]
+  },
+  {
+   "title": "Registered test does not exercise the planner",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 854,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Registered test does not exercise the planner",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 854,
+     "line_end": 863,
+     "evidence": "    self.delayDisplay(\"Starting the test\")\n    \n    # Get/create input data\n\n   \n    self.delayDisplay('Loaded test data set')\n\n\n\n    self.delayDisplay('Test passed')",
+     "explanation": "The test reports success without loading data, placing probes, or checking computed margins, so it will not detect regressions in the main workflow.",
+     "suggestion": "Add automated tests with known probe geometry, expected margins, and invalid input cases.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 854
+     }
+    }
+   ]
+  },
+  {
+   "title": "Typo in parameter node reference role \"NativeFiducialsƒ\" resets selector",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 249,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Typo in parameter node reference role \"NativeFiducialsƒ\" resets selector",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 249,
+     "line_end": 251,
+     "evidence": "    wasBlocked = self.ui.nativeFiducialsSelector.blockSignals(True)\n    self.ui.nativeFiducialsSelector.setCurrentNode(self._parameterNode.GetNodeReference(\"NativeFiducialsƒ\"))\n    self.ui.nativeFiducialsSelector.blockSignals(wasBlocked)",
+     "explanation": "In `updateGUIFromParameterNode`, the node reference role has a stray `ƒ` character (`\"NativeFiducialsƒ\"`), whereas `self.nodeSelectors` (line 122) and `onTumorButton` (line 277) use `\"NativeFiducials\"`. Whenever `updateGUIFromParameterNode` runs, `nativeFiducialsSelector` will be reset to `None`.",
+     "suggestion": "Change `\"NativeFiducialsƒ\"` to `\"NativeFiducials\"`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 249
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unmodified boilerplate SampleData registration and 10 MB test STL in repository",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 57,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Unmodified boilerplate SampleData registration and 10 MB test STL in repository",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 57,
+     "line_end": 63,
+     "evidence": "  SampleData.SampleDataLogic.registerCustomSampleDataSource(\n    # Category and sample name displayed in Sample Data module\n    category='AblationPlanner',\n    sampleName='AblationPlanner1',\n    # Thumbnail should have size of approximately 260x280 pixels and stored in Resources/Icons folder.\n    # It can be created by Screen Capture module, \"Capture all views\" option enabled, \"Number of images\" set to \"Single\".\n    thumbnailFileName=os.path.join(iconsPath, 'AblationPlanner1.png'),",
+     "explanation": "`registerSampleData()` registers boilerplate sample data pointing to `AblationPlanner1.png` (which does not exist in `AblationPlanner/Resources/Icons`) and the default Slicer MRHead testing volume checksum. Meanwhile, actual test data (`AblationPlanner/Testing/solid_LT6015.stl` (10 MB), `tumor.seg.nrrd`, `Endpoints.mrk.json`) is committed directly to the git repository, and `AblationPlannerTest` is an empty stub.",
+     "suggestion": "Either remove the unused template `registerSampleData` function or update it to load the actual ablation planning sample data from a release asset rather than committing a 10 MB STL file in `Testing/`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 57
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Generating probe lines deletes all line markups in the scene",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 298,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Generating probe lines deletes all line markups in the scene",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 298,
+     "line_end": 302,
+     "evidence": "    lineNodes = slicer.mrmlScene.GetNodesByClass(\"vtkMRMLMarkupsLineNode\")\n\n    if lineNodes is not None:\n      for lineNode in lineNodes:\n        slicer.mrmlScene.RemoveNode(lineNode)",
+     "explanation": "Pressing Place Markup Line removes every line markup, including pre-existing measurements and annotations belonging to the user or other modules. The endpoint drag handler also calls onLineButton, so routine probe adjustment can silently destroy unsaved scene data without confirmation.",
+     "suggestion": "Track only lines created by this module using node references or a dedicated attribute, and update or remove only those lines.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 298
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AblationPlanner.py:298-302 removes every vtkMRMLMarkupsLineNode in the scene with no confirmation or filtering. Line 462 calls onLineButton again after endpoint drags. Only in-memory scene nodes are removed, not files, and the user can recreate the lines. This is a real data-loss bug that should be fixed. I don't consider it a blocking safety issue, because it isn't malicious or exfiltrating."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "AblationPlanner/AblationPlanner.py:298-302 obtains all scene line nodes and unconditionally removes them: `lineNodes = slicer.mrmlScene.GetNodesByClass(\"vtkMRMLMarkupsLineNode\")` and `slicer.mrmlScene.RemoveNode(lineNode)`. The button is connected at line 159, and the endpoint interaction handler calls `self.onLineButton()` at line 462. Unrelated, unsaved line measurements can be lost without confirmation, even if subsequent line creation fails."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AblationPlanner/AblationPlanner.py lines 298-302, onLineButton() fetches all vtkMRMLMarkupsLineNode instances from slicer.mrmlScene and removes them without filtering for nodes created by the module. Also, onMarkupEndInteraction() (line 462) calls self.onLineButton(). However, this is an ordinary MRML scene-node management bug (deleting MRML line markup nodes in the active Slicer scene rather than user filesystem files), so under the rubric and policy (\"Do not label ordinary bugs as safety issues merely because the extension processes medical images\"), it is a major soundness issue rather than a blocking safety vulnerability."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Applying margin colors overwrites signed distance data and revert is incomplete",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 595,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Applying margin colors overwrites signed distance data and revert is incomplete",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 615,
+     "line_end": 621,
+     "evidence": "        for j in range(0,len(args)):\n            if (colorval < args[j]):\n                thresholded = True\n                VTKFieldDataArray.SetValue(i,j)\n                break\n        if (not thresholded):\n            VTKFieldDataArray.SetValue(i,num_regions)",
+     "explanation": "The color button replaces the model's Signed distance values with bin numbers rather than creating a separate display scalar. Revert iterates only to len(originalColorArray)-1, while the snapshot itself omits the final value, so at least one modified value is never restored; the original values are also kept only in widget memory. Subsequent use or saving of the model can therefore retain incorrect distance data.",
+     "suggestion": "Keep Signed unchanged, create a separate color-bin array, and test the full apply/revert and scene-reload workflow.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 595
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "AblationPlanner.py:611-621 overwrites the 'Signed' array in place with bin indices. The snapshot (353-357) and the loops at 591/611/633 all stop at size-1, and the revert loop at 633 runs to len-1 over a list that is already one entry short. So the last two values are never restored. The snapshot is only in widget memory. It affects a derived margin model, not the user's source data, so I rate it minor."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AblationPlanner/AblationPlanner.py:367-376 calls `self.logic.changeColorsByMargin_(outputMarginModel,-10,-5,-2)` and later restores from `self.originalColorArray`. Lines 603-621 overwrite the `Signed` array with bin values, including `VTKFieldDataArray.SetValue(i,j)`. The snapshot at lines 351-359 and the recoloring loop at line 611 both omit the final element, but the restore at line 633 uses `range(0, len(originalColorArray)-1)`, omitting one additional element. Thus, for an array of at least two elements, the penultimate value remains binned after revert. This corrupts calculated distance data in the output model, not merely its appearance."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AblationPlanner/AblationPlanner.py lines 604-621, changeColorsByMargin_() mutates the \"Signed\" array of the model's field data in-place with bin indices (0..num_regions). In onMarginButton() (lines 350-359), originalColorArray only records range(0, VTKFieldDataArray.GetSize()-1) in self.originalColorArray, and regenerateOriginalModelColors() (lines 633-636) only iterates over range(0, len(originalColorArray)-1). This is a real soundness defect, though it only affects the generated outputMarginModel and is minor/major in severity (major is reasonable since the distance array and table column on the output model are corrupted)."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Parallel probe endpoints yield a singular rotation",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 747,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Parallel probe endpoints yield a singular rotation",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 747,
+     "line_end": 752,
+     "evidence": "    v = np.cross(a, b)\n    c = np.dot(a, b)\n    s = np.linalg.norm(v)\n    kmat = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])\n    rotationMatrix = np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2))\n    return rotationMatrix",
+     "explanation": "When a probe's endpoints are aligned or anti-aligned with the reference direction [0,0,-1], the cross product is zero and the rotation formula divides by zero. Probe placement can then fail or propagate non-finite transform values for an otherwise valid axis-aligned input.",
+     "suggestion": "Handle parallel and antiparallel vectors explicitly, reject coincident endpoints, and test these cases.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 747
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "AblationPlanner.py:747-751 divides by s**2 with no check for s==0. The reference direction is [0,0,-1] (line 435). A probe whose endpoints are exactly parallel or anti-parallel to it gives s=0, so the matrix becomes NaN or inf. This is a real edge-case bug, but it needs exactly axis-aligned input."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AblationPlanner/AblationPlanner.py:435 uses the reference endpoints `[0,0,0], [0,0,-1]`; lines 502-506 pass the normalized target vector into the rotation calculation. At lines 747-751, `v = np.cross(a, b)`, `s = np.linalg.norm(v)`, and `rotationMatrix = np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2))` give division by zero for parallel or antiparallel vectors. Lines 715-733 then use the resulting matrix in a transform and harden it. Axis-aligned placements can fail or yield non-finite geometry; actual runtime behavior was not tested."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In AblationPlanner/AblationPlanner.py lines 740-752, rotationMatrixFromVectors(vec1, vec2) computes s = np.linalg.norm(v) where v = np.cross(a, b), and divides by (s ** 2) on line 751 without checking for s == 0 (when the probe vector is parallel or anti-parallel to [0, 0, -1]). This produces NaN/Inf in the rotation matrix for vertical probes."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Use of removed Slicer 4 Markups fiducial API methods",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line": 307,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Use of removed Slicer 4 Markups fiducial API methods",
+     "file": "AblationPlanner/AblationPlanner.py",
+     "line_start": 307,
+     "line_end": 309,
+     "evidence": "    for i in range(0,numNodePoints,2):\n        fiducialLabel = endPointsMarkupsNode.GetNthFiducialLabel(i)        \n        ras1 = vtk.vtkVector3d(0,0,0)",
+     "explanation": "`vtkMRMLMarkupsNode.GetNthFiducialLabel()` was deprecated in Slicer 4 and removed in Slicer 5 (replaced by `GetNthControlPointLabel()`). Similarly, `GetNumberOfFiducials()` and `GetNthFiducialPosition()` used in `onProbeButton` (lines 413-428) are removed in Slicer 5. Calling `onLineButton` or `onProbeButton` in Slicer 5 will raise an `AttributeError`.",
+     "suggestion": "Replace `GetNthFiducialLabel`, `GetNumberOfFiducials`, and `GetNthFiducialPosition` with `GetNthControlPointLabel`, `GetNumberOfControlPoints`, and `GetNthControlPointPosition`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AblationPlanner/AblationPlanner.py",
+      "line": 307
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "still disputed",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "no",
+     "severity": "info",
+     "rating": null,
+     "reason": "The EndPoints selector is restricted to vtkMRMLMarkupsFiducialNode (Resources/UI/AblationPlanner.ui:89). From memory, Slicer 5 still provides GetNumberOfFiducials, GetNthFiducialPosition and GetNthFiducialLabel on vtkMRMLMarkupsFiducialNode as legacy methods. I could not check the Slicer source, so this is not verified. The label at AblationPlanner.py:308 is unused anyway. The claim that these methods were removed and raise AttributeError is likely wrong."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "unsure",
+     "severity": null,
+     "rating": null,
+     "reason": "AblationPlanner/AblationPlanner.py:307-308 calls `fiducialLabel = endPointsMarkupsNode.GetNthFiducialLabel(i)`, and lines 413 and 427-428 call `GetNumberOfFiducials()` and `GetNthFiducialPosition(i, xyz[i])`. These legacy calls are verified, but the available repository does not establish whether the targeted Slicer 5 version retains compatibility wrappers. Slicer API source and runtime were unavailable, so removal and the asserted AttributeError could not be verified."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In AblationPlanner/AblationPlanner.py line 308 (endPointsMarkupsNode.GetNthFiducialLabel(i)) and lines 413, 416, 418, 419, 422, 427, 428 (GetNumberOfFiducials() and GetNthFiducialPosition()), the code calls legacy Slicer 4 Markups fiducial methods that were removed in Slicer 5 in favor of ControlPoint methods (which are already used on lines 305, 310, 313). Calling onLineButton or onProbeButton in Slicer 5 raises an AttributeError."
+    }
+   }
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (blocking, ok)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "I read AblationPlanner.py around lines 285-440 and 585-780. I also searched the repo for pip_install, urlopen, requests and subprocess and found nothing. I saw no network access, no code downloads, no eval or exec, and no data leaving the machine. The only safety-adjacent issue is D1, the deletion of all line markups in the scene. That is a data-loss bug, not a malicious or exfiltration issue. I rate safety minor, because that deletion could silently destroy user annotations. I did not read every file in the repo, such as CMake files and the lines after 780, so that part is unchecked."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "AblationPlanner/AblationPlanner.py:298-302 contains `lineNodes = slicer.mrmlScene.GetNodesByClass(\"vtkMRMLMarkupsLineNode\")` followed by `slicer.mrmlScene.RemoveNode(lineNode)` for each node, without ownership filtering or confirmation. This is a concrete path to unintended loss of unrelated unsaved user annotations, making safety blocking. I inspected the full Python module, CMake files, extension metadata, and README; external ModelToModelDistance and the sample-data payload were not inspected, and the supplied commit identity could not be independently resolved."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Inspecting AblationPlanner/AblationPlanner.py and the repository build files shows no malicious or concealed behavior, no network transmission (other than the standard SlicerTestingData sample data URL in registerSampleData on line 65), no command injection, unsafe deserialization, or filesystem destruction. D1 is an ordinary MRML scene node management bug rather than a safety issue."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "concern",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "minor issues",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 5,
+  "single": 9,
+  "unverified": 0,
+  "total": 10,
+  "open_disputes": 2
+ }
+}

@@ -1,0 +1,1377 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "pip installs executed at module import (Slicer startup)",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 83,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "pip installs executed at module import (Slicer startup)",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 83,
+     "line_end": 89,
+     "evidence": "nib = _importOptional('nibabel')\ncv2 = _importOptional('cv2', 'cv2')\nnrrd = _importOptional('pynrrd', 'nrrd')\nyattag = _importOptional('yattag')\nmatplotlib = _importOptional('matplotlib')",
+     "explanation": "Slicer imports every installed scripted module file at startup to register it, so these module-level calls run pip_ensure/pip_install for nibabel, opencv, pynrrd, yattag, matplotlib and scikit-image for every user who has the extension installed, even if they never open the module, and without asking. DCE_IDandPhaseSelect.py lines 54-58 does the same for nibabel. This mutates Slicer's shared Python environment silently and can break other extensions.",
+     "suggestion": "Move the imports inside the functions that need them and ask the user for confirmation before installing anything; declare the dependencies in the extension metadata instead.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 83
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Packages are pip-installed at module import time, including a wrong package name for cv2",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 83,
+     "line_end": 89,
+     "evidence": "nib = _importOptional('nibabel')\ncv2 = _importOptional('cv2', 'cv2')\nnrrd = _importOptional('pynrrd', 'nrrd')\nyattag = _importOptional('yattag')",
+     "explanation": "These run whenever the module file is loaded, so a missing package triggers slicer.util.pip_install without user confirmation, even for users who never open the module. For cv2 the pip target is 'cv2' (the import name), not the OpenCV distribution; the pip package named cv2 is not the OpenCV project. pyproject.toml asks for 'opencv-python', which bundles its own Qt and conflicts with Slicer's Qt, rather than 'opencv-python-headless'. The same pattern appears in DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py lines 54-57 for nibabel.",
+     "suggestion": "Move imports into the functions that need them and ask the user before installing. Use the PyPI name opencv-python-headless (import name cv2). Declare the extra dependencies in the extension, not in pyproject.toml, and avoid installing at startup.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 83
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Module 2 cannot be opened unless module 1 was run first",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 240,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Module 2 cannot be opened unless module 1 was run first",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 240,
+     "line_end": 242,
+     "evidence": "exampath_node = slicer.util.getNode(\"path node\")\n#2. Read exampath from current node in pathSelector\nself.exampath = exampath_node.GetParameter(\"exampath\")",
+     "explanation": "setup() immediately looks up the 'path node' created by module 1 and then unpickles the workspace file (lines 267-270). If the user opens module 2 first, or after restarting Slicer, slicer.util.getNode raises and the module widget fails to build, leaving a broken panel with no explanation.",
+     "suggestion": "Check for the node/file and show a clear message ('run Module 1 first') instead of raising.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 240
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Original DICOMs deleted from the user's exam folder without verification",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line": 168,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Original DICOMs deleted from the user's exam folder without verification",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+     "line_start": 163,
+     "line_end": 170,
+     "evidence": "gzcmd = gzcmd_base + fullfile + '.gz' + ' ' + fullfile\nos.system(gzcmd) #create a gzipped copy of the file\nos.remove(fullfile) #delete the original, non-gzipped copy of the file",
+     "explanation": "In the mixed gzipped/non-gzipped branch, each original DICOM in the user's exam directory is gzipped with a hardcoded 7-Zip path and then unconditionally deleted. If 7-Zip is missing or the command fails (the path is hardcoded to 'C:\\Program Files\\7-Zip\\7z', and line 30 even contains the typo 'C:\\Program Fileszz\\7-Zip'), the original image is removed with no copy left - permanent loss of source medical images. I found no call site for gunzipAllFilesDCE in the files I read, so this may currently be dead code, but it is shipped and reachable.",
+     "suggestion": "Never delete source DICOMs; write decompressed copies to a separate output folder and verify success before any removal, or remove this function.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+      "line": 168
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Persistent global change to Slicer's DataProbe settings",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 231,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Persistent global change to Slicer's DataProbe settings",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 231,
+     "line_end": 235,
+     "evidence": "slicer.modules.DataProbeInstance.infoWidget.sliceAnnotations.sliceViewAnnotationsEnabled=False\nslicer.modules.DataProbeInstance.infoWidget.sliceAnnotations.updateSliceViewFromGUI()\n# Disable slice annotations persistently (after Slicer restarts)\nsettings = qt.QSettings()\nsettings.setValue('DataProbe/sliceViewAnnotations.enabled', 0)",
+     "explanation": "Opening module 2 permanently disables the DataProbe slice annotations in the user's Slicer settings. This survives restarts and affects every other module and workflow, including for users who only tried this extension once.",
+     "suggestion": "Do not write global QSettings; if the annotations must be hidden, restore the previous value in cleanup().",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 231
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Shell commands built from user-controlled folder names and run with os.system",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line": 74,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Shell commands built from user-controlled folder names and run with os.system",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+     "line_start": 74,
+     "line_end": 99,
+     "evidence": "cmd_base = r'\"C:\\Program Files\\7-Zip\\7z\" x '\ncmd1_7z = cmd_base + str(os.path.join(curr_path,file1)) + ' -o' + new_path   #command for file 1 uncompressed\nos.system(cmd1_7z) #execute above command",
+     "explanation": "extractGZ() is called from module 1 (DCE_IDandPhaseSelect.py lines 655 and 766) on the exam folder the user selected. Folder and file names from that directory are concatenated into a command string without quoting and passed to os.system, so a DICOM folder or file named with a shell metacharacter (e.g. '1 & calc', '\"; ...') executes arbitrary commands with the user's privileges. This is reachable with any downloaded or shared DICOM dataset whose folder names are not sanitised. The same pattern is repeated at lines 153-175.",
+     "suggestion": "Use subprocess.run with an argument list (no shell), or better, decompress with Python's gzip module instead of shelling out to 7-Zip.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+      "line": 74
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Windows-only 7-Zip shell commands built from unquoted paths; return codes ignored",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+   "line": 74,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Windows-only 7-Zip shell commands built from unquoted paths; return codes ignored",
+     "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+     "line_start": 74,
+     "line_end": 80,
+     "evidence": "cmd_base = r'\"C:\\Program Files\\7-Zip\\7z\" x '\n cmd1_7z = cmd_base + str(os.path.join(curr_path,file1)) + ' -o' + new_path   #command for file 1 uncompressed\n os.system(cmd1_7z) #execute above command",
+     "explanation": "The 7-Zip path is hard-coded, so on machines without 7-Zip at that location (and on macOS, which the README says works) gunzip silently fails and the module loads no images. Exam and output paths are concatenated without quotes, so folder names with spaces or shell metacharacters break or inject commands. The same pattern is in DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py lines 74-80 and 153-175. gzip_gunzip_pyfuncs.py line 30 also has a 'C:\\Program Fileszz\\7-Zip' path that looks like a typo.",
+     "suggestion": "Use Python's gzip module (no external tool) to decompress the DICOM files. If 7-Zip must stay, use subprocess with an argument list, check the exit code, and show a clear error when 7-Zip is missing.",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+      "line": 74
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "opencv-python (non-headless) declared as a dependency",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "pyproject.toml",
+   "line": 6,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "opencv-python (non-headless) declared as a dependency",
+     "file": "pyproject.toml",
+     "line_start": 6,
+     "line_end": 12,
+     "evidence": "dependencies = [\n    \"nibabel\",\n    \"opencv-python\",",
+     "explanation": "opencv-python bundles its own Qt libraries, which conflicts with the Qt that Slicer ships and can crash or destabilise the application for all modules. The extension only uses cv2.imread/cvtColor (ftv_plots.py lines 46-48), which opencv-python-headless provides.",
+     "suggestion": "Use opencv-python-headless, or avoid cv2 entirely (matplotlib.image / PIL are already available).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "pyproject.toml",
+      "line": 6
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "minor",
+     "title": "Use opencv-python-headless instead of opencv-python",
+     "file": "pyproject.toml",
+     "line_start": 7,
+     "line_end": 9,
+     "evidence": "pyproject.toml\n8:     \"opencv-python\",",
+     "explanation": "opencv-python bundles its own GUI/Qt libraries which can conflict with Slicer's bundled Qt libraries. Extensions should use opencv-python-headless instead.",
+     "suggestion": "Change opencv-python to opencv-python-headless in pyproject.toml.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ],
+   "id": "D7"
+  },
+  {
+   "title": "os.system with user-chosen report filename (img2dcm)",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line": 789,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "os.system with user-chosen report filename (img2dcm)",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+     "line_start": 789,
+     "line_end": 790,
+     "evidence": "command = \"img2dcm\" + \" \" + savenamejpeg + \" \" + savenamedcm #use img2dcm to create dicom report from jpeg\nos.system(command)",
+     "explanation": "savenamejpeg derives from the path the user picked in qt.QFileDialog.getSaveFileName (DCE_TumorMapProcess.py line 2576). A save name containing shell metacharacters is executed as a shell command. In addition img2dcm is not bundled with Slicer or the extension, so on typical installs this silently produces no DICOM report and the user gets no error.",
+     "suggestion": "Use subprocess.run([...]) with a list, check the return code, and report failure to the user (or drop the DICOM export).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+      "line": 789
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "os.system called with unquoted, user-derived file path (command injection / broken on spaces)",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+     "line_start": 789,
+     "line_end": 790,
+     "evidence": "command = \"img2dcm\" + \" \" + savenamejpeg + \" \" + savenamedcm #use img2dcm to create dicom report from jpeg\nos.system(command)",
+     "explanation": "savenamejpeg derives from the path the user types in the Qt save dialog (DCE_TumorMapProcess.py 2576-2583). The string is passed to the shell unquoted. A filename with spaces breaks the command, and shell metacharacters such as & or | in the filename run extra commands. The return value is also ignored, so a failed DICOM conversion goes unreported.",
+     "suggestion": "Call the converter with subprocess.run([...], check=True) using an argument list, or do the DICOM conversion in Python (for example pydicom/pydicom-based writer). Report failures to the user.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+      "line": 789
+     }
+    }
+   ],
+   "id": "D8"
+  },
+  {
+   "title": "progressBar used outside the branch that creates it",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+   "line": 138,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "progressBar used outside the branch that creates it",
+     "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+     "line_start": 138,
+     "line_end": 153,
+     "evidence": "if(len(dce_folders) > 0):\n  progbarttl = \"Visit: \" + nodevisstr\n  progressBar = slicer.util.createProgressDialog(windowTitle = progbarttl)",
+     "explanation": "progressBar is only created when at least one DCE folder was identified, but it is dereferenced unconditionally a few lines later (line 153, 'progressBar.value = 25'). When automatic DCE identification finds nothing, the user gets a NameError traceback instead of an actionable error message, and the progress dialog is never closed on the success path either.",
+     "suggestion": "Create the dialog unconditionally (or guard every use) and close it in a finally block; report 'no DCE series found' to the user.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+      "line": 138
+     }
+    }
+   ],
+   "id": "D9"
+  },
+  {
+   "title": "Deletes any 'gunzipped' folder inside the user-selected exam folder",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line": 110,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Deletes any 'gunzipped' folder inside the user-selected exam folder",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+     "line_start": 108,
+     "line_end": 113,
+     "evidence": "gunzip_path = os.path.join(exampath,\"gunzipped\")\n\n    if(os.path.isdir(gunzip_path) == 1):\n        shutil.rmtree(gunzip_path)",
+     "explanation": "After a report is written, deleteGunzipped removes exampath/gunzipped recursively. If the exam folder already contains a user-owned folder named 'gunzipped' with data, that data is deleted. The extension only creates this folder itself when the DICOMs are gzipped, so the risk is limited to unusual folder layouts.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+      "line": 110
+     }
+    }
+   ]
+  },
+  {
+   "title": "Extension metadata URLs point to a different repository than scm_url",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 7,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Extension metadata URLs point to a different repository than scm_url",
+     "file": "CMakeLists.txt",
+     "line_start": 7,
+     "line_end": 12,
+     "evidence": "set(EXTENSION_HOMEPAGE \"https://github.com/rnadkarni2/SlicerBreast_DCEMRI_FTV\")",
+     "explanation": "The catalog entry points at https://github.com/radiology-research/SlicerBreast_DCEMRI_FTV, while homepage, icon and screenshot URLs point at rnadkarni2/SlicerBreast_DCEMRI_FTV. If the old repository is deleted or diverges, the Extension Manager shows broken icons/screenshots and users are sent to the wrong project.",
+     "suggestion": "Point EXTENSION_HOMEPAGE/ICONURL/SCREENSHOTURLS at the radiology-research repository.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 7
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Homepage and icon URLs point to a different repository than scm_url",
+     "file": "CMakeLists.txt",
+     "line_start": 7,
+     "line_end": 12,
+     "evidence": "set(EXTENSION_HOMEPAGE \"https://github.com/rnadkarni2/SlicerBreast_DCEMRI_FTV\")",
+     "explanation": "The catalog entry's scm_url is radiology-research/SlicerBreast_DCEMRI_FTV, but the extension metadata, icon and screenshot URLs use rnadkarni2. Users may land on a different repository, and the index shows a mismatched homepage. The catalog entry is usable as written; this is a metadata issue.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 7
+     }
+    }
+   ]
+  },
+  {
+   "title": "File dialog opened during widget setup and blocking sleep on the GUI thread",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+   "line": 295,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "File dialog opened during widget setup and blocking sleep on the GUI thread",
+     "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+     "line_start": 295,
+     "line_end": 295,
+     "evidence": "self.exampath = qt.QFileDialog.getExistingDirectory(0,(\"Select folder for DCE-MRI exam\"))",
+     "explanation": "A modal folder dialog is opened as soon as the module widget is constructed, so merely selecting the module in the module list pops a dialog and the rest of setup() runs against whatever the user picked (or an empty string). Combined with time.sleep(1) at line 239 and the long DICOM loading done on the GUI thread with processEvents, the UI is unresponsive during processing.",
+     "suggestion": "Move folder selection to a button, and run the loading in a CLI logic call with a proper progress dialog.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+      "line": 295
+     }
+    }
+   ]
+  },
+  {
+   "title": "Module test code is disabled and the in-module test downloads external data",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DCE_IDandPhaseSelect/Testing/Python/CMakeLists.txt",
+   "line": 2,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Module test code is disabled and the in-module test downloads external data",
+     "file": "DCE_IDandPhaseSelect/Testing/Python/CMakeLists.txt",
+     "line_start": 1,
+     "line_end": 2,
+     "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+     "explanation": "The CTest registration for the module tests is commented out. The unittest class in DCE_IDandPhaseSelect.py (lines 822-866) only downloads 'FA.nrrd' from slicer.kitware.com and asserts nothing. There are no tests of the DICOM-parsing or FTV computation logic, so regressions are not caught.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_IDandPhaseSelect/Testing/Python/CMakeLists.txt",
+      "line": 2
+     }
+    }
+   ]
+  },
+  {
+   "title": "Module test downloads sample data and does not test the module",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+   "line": 857,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Module test downloads sample data and does not test the module",
+     "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+     "line_start": 856,
+     "line_end": 861,
+     "evidence": "SampleData.downloadFromURL(\n  nodeNames='FA',\n  fileNames='FA.nrrd',\n  uris='http://slicer.kitware.com/midas3/download?items=5767')",
+     "explanation": "The only test is the Slicer template test: it downloads an unrelated FA volume over plain HTTP and asserts nothing about the extension, so it cannot catch regressions in the DCE loading or FTV logic. The Testing/Python/CMakeLists.txt files have their unittest lines commented out.",
+     "suggestion": "Add a test that exercises the logic with a small anonymised DICOM series or synthetic volume.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+      "line": 857
+     }
+    }
+   ]
+  },
+  {
+   "title": "Runtime pip dependencies are not declared where the build can see them",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "pyproject.toml",
+   "line": 2,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Runtime pip dependencies are not declared where the build can see them",
+     "file": "pyproject.toml",
+     "line_start": 1,
+     "line_end": 12,
+     "evidence": "name = \"slicer-ext-breast-dcemri-ftv\"",
+     "explanation": "The Slicer extension build does not consume pyproject.toml, and the catalog entry has build_dependencies []. The real dependencies (nibabel, opencv, pynrrd, yattag, scikit-image, matplotlib) are therefore satisfied by silent pip installs at import time rather than by declared requirements, so the packaged extension has no reproducible dependency set.",
+     "suggestion": "Declare the dependencies in the extension metadata / documentation and install them with explicit user consent.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "pyproject.toml",
+      "line": 2
+     }
+    }
+   ]
+  },
+  {
+   "title": "Template help text and no sample data",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+   "line": 261,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Template help text and no sample data",
+     "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+     "line_start": 261,
+     "line_end": 263,
+     "evidence": "self.parent.helpText = \"\"\"\nThis is an example of scripted loadable module bundled in an extension.\n\"\"\"  # TODO: update with short description of the module",
+     "explanation": "Both modules still show the Slicer template help text and acknowledgement, so the in-application documentation does not describe what the module does; there is also no sample dataset, so a new user cannot try the workflow without their own DICOM exam.",
+     "suggestion": "Replace the template helpText with the README description and link the step-by-step PDF.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+      "line": 261
+     }
+    }
+   ]
+  },
+  {
+   "title": "distutils imported (removed in Python 3.12)",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line": 26,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "distutils imported (removed in Python 3.12)",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+     "line_start": 26,
+     "line_end": 26,
+     "evidence": "from distutils.dir_util import copy_tree",
+     "explanation": "distutils was removed from the standard library in Python 3.12, which recent Slicer versions use. On such builds importing this plugin module raises ImportError, and because DCE_TumorMapProcess.py imports it at module level (line 101) the whole module fails to load.",
+     "suggestion": "Use shutil.copytree(dirs_exist_ok=True) instead.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+      "line": 26
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Deprecated distutils import will fail on newer Python versions",
+     "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+     "line_start": 25,
+     "line_end": 26,
+     "evidence": "import shutil\nfrom distutils.dir_util import copy_tree",
+     "explanation": "distutils was removed in Python 3.12. The import fails at module load if the Slicer build moves to that version, which breaks Module 1 entirely. The same import is in the DCE_TumorMapProcess copy.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+      "line": 25
+     }
+    }
+   ]
+  },
+  {
+   "title": "matplotlib backend switched globally during report generation",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line": 30,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "matplotlib backend switched globally during report generation",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+     "line_start": 78,
+     "line_end": 80,
+     "evidence": "import slicer\n     import matplotlib\n     matplotlib.use('Agg')",
+     "explanation": "matplotlib.use() changes the process-wide backend. After one report is created, any other Slicer extension or Python console code that uses pyplot with the Qt backend gets the non-interactive Agg backend for the rest of the session.",
+     "suggestion": "",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+      "line": 30
+     }
+    }
+   ]
+  },
+  {
+   "title": "pickle.load of a file at a fixed path in the extension install directory",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 268,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "pickle.load of a file at a fixed path in the extension install directory",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 267,
+     "line_end": 270,
+     "evidence": "wkspc_savepath = os.path.join(extension_path,'current_exam_workspace.pickle')\nwith open(wkspc_savepath,'rb') as f:\n  self.tempres, self.all_folders_info, self.dce_folders, self.dce_ind, self.fsort, self.studydate, self.nslice, self.earlyPostContrastNum, self.latePostContrastNum, self.earlydiffmm, self.earlydiffss, self.latediffmm, self.latediffss = pickle.load(f)",
+     "explanation": "Module 1 writes this pickle (DCE_IDandPhaseSelect.py lines 147-150) into the extension installation directory and module 2 unpickles it. Anyone able to write that file gets code execution in Slicer, and on a normal install the extension directory is read-only, so module 1 fails for non-admin users. It also stores patient-identifying exam metadata in the install tree.",
+     "suggestion": "Store the workspace in a vtkMRMLScriptedModuleNode parameter node or in the user's temp/settings directory, and use JSON instead of pickle.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 268
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "pickle.load of a workspace file stored in the extension directory",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 267,
+     "line_end": 270,
+     "evidence": "wkspc_savepath = os.path.join(extension_path,'current_exam_workspace.pickle')\n     with open(wkspc_savepath,'rb') as f:\n       self.tempres, self.all_folders_info, ... = pickle.load(f)",
+     "explanation": "The pickle is written by Module 1 into the extension's installation directory (DCE_IDandPhaseSelect.py lines 147-150). Unpickling is arbitrary code execution if the file is replaced by a malicious one. The risk is low (it needs local write access), but the pattern is unsafe and the install directory is often not user-owned.",
+     "suggestion": "",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 268
+     }
+    }
+   ]
+  },
+  {
+   "title": "Clinical-use disclaimer only appears on the generated report",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line": 767,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Clinical-use disclaimer only appears on the generated report",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+     "line_start": 767,
+     "line_end": 767,
+     "evidence": "txtplot = plt.text(0.1,0.7,'NOT FOR DIAGNOSIS', fontsize = 14)",
+     "explanation": "The generated report is marked 'NOT FOR DIAGNOSIS', which is good, but the README and module help do not state that the FTV values are research-only and not validated for clinical decision making.",
+     "suggestion": "Add a short research-use-only statement to the README and module helpText.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+      "line": 767
+     }
+    }
+   ]
+  },
+  {
+   "title": "Large binaries committed to the source repository",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "README.md",
+   "line": 73,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Large binaries committed to the source repository",
+     "file": "README.md",
+     "line_start": 73,
+     "line_end": 74,
+     "evidence": "For complete, step-by-step user instructions on how to use this extension, please read the document <br>\n**[UserInstructionsFor_Breast_DCEMRI_FTV.pdf](StepByStepInstructionsForSlicerFTV_12_14_2022_FINAL_Rdcd.pdf)**, which has been included in this repository.",
+     "explanation": "A 13 MB PDF plus ~2 MB of screenshots are committed. This bloats every clone and the extension package; documentation of this size is normally hosted externally and linked.",
+     "suggestion": "Host the PDF externally (or in a release asset) and link it from the README.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 73
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "pip installs executed at module import (Slicer startup)",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 83,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "pip installs executed at module import (Slicer startup)",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 83,
+     "line_end": 89,
+     "evidence": "nib = _importOptional('nibabel')\ncv2 = _importOptional('cv2', 'cv2')\nnrrd = _importOptional('pynrrd', 'nrrd')\nyattag = _importOptional('yattag')\nmatplotlib = _importOptional('matplotlib')",
+     "explanation": "Slicer imports every installed scripted module file at startup to register it, so these module-level calls run pip_ensure/pip_install for nibabel, opencv, pynrrd, yattag, matplotlib and scikit-image for every user who has the extension installed, even if they never open the module, and without asking. DCE_IDandPhaseSelect.py lines 54-58 does the same for nibabel. This mutates Slicer's shared Python environment silently and can break other extensions.",
+     "suggestion": "Move the imports inside the functions that need them and ask the user for confirmation before installing anything; declare the dependencies in the extension metadata instead.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 83
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Packages are pip-installed at module import time, including a wrong package name for cv2",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 83,
+     "line_end": 89,
+     "evidence": "nib = _importOptional('nibabel')\ncv2 = _importOptional('cv2', 'cv2')\nnrrd = _importOptional('pynrrd', 'nrrd')\nyattag = _importOptional('yattag')",
+     "explanation": "These run whenever the module file is loaded, so a missing package triggers slicer.util.pip_install without user confirmation, even for users who never open the module. For cv2 the pip target is 'cv2' (the import name), not the OpenCV distribution; the pip package named cv2 is not the OpenCV project. pyproject.toml asks for 'opencv-python', which bundles its own Qt and conflicts with Slicer's Qt, rather than 'opencv-python-headless'. The same pattern appears in DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py lines 54-57 for nibabel.",
+     "suggestion": "Move imports into the functions that need them and ask the user before installing. Use the PyPI name opencv-python-headless (import name cv2). Declare the extra dependencies in the extension, not in pyproject.toml, and avoid installing at startup.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 83
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Module 2 cannot be opened unless module 1 was run first",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 240,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Module 2 cannot be opened unless module 1 was run first",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 240,
+     "line_end": 242,
+     "evidence": "exampath_node = slicer.util.getNode(\"path node\")\n#2. Read exampath from current node in pathSelector\nself.exampath = exampath_node.GetParameter(\"exampath\")",
+     "explanation": "setup() immediately looks up the 'path node' created by module 1 and then unpickles the workspace file (lines 267-270). If the user opens module 2 first, or after restarting Slicer, slicer.util.getNode raises and the module widget fails to build, leaving a broken panel with no explanation.",
+     "suggestion": "Check for the node/file and show a clear message ('run Module 1 first') instead of raising.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 240
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Original DICOMs deleted from the user's exam folder without verification",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line": 168,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Original DICOMs deleted from the user's exam folder without verification",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+     "line_start": 163,
+     "line_end": 170,
+     "evidence": "gzcmd = gzcmd_base + fullfile + '.gz' + ' ' + fullfile\nos.system(gzcmd) #create a gzipped copy of the file\nos.remove(fullfile) #delete the original, non-gzipped copy of the file",
+     "explanation": "In the mixed gzipped/non-gzipped branch, each original DICOM in the user's exam directory is gzipped with a hardcoded 7-Zip path and then unconditionally deleted. If 7-Zip is missing or the command fails (the path is hardcoded to 'C:\\Program Files\\7-Zip\\7z', and line 30 even contains the typo 'C:\\Program Fileszz\\7-Zip'), the original image is removed with no copy left - permanent loss of source medical images. I found no call site for gunzipAllFilesDCE in the files I read, so this may currently be dead code, but it is shipped and reachable.",
+     "suggestion": "Never delete source DICOMs; write decompressed copies to a separate output folder and verify success before any removal, or remove this function.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+      "line": 168
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Persistent global change to Slicer's DataProbe settings",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 231,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Persistent global change to Slicer's DataProbe settings",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 231,
+     "line_end": 235,
+     "evidence": "slicer.modules.DataProbeInstance.infoWidget.sliceAnnotations.sliceViewAnnotationsEnabled=False\nslicer.modules.DataProbeInstance.infoWidget.sliceAnnotations.updateSliceViewFromGUI()\n# Disable slice annotations persistently (after Slicer restarts)\nsettings = qt.QSettings()\nsettings.setValue('DataProbe/sliceViewAnnotations.enabled', 0)",
+     "explanation": "Opening module 2 permanently disables the DataProbe slice annotations in the user's Slicer settings. This survives restarts and affects every other module and workflow, including for users who only tried this extension once.",
+     "suggestion": "Do not write global QSettings; if the annotations must be hidden, restore the previous value in cleanup().",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 231
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Shell commands built from user-controlled folder names and run with os.system",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line": 74,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Shell commands built from user-controlled folder names and run with os.system",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+     "line_start": 74,
+     "line_end": 99,
+     "evidence": "cmd_base = r'\"C:\\Program Files\\7-Zip\\7z\" x '\ncmd1_7z = cmd_base + str(os.path.join(curr_path,file1)) + ' -o' + new_path   #command for file 1 uncompressed\nos.system(cmd1_7z) #execute above command",
+     "explanation": "extractGZ() is called from module 1 (DCE_IDandPhaseSelect.py lines 655 and 766) on the exam folder the user selected. Folder and file names from that directory are concatenated into a command string without quoting and passed to os.system, so a DICOM folder or file named with a shell metacharacter (e.g. '1 & calc', '\"; ...') executes arbitrary commands with the user's privileges. This is reachable with any downloaded or shared DICOM dataset whose folder names are not sanitised. The same pattern is repeated at lines 153-175.",
+     "suggestion": "Use subprocess.run with an argument list (no shell), or better, decompress with Python's gzip module instead of shelling out to 7-Zip.",
+     "confidence": "high",
+     "verification": {
+      "status": "partly verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+      "line": 74
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Windows-only 7-Zip shell commands built from unquoted paths; return codes ignored",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+   "line": 74,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Windows-only 7-Zip shell commands built from unquoted paths; return codes ignored",
+     "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+     "line_start": 74,
+     "line_end": 80,
+     "evidence": "cmd_base = r'\"C:\\Program Files\\7-Zip\\7z\" x '\n cmd1_7z = cmd_base + str(os.path.join(curr_path,file1)) + ' -o' + new_path   #command for file 1 uncompressed\n os.system(cmd1_7z) #execute above command",
+     "explanation": "The 7-Zip path is hard-coded, so on machines without 7-Zip at that location (and on macOS, which the README says works) gunzip silently fails and the module loads no images. Exam and output paths are concatenated without quotes, so folder names with spaces or shell metacharacters break or inject commands. The same pattern is in DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py lines 74-80 and 153-175. gzip_gunzip_pyfuncs.py line 30 also has a 'C:\\Program Fileszz\\7-Zip' path that looks like a typo.",
+     "suggestion": "Use Python's gzip module (no external tool) to decompress the DICOM files. If 7-Zip must stay, use subprocess with an argument list, check the exit code, and show a clear error when 7-Zip is missing.",
+     "confidence": "medium",
+     "verification": {
+      "status": "partly verified",
+      "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+      "line": 74
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "opencv-python (non-headless) declared as a dependency",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "pyproject.toml",
+   "line": 6,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "opencv-python (non-headless) declared as a dependency",
+     "file": "pyproject.toml",
+     "line_start": 6,
+     "line_end": 12,
+     "evidence": "dependencies = [\n    \"nibabel\",\n    \"opencv-python\",",
+     "explanation": "opencv-python bundles its own Qt libraries, which conflicts with the Qt that Slicer ships and can crash or destabilise the application for all modules. The extension only uses cv2.imread/cvtColor (ftv_plots.py lines 46-48), which opencv-python-headless provides.",
+     "suggestion": "Use opencv-python-headless, or avoid cv2 entirely (matplotlib.image / PIL are already available).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "pyproject.toml",
+      "line": 6
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "minor",
+     "title": "Use opencv-python-headless instead of opencv-python",
+     "file": "pyproject.toml",
+     "line_start": 7,
+     "line_end": 9,
+     "evidence": "pyproject.toml\n8:     \"opencv-python\",",
+     "explanation": "opencv-python bundles its own GUI/Qt libraries which can conflict with Slicer's bundled Qt libraries. Extensions should use opencv-python-headless instead.",
+     "suggestion": "Change opencv-python to opencv-python-headless in pyproject.toml.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ],
+   "id": "D7"
+  },
+  {
+   "title": "os.system with user-chosen report filename (img2dcm)",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line": 789,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "os.system with user-chosen report filename (img2dcm)",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+     "line_start": 789,
+     "line_end": 790,
+     "evidence": "command = \"img2dcm\" + \" \" + savenamejpeg + \" \" + savenamedcm #use img2dcm to create dicom report from jpeg\nos.system(command)",
+     "explanation": "savenamejpeg derives from the path the user picked in qt.QFileDialog.getSaveFileName (DCE_TumorMapProcess.py line 2576). A save name containing shell metacharacters is executed as a shell command. In addition img2dcm is not bundled with Slicer or the extension, so on typical installs this silently produces no DICOM report and the user gets no error.",
+     "suggestion": "Use subprocess.run([...]) with a list, check the return code, and report failure to the user (or drop the DICOM export).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+      "line": 789
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "os.system called with unquoted, user-derived file path (command injection / broken on spaces)",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+     "line_start": 789,
+     "line_end": 790,
+     "evidence": "command = \"img2dcm\" + \" \" + savenamejpeg + \" \" + savenamedcm #use img2dcm to create dicom report from jpeg\nos.system(command)",
+     "explanation": "savenamejpeg derives from the path the user types in the Qt save dialog (DCE_TumorMapProcess.py 2576-2583). The string is passed to the shell unquoted. A filename with spaces breaks the command, and shell metacharacters such as & or | in the filename run extra commands. The return value is also ignored, so a failed DICOM conversion goes unreported.",
+     "suggestion": "Call the converter with subprocess.run([...], check=True) using an argument list, or do the DICOM conversion in Python (for example pydicom/pydicom-based writer). Report failures to the user.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+      "line": 789
+     }
+    }
+   ],
+   "id": "D8"
+  },
+  {
+   "title": "progressBar used outside the branch that creates it",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+   "line": 138,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "progressBar used outside the branch that creates it",
+     "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+     "line_start": 138,
+     "line_end": 153,
+     "evidence": "if(len(dce_folders) > 0):\n  progbarttl = \"Visit: \" + nodevisstr\n  progressBar = slicer.util.createProgressDialog(windowTitle = progbarttl)",
+     "explanation": "progressBar is only created when at least one DCE folder was identified, but it is dereferenced unconditionally a few lines later (line 153, 'progressBar.value = 25'). When automatic DCE identification finds nothing, the user gets a NameError traceback instead of an actionable error message, and the progress dialog is never closed on the success path either.",
+     "suggestion": "Create the dialog unconditionally (or guard every use) and close it in a finally block; report 'no DCE series found' to the user.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+      "line": 138
+     }
+    }
+   ],
+   "id": "D9"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D10",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D11",
+   "rating_dispute": {
+    "deepseek": "blocking",
+    "flash-lite": "minor",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D12",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8",
+  "D9",
+  "D10",
+  "D11",
+  "D12"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "blocking",
+   "flash-lite": "minor",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 12,
+  "single": 15,
+  "unverified": 0,
+  "total": 21
+ }
+}

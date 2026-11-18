@@ -1,0 +1,486 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "pip_install(\"pyserial\") executed at module import / Slicer startup",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "blocking"
+   ],
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "pip_install(\"pyserial\") executed at module import / Slicer startup",
+     "file": "ArduinoConnect/ArduinoConnect.py",
+     "line_start": 9,
+     "line_end": 15,
+     "evidence": "try:\n  import serial\n  import serial.tools.list_ports\nexcept ModuleNotFoundError:\n  slicer.util.pip_install(\"pyserial\")\n  import serial\n  import serial.tools.list_ports",
+     "explanation": "`ArduinoConnect.py` installs `pyserial` via `slicer.util.pip_install(\"pyserial\")` at top-level module import time. Because Slicer imports all installed scripted modules during application startup, this triggers a network package installation on first launch after installing the extension, blocking startup and modifying Slicer's shared Python environment even for users who never open the module.",
+     "suggestion": "Move the `serial` import and `slicer.util.pip_install(\"pyserial\")` call out of the top-level module scope into `ArduinoConnectWidget.setup()` or `ArduinoConnectLogic.connect()` / `onDetectDeviceButton()` so that installation only occurs when the user interacts with the module.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ArduinoConnect/ArduinoConnect.py",
+      "line": 9
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "pyserial is installed automatically during module import",
+     "file": "ArduinoConnect/ArduinoConnect.py",
+     "line_start": 9,
+     "line_end": 13,
+     "evidence": "try:\n  import serial\n  import serial.tools.list_ports\nexcept ModuleNotFoundError:\n  slicer.util.pip_install(\"pyserial\")",
+     "explanation": "When pyserial is absent, loading the scripted module downloads and installs it into Slicer's shared Python environment without confirmation. This can happen during Slicer startup even if the user never opens ArduinoConnect, and an offline or failed installation can prevent the module from loading.",
+     "suggestion": "Defer the dependency check to explicit module use, explain the required installation, and ask the user for confirmation before installing.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ArduinoConnect/ArduinoConnect.py",
+      "line": 9
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "ArduinoConnect/ArduinoConnect.py lines 9-15: top-level try/except ModuleNotFoundError calls slicer.util.pip_install(\"pyserial\") at import, with no user confirmation. Slicer loads modules at startup, so this runs for users who never open the module, and a failed or offline install breaks module loading. The AGENTS policy lists package installation at import as a change-request item. The package is small (pyserial), pure Python, and not bundled by Slicer, and it is not pinned. Because of that I rate it major, not blocking, though the policy requires a fix. The environment rating is concern."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "ArduinoConnect/ArduinoConnect.py:9-13 executes at module scope: `try:` / `  import serial` / `  import serial.tools.list_ports` / `except ModuleNotFoundError:` / `  slicer.util.pip_install(\"pyserial\")`. ArduinoConnect/CMakeLists.txt:5-6 and 16-19 registers this Python file as a scripted module. If either import raises ModuleNotFoundError, importing the module installs pyserial into Slicer's shared Python environment without a prompt, potentially during startup even for users who do not open the module; failed installation can prevent module loading. This is an import-time installation explicitly requiring changes under the security policy. Runtime startup behavior was not independently tested."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "In ArduinoConnect/ArduinoConnect.py:9-15, at top-level module scope, the code attempts `import serial` and on `ModuleNotFoundError` executes `slicer.util.pip_install(\"pyserial\")` immediately upon module import (which happens during Slicer startup). Under the review policy and rubric (\"Request changes for: ... Package installation at module import or Slicer startup\"), this is a blocking environment issue."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "A partial serial line can freeze the Slicer GUI indefinitely",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line": 448,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "A partial serial line can freeze the Slicer GUI indefinitely",
+     "file": "ArduinoConnect/ArduinoConnect.py",
+     "line_start": 448,
+     "line_end": 449,
+     "evidence": "      elif self.arduinoConnection.isOpen() and self.arduinoConnection.in_waiting > 0: # Some messages from arduino\n        arduinoReceiveBuffer = self.arduinoConnection.readline().decode('ascii')",
+     "explanation": "The port is opened at line 426 without a read timeout, and polling runs in a Qt timer callback. If a device sends some bytes but no newline, readline waits indefinitely on the GUI thread, preventing interaction and risking loss of unsaved work if the user must terminate Slicer.",
+     "suggestion": "Use nonblocking or bounded reads and accumulate partial lines, preferably with serial I/O isolated from the GUI thread.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ArduinoConnect/ArduinoConnect.py",
+      "line": 448
+     }
+    }
+   ]
+  },
+  {
+   "title": "Broken boilerplate self-tests in all three modules",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+   "line": 453,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Broken boilerplate self-tests in all three modules",
+     "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+     "line_start": 453,
+     "line_end": 459,
+     "evidence": "  def runTest(self):\n    \"\"\"Run as few or as many tests as needed here.\n    \"\"\"\n    self.setUp()\n    self.test_ArduinoPedalBoard1()\n\n  def test_ArduinoPedalBoard11(self):",
+     "explanation": "The self-tests in all three modules (`ArduinoConnectTest`, `ArduinoPedalBoardTest`, `ArduinoMotionSensorTest`) are unmodified boilerplate that call `logic.hasImageData(volumeNode)` (which does not exist on the logic classes), and `ArduinoPedalBoardTest.runTest` calls `self.test_ArduinoPedalBoard1()` while the method is named `test_ArduinoPedalBoard11`. Running the self-tests will fail with `AttributeError` or `TypeError`.",
+     "suggestion": "Replace the template test methods with tests that instantiate the module logic and verify basic parameter node and message handling behavior.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+      "line": 453
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Registered module tests do not exercise the integrations and contain mismatches",
+     "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+     "line_start": 456,
+     "line_end": 459,
+     "evidence": "    self.setUp()\n    self.test_ArduinoPedalBoard1()\n\n  def test_ArduinoPedalBoard11(self):",
+     "explanation": "The pedalboard test calls a method that is not defined under that name. The motion sensor and connector tests also use unrelated sample-volume template logic; the motion sensor test constructs its logic without the required arduinoNode argument. These tests cannot validate the advertised device behavior.",
+     "suggestion": "Replace template tests with deterministic fake serial/node tests covering connection, partial messages, gestures, and pedal mappings.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+      "line": 456
+     }
+    }
+   ]
+  },
+  {
+   "title": "One pedal mapping does not decrease the yellow slice offset",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+   "line": 401,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "One pedal mapping does not decrease the yellow slice offset",
+     "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+     "line_start": 401,
+     "line_end": 403,
+     "evidence": "    if message==\"2\" and self.button2==\"Slice Offset -\" and self.selected_view==2 and self.button3==\"Change Viewer\":\n        print(\"Button DOWN Pressed, [Operation num.]:\",message)              \n        print(\"Offset Yellow Slice:\",self.yellow_Slice.GetSliceOffset())",
+     "explanation": "With button 3 configured to change views and button 2 configured for Slice Offset -, pressing button 2 in the yellow view only prints the offset. Unlike the red and green branches, it never calls SetSliceOffset, so the slice does not move.",
+     "suggestion": "Apply the offset decrement in this branch and test all view/button mapping combinations.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+      "line": 401
+     }
+    }
+   ]
+  },
+  {
+   "title": "Opening ArduinoPedalBoard or ArduinoMotionSensor before ArduinoConnect causes AttributeError on None node",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+   "line": 36,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Opening ArduinoPedalBoard or ArduinoMotionSensor before ArduinoConnect causes AttributeError on None node",
+     "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+     "line_start": 36,
+     "line_end": 37,
+     "evidence": "    self.ArduinoNode = slicer.mrmlScene.GetFirstNodeByName(\"arduinoNode\")\n    self.logic = ArduinoPedalBoardLogic(self.ArduinoNode)",
+     "explanation": "If a user opens the `ArduinoPedalBoard` or `ArduinoMotionSensor` module before ever opening `ArduinoConnect` (which creates the `\"arduinoNode\"` node in `ArduinoConnectLogic.__init__`), `slicer.mrmlScene.GetFirstNodeByName(\"arduinoNode\")` returns `None`. In `ArduinoPedalBoardWidget.setup()` (line 50), `self.ArduinoNode.AddObserver(...)` will immediately raise an `AttributeError: 'NoneType' object has no attribute 'AddObserver'`. Similarly, in `ArduinoMotionSensorWidget.onStartButton()` (line 59), `self.ArduinoNode.AddObserver(...)` will fail if `ArduinoConnect` was not opened first. Additionally, `ArduinoPedalBoardLogic.__init__` (lines 186-188) creates a second duplicate node named `\"arduinoNode\"` in the scene without assigning it to `self.ArduinoNode`.",
+     "suggestion": "Ensure a single shared singleton node or helper function retrieves or creates `\"arduinoNode\"` if it does not already exist in `slicer.mrmlScene`, and remove the duplicate node creation in `ArduinoPedalBoardLogic.__init__`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+      "line": 36
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Pedalboard setup fails if the connector has not created its node",
+     "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+     "line_start": 34,
+     "line_end": 37,
+     "evidence": "  def setup(self):\n    ScriptedLoadableModuleWidget.setup(self)\n    self.ArduinoNode = slicer.mrmlScene.GetFirstNodeByName(\"arduinoNode\")\n    self.logic = ArduinoPedalBoardLogic(self.ArduinoNode)",
+     "explanation": "Opening the pedalboard before the ArduinoConnect widget has created arduinoNode leaves ArduinoNode as None; the AddObserver call at line 50 then raises an exception during setup. The motion sensor has the same missing-node assumption when its Start button is pressed.",
+     "suggestion": "Create or obtain the connector node reliably and disable device controls with a clear explanation until it exists; handle scene resets too.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+      "line": 34
+     }
+    }
+   ]
+  },
+  {
+   "title": "Pedalboard observer is not removed on cleanup",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+   "line": 49,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Pedalboard observer is not removed on cleanup",
+     "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+     "line_start": 49,
+     "line_end": 50,
+     "evidence": "    # Link to logic class\n    self.sceneModifiedObserverTag=self.ArduinoNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.logic.ApplyChange)",
+     "explanation": "The widget's cleanup at lines 168-169 is empty, so the observer and callback remain attached until the observed node is destroyed. Reloading or recreating the widget can leave multiple callbacks processing each pedal message and changing slice views more than once.",
+     "suggestion": "Remove the saved observer during cleanup and on scene changes, and disable the active pedal mapping when appropriate.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+      "line": 49
+     }
+    }
+   ]
+  },
+  {
+   "title": "User configuration written into installed module Resources directory instead of QSettings",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line": 209,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "User configuration written into installed module Resources directory instead of QSettings",
+     "file": "ArduinoConnect/ArduinoConnect.py",
+     "line_start": 209,
+     "line_end": 212,
+     "evidence": "    # Configuration\n    self.configFileName = __file__.replace(\"ArduinoConnect.py\", \"Resources%sArduinoConnectConfig.json\" % (os.sep))\n    with open(self.configFileName) as f:\n      self.config = json.load(f)",
+     "explanation": "`ArduinoConnectWidget` saves the user's Arduino IDE executable path by writing directly to `Resources/ArduinoConnectConfig.json` inside the installed extension directory (`writeConfig` at lines 250-252). If Slicer or the extension is installed in a read-only or system-wide directory, `open(self.configFileName, 'w')` will fail with a `PermissionError`, and settings will not persist across extension updates.",
+     "suggestion": "Store user preferences such as the Arduino IDE path in `slicer.app.userSettings()` (`qt.QSettings`) rather than writing into the installed module's `Resources` directory.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ArduinoConnect/ArduinoConnect.py",
+      "line": 209
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "IDE setting is written inside the installed extension resources",
+     "file": "ArduinoConnect/ArduinoConnect.py",
+     "line_start": 250,
+     "line_end": 252,
+     "evidence": "  def writeConfig(self):\n    with open(self.configFileName, 'w') as json_file:\n      json.dump(self.config, json_file)",
+     "explanation": "The filename is derived from the module's Resources directory at line 210. Selecting an IDE fails if the extension installation is read-only, and a writable setting may be lost when the extension is upgraded or reinstalled.",
+     "suggestion": "Persist the IDE path in Slicer application settings or another per-user writable location.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ArduinoConnect/ArduinoConnect.py",
+      "line": 250
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "pip_install(\"pyserial\") executed at module import / Slicer startup",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "blocking"
+   ],
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "pip_install(\"pyserial\") executed at module import / Slicer startup",
+     "file": "ArduinoConnect/ArduinoConnect.py",
+     "line_start": 9,
+     "line_end": 15,
+     "evidence": "try:\n  import serial\n  import serial.tools.list_ports\nexcept ModuleNotFoundError:\n  slicer.util.pip_install(\"pyserial\")\n  import serial\n  import serial.tools.list_ports",
+     "explanation": "`ArduinoConnect.py` installs `pyserial` via `slicer.util.pip_install(\"pyserial\")` at top-level module import time. Because Slicer imports all installed scripted modules during application startup, this triggers a network package installation on first launch after installing the extension, blocking startup and modifying Slicer's shared Python environment even for users who never open the module.",
+     "suggestion": "Move the `serial` import and `slicer.util.pip_install(\"pyserial\")` call out of the top-level module scope into `ArduinoConnectWidget.setup()` or `ArduinoConnectLogic.connect()` / `onDetectDeviceButton()` so that installation only occurs when the user interacts with the module.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ArduinoConnect/ArduinoConnect.py",
+      "line": 9
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "pyserial is installed automatically during module import",
+     "file": "ArduinoConnect/ArduinoConnect.py",
+     "line_start": 9,
+     "line_end": 13,
+     "evidence": "try:\n  import serial\n  import serial.tools.list_ports\nexcept ModuleNotFoundError:\n  slicer.util.pip_install(\"pyserial\")",
+     "explanation": "When pyserial is absent, loading the scripted module downloads and installs it into Slicer's shared Python environment without confirmation. This can happen during Slicer startup even if the user never opens ArduinoConnect, and an offline or failed installation can prevent the module from loading.",
+     "suggestion": "Defer the dependency check to explicit module use, explain the required installation, and ask the user for confirmation before installing.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ArduinoConnect/ArduinoConnect.py",
+      "line": 9
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "ArduinoConnect/ArduinoConnect.py lines 9-15: top-level try/except ModuleNotFoundError calls slicer.util.pip_install(\"pyserial\") at import, with no user confirmation. Slicer loads modules at startup, so this runs for users who never open the module, and a failed or offline install breaks module loading. The AGENTS policy lists package installation at import as a change-request item. The package is small (pyserial), pure Python, and not bundled by Slicer, and it is not pinned. Because of that I rate it major, not blocking, though the policy requires a fix. The environment rating is concern."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "ArduinoConnect/ArduinoConnect.py:9-13 executes at module scope: `try:` / `  import serial` / `  import serial.tools.list_ports` / `except ModuleNotFoundError:` / `  slicer.util.pip_install(\"pyserial\")`. ArduinoConnect/CMakeLists.txt:5-6 and 16-19 registers this Python file as a scripted module. If either import raises ModuleNotFoundError, importing the module installs pyserial into Slicer's shared Python environment without a prompt, potentially during startup even for users who do not open the module; failed installation can prevent module loading. This is an import-time installation explicitly requiring changes under the security policy. Runtime startup behavior was not independently tested."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "In ArduinoConnect/ArduinoConnect.py:9-15, at top-level module scope, the code attempts `import serial` and on `ModuleNotFoundError` executes `slicer.util.pip_install(\"pyserial\")` immediately upon module import (which happens during Slicer startup). Under the review policy and rubric (\"Request changes for: ... Package installation at module import or Slicer startup\"), this is a blocking environment issue."
+    }
+   },
+   "settled_severity": "blocking"
+  }
+ ],
+ "disputes": [
+  "D1"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "blocking",
+   "gpt": "blocking"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "needs fixes",
+  "gemini": "needs fixes",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 1,
+  "single": 3,
+  "unverified": 0,
+  "total": 7,
+  "open_disputes": 0
+ }
+}

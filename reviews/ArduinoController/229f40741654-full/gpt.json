@@ -1,0 +1,124 @@
+{
+ "purpose": "ArduinoController connects 3D Slicer to Arduino-compatible devices over a serial port and provides tools to send, monitor, and plot data. It also lets users control slice views with a motion sensor or pedalboard and provides examples for developers building device integrations.",
+ "summary": "The source provides documented Arduino integrations, but it installs pyserial into Slicer's shared environment during module import without asking. Serial polling can also freeze the GUI on an incomplete message, and several ordinary usability and test defects deserve follow-up. The root license is MIT and the inspected CMake lists the module scripts and resources, but the catalog's moving branch and exact revision could not be independently resolved here. 🔴 Do not merge yet: move dependency installation out of startup and obtain user consent; also verify the catalog source and revision.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected the three module scripts, Arduino sketches, CMake files, and repository-wide searches for network, execution, and file operations. Serial data is sent to the user-selected device and the IDE is launched explicitly; external package and binary contents were not independently audited."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "ArduinoConnect/ArduinoConnect.py installs pyserial at import if it is missing, without user confirmation, changing Slicer's shared environment even for users who do not open the module."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "The three module CMake files list their Python scripts and existing resources, and EXTENSION_DEPENDS agrees with the supplied empty build_dependencies. The source URL, moving master revision, and actual build could not be independently verified with the available tools."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "The root LICENSE grants MIT distribution rights for the extension. The terms and contents of externally obtained dependencies and the unavailable example scene were not independently inspected."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected connection and polling logic, motion and pedal callbacks, UI resources, and test implementations. Blocking serial reads, missing-node handling, and a pedal mapping defect can disrupt the advertised functionality."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md and docs include setup guidance, examples, and demonstrations. The registered tests are template-derived and contain concrete method and constructor mismatches rather than exercising the device integrations."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "pyserial is installed automatically during module import",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 9,
+   "line_end": 13,
+   "evidence": "try:\n  import serial\n  import serial.tools.list_ports\nexcept ModuleNotFoundError:\n  slicer.util.pip_install(\"pyserial\")",
+   "explanation": "When pyserial is absent, loading the scripted module downloads and installs it into Slicer's shared Python environment without confirmation. This can happen during Slicer startup even if the user never opens ArduinoConnect, and an offline or failed installation can prevent the module from loading.",
+   "suggestion": "Defer the dependency check to explicit module use, explain the required installation, and ask the user for confirmation before installing.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "A partial serial line can freeze the Slicer GUI indefinitely",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 448,
+   "line_end": 449,
+   "evidence": "      elif self.arduinoConnection.isOpen() and self.arduinoConnection.in_waiting > 0: # Some messages from arduino\n        arduinoReceiveBuffer = self.arduinoConnection.readline().decode('ascii')",
+   "explanation": "The port is opened at line 426 without a read timeout, and polling runs in a Qt timer callback. If a device sends some bytes but no newline, readline waits indefinitely on the GUI thread, preventing interaction and risking loss of unsaved work if the user must terminate Slicer.",
+   "suggestion": "Use nonblocking or bounded reads and accumulate partial lines, preferably with serial I/O isolated from the GUI thread.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Pedalboard setup fails if the connector has not created its node",
+   "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+   "line_start": 34,
+   "line_end": 37,
+   "evidence": "  def setup(self):\n    ScriptedLoadableModuleWidget.setup(self)\n    self.ArduinoNode = slicer.mrmlScene.GetFirstNodeByName(\"arduinoNode\")\n    self.logic = ArduinoPedalBoardLogic(self.ArduinoNode)",
+   "explanation": "Opening the pedalboard before the ArduinoConnect widget has created arduinoNode leaves ArduinoNode as None; the AddObserver call at line 50 then raises an exception during setup. The motion sensor has the same missing-node assumption when its Start button is pressed.",
+   "suggestion": "Create or obtain the connector node reliably and disable device controls with a clear explanation until it exists; handle scene resets too.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "One pedal mapping does not decrease the yellow slice offset",
+   "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+   "line_start": 401,
+   "line_end": 403,
+   "evidence": "    if message==\"2\" and self.button2==\"Slice Offset -\" and self.selected_view==2 and self.button3==\"Change Viewer\":\n        print(\"Button DOWN Pressed, [Operation num.]:\",message)              \n        print(\"Offset Yellow Slice:\",self.yellow_Slice.GetSliceOffset())",
+   "explanation": "With button 3 configured to change views and button 2 configured for Slice Offset -, pressing button 2 in the yellow view only prints the offset. Unlike the red and green branches, it never calls SetSliceOffset, so the slice does not move.",
+   "suggestion": "Apply the offset decrement in this branch and test all view/button mapping combinations.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "IDE setting is written inside the installed extension resources",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 250,
+   "line_end": 252,
+   "evidence": "  def writeConfig(self):\n    with open(self.configFileName, 'w') as json_file:\n      json.dump(self.config, json_file)",
+   "explanation": "The filename is derived from the module's Resources directory at line 210. Selecting an IDE fails if the extension installation is read-only, and a writable setting may be lost when the extension is upgraded or reinstalled.",
+   "suggestion": "Persist the IDE path in Slicer application settings or another per-user writable location.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Registered module tests do not exercise the integrations and contain mismatches",
+   "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+   "line_start": 456,
+   "line_end": 459,
+   "evidence": "    self.setUp()\n    self.test_ArduinoPedalBoard1()\n\n  def test_ArduinoPedalBoard11(self):",
+   "explanation": "The pedalboard test calls a method that is not defined under that name. The motion sensor and connector tests also use unrelated sample-volume template logic; the motion sensor test constructs its logic without the required arduinoNode argument. These tests cannot validate the advertised device behavior.",
+   "suggestion": "Replace template tests with deterministic fake serial/node tests covering connection, partial messages, gestures, and pedal mappings.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Pedalboard observer is not removed on cleanup",
+   "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+   "line_start": 49,
+   "line_end": 50,
+   "evidence": "    # Link to logic class\n    self.sceneModifiedObserverTag=self.ArduinoNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.logic.ApplyChange)",
+   "explanation": "The widget's cleanup at lines 168-169 is empty, so the observer and callback remain attached until the observed node is destroyed. Reloading or recreating the widget can leave multiple callbacks processing each pedal message and changing slice views more than once.",
+   "suggestion": "Remove the saved observer during cleanup and on scene changes, and disable the active pedal mapping when appropriate.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not access the remote repository to independently resolve master or verify that the supplied source snapshot is exactly commit 229f407416549b33f8431a960c7d0479a7a5b564; previous catalog entry and submission checklist were not available.",
+  "Could not run Slicer, build the extension, execute tests, inspect CI, or test with actual Arduino hardware.",
+  "The 2 MB example MRB was unavailable for content and provenance inspection; binary icons and their third-party attribution terms were not independently inspected.",
+  "Could not inspect the current pyserial package, the externally linked gesture-sensor firmware, their distribution terms, or the remote sample-data endpoint."
+ ],
+ "questions_for_author": []
+}

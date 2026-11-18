@@ -1,0 +1,100 @@
+{
+ "purpose": "AblationPlanner lets Slicer users position theoretical ablation profiles around segmented tumors and estimate surface margins. It also supports landmark-based tumor alignment for research workflows.",
+ "summary": "The module can delete unrelated line markups from the user's scene without confirmation, including when a probe endpoint is dragged. Several non-blocking correctness issues also affect probe orientation, stored selections, and margin colors. The inspected source has a research-only disclaimer and permissive license terms, but the catalog's moving branch and repository accessibility could not be independently verified. 🔴 Do not merge yet: fix the unintended deletion and verify the catalog source and revision.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected the complete Python module, UI and repository-wide search results. The line-generation callback removes every line markup in the scene, including user-created data unrelated to this module."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected Python imports, startup sample registration, and build files; found no package installation, environment mutation, or bundled Qt/VTK dependency."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "The CMake files install the Python module and its UI and icon, and ModelToModelDistance matches the supplied catalog dependency. Repository accessibility and the current resolution of the catalog's main branch could not be verified."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected license.txt: it includes distribution permission under the Slicer license and notes that clinical applications are not advised. External sample data and the separately linked profile library were not inspected."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected the probe placement, parameter node and color manipulation paths. Parallel probe directions produce a singular rotation calculation, and saved selections and original signed distances are not reliably restored."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md provides a workflow and research-use disclaimer, but the registered test in AblationPlanner.py only displays messages and does not exercise the workflow."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Generating probe lines deletes all line markups in the scene",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 298,
+   "line_end": 302,
+   "evidence": "    lineNodes = slicer.mrmlScene.GetNodesByClass(\"vtkMRMLMarkupsLineNode\")\n\n    if lineNodes is not None:\n      for lineNode in lineNodes:\n        slicer.mrmlScene.RemoveNode(lineNode)",
+   "explanation": "Pressing Place Markup Line removes every line markup, including pre-existing measurements and annotations belonging to the user or other modules. The endpoint drag handler also calls onLineButton, so routine probe adjustment can silently destroy unsaved scene data without confirmation.",
+   "suggestion": "Track only lines created by this module using node references or a dedicated attribute, and update or remove only those lines.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Parallel probe endpoints yield a singular rotation",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 747,
+   "line_end": 752,
+   "evidence": "    v = np.cross(a, b)\n    c = np.dot(a, b)\n    s = np.linalg.norm(v)\n    kmat = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])\n    rotationMatrix = np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2))\n    return rotationMatrix",
+   "explanation": "When a probe's endpoints are aligned or anti-aligned with the reference direction [0,0,-1], the cross product is zero and the rotation formula divides by zero. Probe placement can then fail or propagate non-finite transform values for an otherwise valid axis-aligned input.",
+   "suggestion": "Handle parallel and antiparallel vectors explicitly, reject coincident endpoints, and test these cases.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Applying margin colors overwrites signed distance data and revert is incomplete",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 615,
+   "line_end": 621,
+   "evidence": "        for j in range(0,len(args)):\n            if (colorval < args[j]):\n                thresholded = True\n                VTKFieldDataArray.SetValue(i,j)\n                break\n        if (not thresholded):\n            VTKFieldDataArray.SetValue(i,num_regions)",
+   "explanation": "The color button replaces the model's Signed distance values with bin numbers rather than creating a separate display scalar. Revert iterates only to len(originalColorArray)-1, while the snapshot itself omits the final value, so at least one modified value is never restored; the original values are also kept only in widget memory. Subsequent use or saving of the model can therefore retain incorrect distance data.",
+   "suggestion": "Keep Signed unchanged, create a separate color-bin array, and test the full apply/revert and scene-reload workflow.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Parameter node observation and native-fiducial restoration are broken",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 220,
+   "line_end": 225,
+   "evidence": "    if self._parameterNode is not None:\n      self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)\n    if self._parameterNode is not None:\n      self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)\n\n    self._parameterNode = inputParameterNode",
+   "explanation": "The observer is re-added to the old node before the new one is assigned, so the initially selected parameter node is not observed. Separately, updateGUIFromParameterNode reads the role NativeFiducialsƒ whereas selections are stored under NativeFiducials, preventing that selection from being restored correctly.",
+   "suggestion": "Observe inputParameterNode after assignment and use the same reference role for saving and restoring.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Registered test does not exercise the planner",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 854,
+   "line_end": 863,
+   "evidence": "    self.delayDisplay(\"Starting the test\")\n    \n    # Get/create input data\n\n   \n    self.delayDisplay('Loaded test data set')\n\n\n\n    self.delayDisplay('Test passed')",
+   "explanation": "The test reports success without loading data, placing probes, or checking computed margins, so it will not detect regressions in the main workflow.",
+   "suggestion": "Add automated tests with known probe geometry, expected margins, and invalid input cases.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not independently access the remote repository, verify that the supplied snapshot is commit 5b9622a808096cb2d1a7b14410c8b50b1b6f29a3, or resolve the catalog's moving main branch.",
+  "Could not build or run the extension, Slicer, or its tests; no CI results were available.",
+  "The hinted 10 MB STL and binary sample data were not inspectable; external sample download, ModelToModelDistance source, and the separately linked profile library were not reviewed.",
+  "No previous catalog entry, PR checklist, or earlier reviewed source baseline was provided."
+ ],
+ "questions_for_author": []
+}

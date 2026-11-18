@@ -1,0 +1,85 @@
+{
+ "purpose": "ArduinoController connects 3D Slicer to Arduino microcontroller boards over a serial port to exchange data and events via a MRML node. It is intended for researchers and developers building hardware-in-the-loop integrations, and includes example modules for controlling Slicer views with an Arduino pedalboard or gesture motion sensor.",
+ "summary": "ArduinoController provides a serial bridge between 3D Slicer and Arduino boards (`ArduinoConnect`) along with two companion modules (`ArduinoMotionSensor` and `ArduinoPedalBoard`) for controlling slice views. The code is safe, well-documented, and MIT-licensed, and the CMake packaging is complete.\n\nHowever, `ArduinoConnect/ArduinoConnect.py` calls `slicer.util.pip_install(\"pyserial\")` at top-level module import time (lines 9–15), which triggers package installation during Slicer startup even when the user never opens the module. Moving the `pyserial` installation/import out of module import scope into widget setup or connection logic is required before acceptance.\n\n🔴 Do not merge yet: `slicer.util.pip_install(\"pyserial\")` is executed at module import / Slicer startup in `ArduinoConnect/ArduinoConnect.py`.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all Python scripts, Arduino `.ino` sketches, CMake files, and documentation. There is no concealed behavior, unauthorized network transmission, or unsafe code execution (`subprocess.Popen` only launches the user-configured Arduino IDE executable when clicked)."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "Inspected all three Python module files (`ArduinoConnect.py`, `ArduinoMotionSensor.py`, `ArduinoPedalBoard.py`). `ArduinoConnect.py` calls `slicer.util.pip_install(\"pyserial\")` at top-level module import time (lines 9-15), which executes during Slicer startup whenever the module is discovered."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected root `CMakeLists.txt`, module `CMakeLists.txt` files, and the catalog entry JSON. All three modules (`ArduinoConnect`, `ArduinoMotionSensor`, `ArduinoPedalBoard`) and their UI/icon/JSON resources are properly listed in CMake and exist in the repository."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE`, which provides standard MIT License terms permitting distribution."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Inspected `ArduinoConnect.py`, `ArduinoPedalBoard.py`, and `ArduinoMotionSensor.py`. Serial polling uses `qt.QTimer.singleShot` cleanly, but secondary modules fail if opened before `ArduinoConnect` initializes `arduinoNode`, config is written to the install folder rather than `QSettings`, observers are not cleaned up on widget teardown, and unit tests are broken boilerplate."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md`, `docs/`, and the three modules. The extension provides clear documentation, hardware wiring diagrams, Arduino `.ino` example code, and a peer-reviewed reference describing its use cases."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "pip_install(\"pyserial\") executed at module import / Slicer startup",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 9,
+   "line_end": 15,
+   "evidence": "try:\n  import serial\n  import serial.tools.list_ports\nexcept ModuleNotFoundError:\n  slicer.util.pip_install(\"pyserial\")\n  import serial\n  import serial.tools.list_ports",
+   "explanation": "`ArduinoConnect.py` installs `pyserial` via `slicer.util.pip_install(\"pyserial\")` at top-level module import time. Because Slicer imports all installed scripted modules during application startup, this triggers a network package installation on first launch after installing the extension, blocking startup and modifying Slicer's shared Python environment even for users who never open the module.",
+   "suggestion": "Move the `serial` import and `slicer.util.pip_install(\"pyserial\")` call out of the top-level module scope into `ArduinoConnectWidget.setup()` or `ArduinoConnectLogic.connect()` / `onDetectDeviceButton()` so that installation only occurs when the user interacts with the module.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Opening ArduinoPedalBoard or ArduinoMotionSensor before ArduinoConnect causes AttributeError on None node",
+   "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+   "line_start": 36,
+   "line_end": 37,
+   "evidence": "    self.ArduinoNode = slicer.mrmlScene.GetFirstNodeByName(\"arduinoNode\")\n    self.logic = ArduinoPedalBoardLogic(self.ArduinoNode)",
+   "explanation": "If a user opens the `ArduinoPedalBoard` or `ArduinoMotionSensor` module before ever opening `ArduinoConnect` (which creates the `\"arduinoNode\"` node in `ArduinoConnectLogic.__init__`), `slicer.mrmlScene.GetFirstNodeByName(\"arduinoNode\")` returns `None`. In `ArduinoPedalBoardWidget.setup()` (line 50), `self.ArduinoNode.AddObserver(...)` will immediately raise an `AttributeError: 'NoneType' object has no attribute 'AddObserver'`. Similarly, in `ArduinoMotionSensorWidget.onStartButton()` (line 59), `self.ArduinoNode.AddObserver(...)` will fail if `ArduinoConnect` was not opened first. Additionally, `ArduinoPedalBoardLogic.__init__` (lines 186-188) creates a second duplicate node named `\"arduinoNode\"` in the scene without assigning it to `self.ArduinoNode`.",
+   "suggestion": "Ensure a single shared singleton node or helper function retrieves or creates `\"arduinoNode\"` if it does not already exist in `slicer.mrmlScene`, and remove the duplicate node creation in `ArduinoPedalBoardLogic.__init__`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "User configuration written into installed module Resources directory instead of QSettings",
+   "file": "ArduinoConnect/ArduinoConnect.py",
+   "line_start": 209,
+   "line_end": 212,
+   "evidence": "    # Configuration\n    self.configFileName = __file__.replace(\"ArduinoConnect.py\", \"Resources%sArduinoConnectConfig.json\" % (os.sep))\n    with open(self.configFileName) as f:\n      self.config = json.load(f)",
+   "explanation": "`ArduinoConnectWidget` saves the user's Arduino IDE executable path by writing directly to `Resources/ArduinoConnectConfig.json` inside the installed extension directory (`writeConfig` at lines 250-252). If Slicer or the extension is installed in a read-only or system-wide directory, `open(self.configFileName, 'w')` will fail with a `PermissionError`, and settings will not persist across extension updates.",
+   "suggestion": "Store user preferences such as the Arduino IDE path in `slicer.app.userSettings()` (`qt.QSettings`) rather than writing into the installed module's `Resources` directory.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Broken boilerplate self-tests in all three modules",
+   "file": "ArduinoPedalBoard/ArduinoPedalBoard.py",
+   "line_start": 453,
+   "line_end": 459,
+   "evidence": "  def runTest(self):\n    \"\"\"Run as few or as many tests as needed here.\n    \"\"\"\n    self.setUp()\n    self.test_ArduinoPedalBoard1()\n\n  def test_ArduinoPedalBoard11(self):",
+   "explanation": "The self-tests in all three modules (`ArduinoConnectTest`, `ArduinoPedalBoardTest`, `ArduinoMotionSensorTest`) are unmodified boilerplate that call `logic.hasImageData(volumeNode)` (which does not exist on the logic classes), and `ArduinoPedalBoardTest.runTest` calls `self.test_ArduinoPedalBoard1()` while the method is named `test_ArduinoPedalBoard11`. Running the self-tests will fail with `AttributeError` or `TypeError`.",
+   "suggestion": "Replace the template test methods with tests that instantiate the module logic and verify basic parameter node and message handling behavior.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "docs/extra/SlicerArduino_US_probe_example.mrb (2 MB binary scene file not inspected)"
+ ],
+ "questions_for_author": []
+}

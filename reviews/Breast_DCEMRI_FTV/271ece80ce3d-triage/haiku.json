@@ -1,0 +1,155 @@
+{
+ "purpose": "Two Slicer scripted modules (FTV Segmentation category) that load pre, early and late post-contrast breast DCE-MRI phases and compute functional tumor volume (FTV) with SER/PE maps, an ROI/omit-region editor, and a PDF/DICOM report. Intended for research users of bilateral axial breast MR exams.",
+ "summary": "I read the catalog entry, CMake files, license/README, the module entry points and several plugin files, but not every file. No network exfiltration or obfuscation was found. The main concerns are shared-environment side effects: pip installs at module import (including a package named 'cv2' that is not the OpenCV distribution), a global matplotlib backend switch, and shell commands built from unquoted user-selected paths. The license is Slicer's BSD-style agreement with a research-only note, and the catalog has no build dependencies. I recommend fixes before listing.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "No exfiltration, telemetry or obfuscation seen in the inspected files. Shell commands via os.system with unquoted user-derived paths (ftv_plots.py 789-790; gzip_gunzip_pyfuncs.py 79-80) and unsafe pickle load from the extension directory (DCE_TumorMapProcess.py 269-270) are concerns, not confirmed exploits."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Module-level pip installs run when the module file loads (DCE_TumorMapProcess.py 83-89, _importOptional/_pipEnsure). The cv2 entry installs package 'cv2', and pyproject.toml lists opencv-python rather than the headless build. ftv_plots.py line 80 calls matplotlib.use('Agg') globally."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMake lists plugin scripts for both modules and build_dependencies is empty, matching EXTENSION_DEPENDS 'NA'. Homepage and icon URLs in CMakeLists.txt point to a different GitHub owner than the catalog scm_url. I did not verify that every imported plugin file is installed."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "license.txt is the Slicer Contribution and Software License (BSD-style) and copyright.txt says 'All rights reserved' with an attribution notice. Distribution is permitted under Part B, which carries conditions (preface text, attribution). The README notes research-only use. Permission is reasonably clear but not stated as a plain grant."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Windows-only hard-coded 7-Zip path (gzip_gunzip_pyfuncs.py 153, 163) with os.system return values ignored; the README claims Mac support. distutils is imported (gzip_gunzip_pyfuncs.py 26), which is removed in Python 3.12. Several long operations run on the GUI thread."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README gives a description and points to a PDF user guide (not inspected, 13 MB). Module test code is commented out (Testing/Python/CMakeLists.txt) and the in-module test downloads sample data from a Kitware URL. A 'NOT FOR DIAGNOSIS' disclaimer appears on the report."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Packages are pip-installed at module import time, including a wrong package name for cv2",
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line_start": 83,
+   "line_end": 89,
+   "evidence": "nib = _importOptional('nibabel')\ncv2 = _importOptional('cv2', 'cv2')\nnrrd = _importOptional('pynrrd', 'nrrd')\nyattag = _importOptional('yattag')",
+   "explanation": "These run whenever the module file is loaded, so a missing package triggers slicer.util.pip_install without user confirmation, even for users who never open the module. For cv2 the pip target is 'cv2' (the import name), not the OpenCV distribution; the pip package named cv2 is not the OpenCV project. pyproject.toml asks for 'opencv-python', which bundles its own Qt and conflicts with Slicer's Qt, rather than 'opencv-python-headless'. The same pattern appears in DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py lines 54-57 for nibabel.",
+   "suggestion": "Move imports into the functions that need them and ask the user before installing. Use the PyPI name opencv-python-headless (import name cv2). Declare the extra dependencies in the extension, not in pyproject.toml, and avoid installing at startup.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "os.system called with unquoted, user-derived file path (command injection / broken on spaces)",
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line_start": 789,
+   "line_end": 790,
+   "evidence": "command = \"img2dcm\" + \" \" + savenamejpeg + \" \" + savenamedcm #use img2dcm to create dicom report from jpeg\nos.system(command)",
+   "explanation": "savenamejpeg derives from the path the user types in the Qt save dialog (DCE_TumorMapProcess.py 2576-2583). The string is passed to the shell unquoted. A filename with spaces breaks the command, and shell metacharacters such as & or | in the filename run extra commands. The return value is also ignored, so a failed DICOM conversion goes unreported.",
+   "suggestion": "Call the converter with subprocess.run([...], check=True) using an argument list, or do the DICOM conversion in Python (for example pydicom/pydicom-based writer). Report failures to the user.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Windows-only 7-Zip shell commands built from unquoted paths; return codes ignored",
+   "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+   "line_start": 74,
+   "line_end": 80,
+   "evidence": "cmd_base = r'\"C:\\Program Files\\7-Zip\\7z\" x '\n cmd1_7z = cmd_base + str(os.path.join(curr_path,file1)) + ' -o' + new_path   #command for file 1 uncompressed\n os.system(cmd1_7z) #execute above command",
+   "explanation": "The 7-Zip path is hard-coded, so on machines without 7-Zip at that location (and on macOS, which the README says works) gunzip silently fails and the module loads no images. Exam and output paths are concatenated without quotes, so folder names with spaces or shell metacharacters break or inject commands. The same pattern is in DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py lines 74-80 and 153-175. gzip_gunzip_pyfuncs.py line 30 also has a 'C:\\Program Fileszz\\7-Zip' path that looks like a typo.",
+   "suggestion": "Use Python's gzip module (no external tool) to decompress the DICOM files. If 7-Zip must stay, use subprocess with an argument list, check the exit code, and show a clear error when 7-Zip is missing.",
+   "confidence": "medium"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "matplotlib backend switched globally during report generation",
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line_start": 78,
+   "line_end": 80,
+   "evidence": "import slicer\n     import matplotlib\n     matplotlib.use('Agg')",
+   "explanation": "matplotlib.use() changes the process-wide backend. After one report is created, any other Slicer extension or Python console code that uses pyplot with the Qt backend gets the non-interactive Agg backend for the rest of the session.",
+   "suggestion": "",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "pickle.load of a workspace file stored in the extension directory",
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line_start": 267,
+   "line_end": 270,
+   "evidence": "wkspc_savepath = os.path.join(extension_path,'current_exam_workspace.pickle')\n     with open(wkspc_savepath,'rb') as f:\n       self.tempres, self.all_folders_info, ... = pickle.load(f)",
+   "explanation": "The pickle is written by Module 1 into the extension's installation directory (DCE_IDandPhaseSelect.py lines 147-150). Unpickling is arbitrary code execution if the file is replaced by a malicious one. The risk is low (it needs local write access), but the pattern is unsafe and the install directory is often not user-owned.",
+   "suggestion": "",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Deletes any 'gunzipped' folder inside the user-selected exam folder",
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line_start": 108,
+   "line_end": 113,
+   "evidence": "gunzip_path = os.path.join(exampath,\"gunzipped\")\n\n    if(os.path.isdir(gunzip_path) == 1):\n        shutil.rmtree(gunzip_path)",
+   "explanation": "After a report is written, deleteGunzipped removes exampath/gunzipped recursively. If the exam folder already contains a user-owned folder named 'gunzipped' with data, that data is deleted. The extension only creates this folder itself when the DICOMs are gzipped, so the risk is limited to unusual folder layouts.",
+   "suggestion": "",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Deprecated distutils import will fail on newer Python versions",
+   "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+   "line_start": 25,
+   "line_end": 26,
+   "evidence": "import shutil\nfrom distutils.dir_util import copy_tree",
+   "explanation": "distutils was removed in Python 3.12. The import fails at module load if the Slicer build moves to that version, which breaks Module 1 entirely. The same import is in the DCE_TumorMapProcess copy.",
+   "suggestion": "",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Homepage and icon URLs point to a different repository than scm_url",
+   "file": "CMakeLists.txt",
+   "line_start": 7,
+   "line_end": 12,
+   "evidence": "set(EXTENSION_HOMEPAGE \"https://github.com/rnadkarni2/SlicerBreast_DCEMRI_FTV\")",
+   "explanation": "The catalog entry's scm_url is radiology-research/SlicerBreast_DCEMRI_FTV, but the extension metadata, icon and screenshot URLs use rnadkarni2. Users may land on a different repository, and the index shows a mismatched homepage. The catalog entry is usable as written; this is a metadata issue.",
+   "suggestion": "",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Module test code is disabled and the in-module test downloads external data",
+   "file": "DCE_IDandPhaseSelect/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The CTest registration for the module tests is commented out. The unittest class in DCE_IDandPhaseSelect.py (lines 822-866) only downloads 'FA.nrrd' from slicer.kitware.com and asserts nothing. There are no tests of the DICOM-parsing or FTV computation logic, so regressions are not caught.",
+   "suggestion": "",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The 13 MB user guide PDF (StepByStepInstructionsForSlicerFTV_12_14_2022_FINAL_Rdcd.pdf) and the screenshots were not read.",
+  "Most plugin files (for example Exam_Ident_and_timing.py, chooseEarly_LateByManufacturer.py, read_DCE_images_to_numpy.py, ftv_map_gen_p2.py, the DCE_TumorMapProcess.py body beyond the imports and the report section) were not read in full, so I did not check every import against the CMake install list",
+  "I did not resolve the scm_revision 'master' to a commit, did not check the upstream repository, and did not verify whether the PyPI package 'cv2' exists or what it contains.",
+  "Nothing was executed; the Slicer version targeted and the build/CI results are unknown.",
+  "The rest of license.txt was read in full, but whether the UCSF copyright notice conflicts with the Slicer agreement was not assessed legally."
+ ],
+ "questions_for_author": [
+  "Why does _importOptional('cv2', 'cv2') install 'cv2' rather than opencv-python-headless? Which package was intended?",
+  "Can the module installs be moved to an explicit user-confirmed action rather than module load?",
+  "Can the 7-Zip calls be replaced with Python gzip, and can subprocess argument lists be used for img2dcm?",
+  "Please confirm the canonical repository (rnadkarni2 vs radiology-research) and whether the catalog should pin a commit rather than 'master'.",
+  "Is matplotlib.use('Agg') needed globally, or can it be scoped to the report function?"
+ ]
+}

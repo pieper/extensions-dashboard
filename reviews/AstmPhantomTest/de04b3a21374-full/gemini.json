@@ -1,0 +1,76 @@
+{
+ "purpose": "AstmPhantomTest is a 3D Slicer module that guides operators through performing spatial tracking system accuracy and precision evaluations according to the ASTM F2554-22 standard using a calibrated divot phantom and tracked pointer connected via OpenIGTLink (PLUS Toolkit). It provides 3D visual guidance for working-volume placement, single-point, rotation, and multi-point distance tests, and generates HTML and JSON statistical reports.",
+ "summary": "AstmPhantomTest is a well-documented IGT extension for evaluating tracking system accuracy and precision under the ASTM F2554-22 standard using OpenIGTLink/PLUS. The extension is safe, self-contained, and permissively licensed under the 3D Slicer license, with matching CMake and catalog dependencies (`SlicerOpenIGTLink`). A couple of non-blocking soundness issues were identified: a `msgBoxsgBox` variable name typo in `Pointer.py` when zero samples are acquired, and modal file dialog / main-window resizing / root logger handler side effects inside `AstmPhantomTestWidget.setup()`. 🟢 Recommend merge.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected `CMakeLists.txt`, `AstmPhantomTest/CMakeLists.txt`, `AstmPhantomTest/AstmPhantomTest.py`, and all modules under `AstmPhantomTest/AstmPhantomTestClasses/`. There are no external network transmissions, subprocess calls, dynamic code execution (`ast.literal_eval` is used only on internal VTK event calldata strings), or unsafe file operations; all outputs (`.log`, `.json`, `.html`) are written to the user-selected directory."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected all Python files and CMakeLists.txt. The extension uses only standard library modules and packages bundled with Slicer (`vtk`, `qt`, `ctk`, `slicer`, `numpy`), does not call `pip_install`, and performs no global environment mutations at module import time."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected root `CMakeLists.txt`, `AstmPhantomTest/CMakeLists.txt`, and the catalog JSON entry. `EXTENSION_DEPENDS` (`SlicerOpenIGTLink`) matches `build_dependencies`, and all Python scripts, UI files, icons, and required resource files are properly installed via `slicerMacroBuildScriptedModule` (only one optional working-volume preset `.txt` file is omitted from `RESOURCES_FILES`)."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `License.txt`, which provides the standard 3D Slicer Contribution and Software License Agreement (BSD-style permissive license permitting use, modification, and distribution). No incompatible third-party code or restricted weights are bundled."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Inspected `AstmPhantomTest.py` and all helper classes in `AstmPhantomTestClasses/`. The tracking and statistical calculations are well-structured, but `AstmPhantomTestWidget.setup()` blocks on a modal `QFileDialog` (leaving the widget uninitialized if canceled), resizes the main window, and adds a persistent root log handler, and `Pointer.py` has a variable name typo (`msgBoxsgBox`) in an error dialog branch."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md`, `AnalyzePhantomJSON.m`, and the module implementation. The extension provides thorough documentation covering PLUS Server configuration, parameter file formats, test execution, and troubleshooting, along with a companion MATLAB analysis script and built-in HTML/JSON reporting."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Typo `msgBoxsgBox` raises NameError when point acquisition collects no samples",
+   "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+   "line_start": 279,
+   "line_end": 285,
+   "evidence": "          if np.size(self.coordAccumulator,0) == 0:\n            msgBox = qt.QMessageBox()\n            msgBox.setText(\"No sample taken during timer duration for point acquisition. Restart module and try again with increased duration.\")\n            msgBoxsgBox.setIcon(qt.QMessageBox().Warning)\n            msgBoxsgBox.setStandardButtons(qt.QMessageBox().Ok)\n            msgBoxsgBox.exec()",
+   "explanation": "In `Pointer.staticTimerCallback`, when no samples were collected during the point-acquisition timer duration, the code instantiates `msgBox` but then references `msgBoxsgBox` on the next three lines, raising a `NameError` instead of displaying the warning dialog to the user.",
+   "suggestion": "Replace `msgBoxsgBox` with `msgBox` on lines 282-284.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Modal directory dialog and global UI/logger side effects in widget `setup()`",
+   "file": "AstmPhantomTest/AstmPhantomTest.py",
+   "line_start": 121,
+   "line_end": 131,
+   "evidence": "    self.saveDialog = qt.QFileDialog()\n    self.saveDialog.setFileMode(qt.QFileDialog().DirectoryOnly)\n\n    if self.saveDialog.exec():\n      # Path where the ouput files (including the log) will be saved\n      savePath = self.saveDialog.selectedFiles()[0]\n      # The log file doesn't overwrite itself and is named after the date,\n      # so any use of this module on a same day will be logged in the same file\n      fh = logging.FileHandler(savePath + \"/AstmPhantomTest_log_\" + datetime.now().strftime(\"%Y.%m.%d\") + \".log\")\n      fh.setLevel(logging.INFO)\n      logging.getLogger().addHandler(fh)",
+   "explanation": "When the module widget is initialized (`setup`), it immediately blocks on a modal `QFileDialog.exec()`, resizes and maximizes the Slicer main window (lines 73-75), attaches a `FileHandler` to the root Python logger (`logging.getLogger().addHandler(fh)`) without removing it on cleanup, and starts an OpenIGTLink client connector on the default localhost port (`self.cnode.Start()`). Furthermore, if the user cancels the file dialog (`self.saveDialog.exec()` returns 0), `self.logic`, UI signal connections, and the OpenIGTLink connector are never initialized, leaving the module UI in a broken/unresponsive state for the rest of the Slicer session.",
+   "suggestion": "Avoid blocking modal dialogs, root logger mutations, and main window resizing inside `setup()`. Provide a directory selector widget (e.g., `ctkDirectoryButton`) in the module UI to choose the output folder and start the session explicitly.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Uninstalled working volume preset and large committed STL/GIF assets",
+   "file": "AstmPhantomTest/CMakeLists.txt",
+   "line_start": 9,
+   "line_end": 15,
+   "evidence": "set(RESOURCES_FILES\n  Resources/gt/phantom.txt\n  Resources/models/ftk250_RAS.stl\n  Resources/models/ftk500_RAS.stl\n  Resources/models/phantom2018_RAS.stl\n  Resources/models/phantom2022_RAS.stl",
+   "explanation": "The repository commits two large binary STL meshes (`phantom2018_RAS.stl` at 10 MB and `phantom2022_RAS.stl` at 13 MB) and three large animated GIFs in `readme_img/` (6-8 MB each), and `AstmPhantomTest/CMakeLists.txt` omits `Resources/wv/PolarisVegaExt_ftk500Locs.txt` from `RESOURCES_FILES` so that working-volume preset is not installed in packaged builds.",
+   "suggestion": "Add `Resources/wv/PolarisVegaExt_ftk500Locs.txt` to `RESOURCES_FILES` in `AstmPhantomTest/CMakeLists.txt` if it is intended to be selectable in packaged builds, and consider simplifying or decimating the visual phantom STL meshes.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Binary contents of AstmPhantomTest/Resources/models/phantom2018_RAS.stl (10 MB) and AstmPhantomTest/Resources/models/phantom2022_RAS.stl (13 MB)",
+  "Runtime hardware testing with a live Plus Server / OpenIGTLink tracker stream"
+ ],
+ "questions_for_author": [
+  "Should `Resources/wv/PolarisVegaExt_ftk500Locs.txt` be listed in `AstmPhantomTest/CMakeLists.txt` under `RESOURCES_FILES` so it is installed with the package?"
+ ]
+}

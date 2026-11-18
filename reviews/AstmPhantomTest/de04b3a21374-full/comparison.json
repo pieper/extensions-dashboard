@@ -1,0 +1,773 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Existing scene nodes are deleted by name without checking ownership",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+   "line": 28,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Existing scene nodes are deleted by name without checking ownership",
+     "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+     "line_start": 28,
+     "line_end": 34,
+     "evidence": "    # Detects if a transfo node with the same name is already present\n    prevTransfoNode = slicer.mrmlScene.GetFirstNodeByName('phantCalibTransfo')\n    # if so, remove it\n    if prevTransfoNode:\n      slicer.mrmlScene.RemoveNode(prevTransfoNode)\n    # Create the transfo node",
+     "explanation": "Opening the module initializes Phantom and removes the first existing node named phantCalibTransfo, even if it belongs to the user's current scene. Unsaved transform data can be lost. Similar name-based deletion occurs for model and connector nodes.",
+     "suggestion": "Keep references to nodes created by this module and remove only those it owns; let Slicer assign unique names when existing nodes conflict.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+      "line": 28
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Phantom.py:29-34 removes the first node named 'phantCalibTransfo' and Phantom.py:61-63 removes 'PhantomModel'. Pointer.py:79, WorkingVolume.py:120,180 and AstmPhantomTest.py:262-264 do the same for other nodes. The names are specific to this module, so it is unlikely to hit unrelated user data. It would only remove a stale node from an earlier run of this module, or a user node that happens to share the name. This is an ordinary robustness issue, not a concrete path to harm, so not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "AstmPhantomTest/AstmPhantomTest.py:124-137,152 and 914-918 show that choosing the output folder initializes Phantom; AstmPhantomTest/AstmPhantomTestClasses/Phantom.py:28-34 says exactly: \"    prevTransfoNode = slicer.mrmlScene.GetFirstNodeByName('phantCalibTransfo')\" and \"      slicer.mrmlScene.RemoveNode(prevTransfoNode)\". No ownership check is made. A same-named unsaved node in the user's scene can be removed; this is a concrete data-loss path. Similar name-based removal occurs for models and PointerConnector (Pointer.py:76-79; AstmPhantomTest.py:261-264)."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked AstmPhantomTest/AstmPhantomTestClasses/Phantom.py:28-34 and 60-63, Pointer.py:76-79, WorkingVolume.py:118-120 and 178-180, and AstmPhantomTest/AstmPhantomTest.py:262-264. The module removes existing MRML nodes with specific internal names ('phantCalibTransfo', 'PhantomModel', 'PointerModel', 'SimpPhantomModel', 'TrackerModel', 'PointerConnector') before recreating them. While deleting by name instead of keeping node references is poor Slicer practice, these are specific module-internal node names in a dedicated phantom testing workflow, not a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Acquisition checks pointer status but not phantom-relative transform status",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+   "line": 183,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Acquisition checks pointer status but not phantom-relative transform status",
+     "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+     "line_start": 203,
+     "line_end": 207,
+     "evidence": "  @vtk.calldata_type(vtk.VTK_STRING)\n  def onPtrRefTransformModified(self, caller, event=None, calldata=None):\n    if self.ptrTransfoNode.GetAttribute(\"TransformStatus\") == \"OK\":\n      # update current matrix\n      self.ptrRefMat = slicer.util.arrayFromTransformMatrix(self.ptrRefTransfoNode)",
+     "explanation": "After the initial connection check, a pointer-to-phantom update is accepted based only on PointerToTracker status. If the phantom is missing while the pointer remains tracked, an invalid or stale relative transform can enter the acquisition queue and affect measured points; the red status display does not itself halt acquisition. This is non-blocking correctness feedback.",
+     "suggestion": "Require valid status for the phantom and relative transforms as well, and abort or pause an active acquisition on tracking loss.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+      "line": 183
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Pointer.py:205 checks self.ptrTransfoNode's TransformStatus inside onPtrRefTransformModified. It does not check ptrRefTransfoNode, which is the transform actually read on line 207. The status of the phantom-relative transform is therefore not validated there. I did not trace the handling of a missing phantom elsewhere, so the actual impact on acquisition is unconfirmed. It is a correctness weakness, not a safety issue."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Pointer.py:203-212 says \"    if self.ptrTransfoNode.GetAttribute(\\\"TransformStatus\\\") == \\\"OK\\\":\" and \"      self.pq.push(self.pos())\"; lines 237-256 then accumulate and emit samples without checking relative or phantom status. AstmPhantomTest.py:771-794 checks all three only for initial startup, subsequently showing status through the border. If relative-transform events continue while the phantom is missing, stale or invalid data can affect an accuracy measurement; exact behavior depends on the tracker stream. This is non-blocking correctness feedback."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked AstmPhantomTest/AstmPhantomTestClasses/Pointer.py:203-207 and AstmPhantomTest/AstmPhantomTest.py:734-794. In onPtrRefTransformModified, it checks `if self.ptrTransfoNode.GetAttribute(\"TransformStatus\") == \"OK\":` instead of checking `self.ptrRefTransfoNode.GetAttribute(\"TransformStatus\") == \"OK\"` (or both). If PointerToPhantom is MISSING while PointerToTracker is OK, stale/invalid relative transforms can be processed."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Session log captures unrelated Slicer logs and remains attached",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "AstmPhantomTest/AstmPhantomTest.py",
+   "line": 127,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Modal directory dialog and global UI/logger side effects in widget `setup()`",
+     "file": "AstmPhantomTest/AstmPhantomTest.py",
+     "line_start": 121,
+     "line_end": 131,
+     "evidence": "    self.saveDialog = qt.QFileDialog()\n    self.saveDialog.setFileMode(qt.QFileDialog().DirectoryOnly)\n\n    if self.saveDialog.exec():\n      # Path where the ouput files (including the log) will be saved\n      savePath = self.saveDialog.selectedFiles()[0]\n      # The log file doesn't overwrite itself and is named after the date,\n      # so any use of this module on a same day will be logged in the same file\n      fh = logging.FileHandler(savePath + \"/AstmPhantomTest_log_\" + datetime.now().strftime(\"%Y.%m.%d\") + \".log\")\n      fh.setLevel(logging.INFO)\n      logging.getLogger().addHandler(fh)",
+     "explanation": "When the module widget is initialized (`setup`), it immediately blocks on a modal `QFileDialog.exec()`, resizes and maximizes the Slicer main window (lines 73-75), attaches a `FileHandler` to the root Python logger (`logging.getLogger().addHandler(fh)`) without removing it on cleanup, and starts an OpenIGTLink client connector on the default localhost port (`self.cnode.Start()`). Furthermore, if the user cancels the file dialog (`self.saveDialog.exec()` returns 0), `self.logic`, UI signal connections, and the OpenIGTLink connector are never initialized, leaving the module UI in a broken/unresponsive state for the rest of the Slicer session.",
+     "suggestion": "Avoid blocking modal dialogs, root logger mutations, and main window resizing inside `setup()`. Provide a directory selector widget (e.g., `ctkDirectoryButton`) in the module UI to choose the output folder and start the session explicitly.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AstmPhantomTest/AstmPhantomTest.py",
+      "line": 121
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Session log captures unrelated Slicer logs and remains attached",
+     "file": "AstmPhantomTest/AstmPhantomTest.py",
+     "line_start": 127,
+     "line_end": 132,
+     "evidence": "      # The log file doesn't overwrite itself and is named after the date,\n      # so any use of this module on a same day will be logged in the same file\n      fh = logging.FileHandler(savePath + \"/AstmPhantomTest_log_\" + datetime.now().strftime(\"%Y.%m.%d\") + \".log\")\n      fh.setLevel(logging.INFO)\n      logging.getLogger().addHandler(fh)\n      logging.info(f\"Save path set to {savePath}\")",
+     "explanation": "The handler is attached to the process-wide root logger and is not retained or removed in cleanup. INFO-and-higher records from other modules that propagate to the root can therefore be written to the selected session folder even after the user leaves this module, potentially exposing other session information in a shared report directory.",
+     "suggestion": "Use a module-specific logger and remove and close its handler when the session or widget ends; describe the contents of the output log.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AstmPhantomTest/AstmPhantomTest.py",
+      "line": 127
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "AstmPhantomTest.py:121-131 shows a modal QFileDialog.exec() in setup(). It then adds a FileHandler to the root logger (line 131) and never removes it. Everything else from line 134 onward, including logic creation and UI connections, sits inside `if self.saveDialog.exec():`. If the user cancels, the module is left half-initialized. The log goes to a folder the user chose and the level is INFO, so this is not a safety problem. It is a soundness and side-effect issue. Setup() also maximizes the main window (lines 73-75)."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AstmPhantomTest.py:124-132 attaches a file handler to the root logger: \"      fh.setLevel(logging.INFO)\" and \"      logging.getLogger().addHandler(fh)\". The handler is local, while cleanup at 796-800 only calls \"    self.removeObservers()\" and exit at 807-810 has no teardown. Thus other propagating log records can persist in the selected directory after switching modules, potentially disclosing sensitive information if shared. The dialog cancellation also skips logic and signal initialization (124-136,162-169). The code starts a connector at 261-270, but its actual default mode/address was not verified; no assumption of a localhost client is needed for this finding."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked AstmPhantomTest/AstmPhantomTest.py:73-75, 121-132, 267-270, and 796-800. In setup(), the widget resizes/maximizes the main window, opens a modal QFileDialog, adds a FileHandler to the root logger (`logging.getLogger().addHandler(fh)`) that is never removed in cleanup(), starts an OpenIGTLink connector, and leaves `self.logic` uninitialized if the dialog is canceled. Writing root logger messages to the user-selected local save directory is a soundness/cleanup flaw, not a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Similarity calibration scales the reference distances used in accuracy results",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+   "line": 193,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Similarity calibration scales the reference distances used in accuracy results",
+     "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+     "line_start": 193,
+     "line_end": 199,
+     "evidence": "    ldmkTransfo = vtk.vtkLandmarkTransform()\n    ldmkTransfo.SetSourceLandmarks(ptsFrom)\n    ldmkTransfo.SetTargetLandmarks(ptsTo)\n    ldmkTransfo.SetModeToSimilarity()\n    ldmkTransfo.Update()\n    transfoMat = ldmkTransfo.GetMatrix()\n    self.calibTransfoNode.SetMatrixTransformToParent(transfoMat)",
+     "explanation": "Similarity registration permits scale as well as rigid alignment. The resulting transform is applied to all CMM ground-truth points, and the scaled points are subsequently used for multi-point distance comparisons; a tracker scale error can therefore be partly absorbed into the reference and underreported. This is non-blocking correctness feedback.",
+     "suggestion": "Use rigid registration for the physical phantom reference, or justify and validate scaling separately and compare distances against the original CMM geometry.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+      "line": 193
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Phantom.py:196 uses SetModeToSimilarity(), which allows scaling. Lines 201-205 apply the fitted transform to all ground-truth points. Scale error in the tracker can therefore be partly absorbed into the reference. This may be a deliberate design choice, and I could not verify the ASTM method's intent. It is a methodological point, not a defect that blocks anything."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Phantom.py:190-205 fits CMM points to acquired points with \"    ldmkTransfo.SetModeToSimilarity()\" and then \"      self.calGtPts[k] = np.array([p1[0], p1[1], p1[2]])\". AstmPhantomTest.py:1249-1265 passes these points to the distance measurement, which computes \"      gtDist = Dist(self.gtPts[kp[0]], self.gtPts[kp[1]])\" and \"      errors.append(abs(gtDist - ptrDist))\" (Measurements.py:218-224). A fitted scale can therefore absorb a tracker scale error and reduce reported distance errors. This is non-blocking correctness feedback."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked AstmPhantomTest/AstmPhantomTestClasses/Phantom.py:185-206, AstmPhantomTest/AstmPhantomTest.py:1250-1279, and AstmPhantomTest/AstmPhantomTestClasses/Measurements.py:218-225. `Phantom.calibrate()` uses `ldmkTransfo.SetModeToSimilarity()` (allowing isotropic scaling) and transforms `self.gtPts` into `self.calGtPts`. `self.calGtPts` is then passed to `distMeasurement.fullReset` / `setGtPts` and used in `updateDistStats` to compute ground-truth pairwise distances `gtDist = Dist(self.gtPts[kp[0]], self.gtPts[kp[1]])`, scaling the ground-truth reference distances instead of using rigid registration or unscaled CMM coordinates `Phantom.gtPts`."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Typo `msgBoxsgBox` raises NameError when point acquisition collects no samples",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+   "line": 279,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Typo `msgBoxsgBox` raises NameError when point acquisition collects no samples",
+     "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+     "line_start": 279,
+     "line_end": 285,
+     "evidence": "          if np.size(self.coordAccumulator,0) == 0:\n            msgBox = qt.QMessageBox()\n            msgBox.setText(\"No sample taken during timer duration for point acquisition. Restart module and try again with increased duration.\")\n            msgBoxsgBox.setIcon(qt.QMessageBox().Warning)\n            msgBoxsgBox.setStandardButtons(qt.QMessageBox().Ok)\n            msgBoxsgBox.exec()",
+     "explanation": "In `Pointer.staticTimerCallback`, when no samples were collected during the point-acquisition timer duration, the code instantiates `msgBox` but then references `msgBoxsgBox` on the next three lines, raising a `NameError` instead of displaying the warning dialog to the user.",
+     "suggestion": "Replace `msgBoxsgBox` with `msgBox` on lines 282-284.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+      "line": 279
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "No-sample acquisition error path references an undefined variable",
+     "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+     "line_start": 279,
+     "line_end": 284,
+     "evidence": "        if np.size(self.coordAccumulator,0) == 0:\n          msgBox = qt.QMessageBox()\n          msgBox.setText(\"No sample taken during timer duration for point acquisition. Restart module and try again with increased duration.\")\n          msgBoxsgBox.setIcon(qt.QMessageBox().Warning)\n          msgBoxsgBox.setStandardButtons(qt.QMessageBox().Ok)\n          msgBoxsgBox.exec()",
+     "explanation": "If a timed acquisition receives no samples, the misspelled variable raises NameError instead of displaying the recovery instructions. This is non-blocking correctness feedback.",
+     "suggestion": "Use msgBox consistently and reset the acquisition state so the operator can retry.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+      "line": 279
+     }
+    }
+   ]
+  },
+  {
+   "title": "Uninstalled working volume preset and large committed STL/GIF assets",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "AstmPhantomTest/CMakeLists.txt",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Uninstalled working volume preset and large committed STL/GIF assets",
+     "file": "AstmPhantomTest/CMakeLists.txt",
+     "line_start": 9,
+     "line_end": 15,
+     "evidence": "set(RESOURCES_FILES\n  Resources/gt/phantom.txt\n  Resources/models/ftk250_RAS.stl\n  Resources/models/ftk500_RAS.stl\n  Resources/models/phantom2018_RAS.stl\n  Resources/models/phantom2022_RAS.stl",
+     "explanation": "The repository commits two large binary STL meshes (`phantom2018_RAS.stl` at 10 MB and `phantom2022_RAS.stl` at 13 MB) and three large animated GIFs in `readme_img/` (6-8 MB each), and `AstmPhantomTest/CMakeLists.txt` omits `Resources/wv/PolarisVegaExt_ftk500Locs.txt` from `RESOURCES_FILES` so that working-volume preset is not installed in packaged builds.",
+     "suggestion": "Add `Resources/wv/PolarisVegaExt_ftk500Locs.txt` to `RESOURCES_FILES` in `AstmPhantomTest/CMakeLists.txt` if it is intended to be selectable in packaged builds, and consider simplifying or decimating the visual phantom STL meshes.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AstmPhantomTest/CMakeLists.txt",
+      "line": 9
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Existing scene nodes are deleted by name without checking ownership",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+   "line": 28,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Existing scene nodes are deleted by name without checking ownership",
+     "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+     "line_start": 28,
+     "line_end": 34,
+     "evidence": "    # Detects if a transfo node with the same name is already present\n    prevTransfoNode = slicer.mrmlScene.GetFirstNodeByName('phantCalibTransfo')\n    # if so, remove it\n    if prevTransfoNode:\n      slicer.mrmlScene.RemoveNode(prevTransfoNode)\n    # Create the transfo node",
+     "explanation": "Opening the module initializes Phantom and removes the first existing node named phantCalibTransfo, even if it belongs to the user's current scene. Unsaved transform data can be lost. Similar name-based deletion occurs for model and connector nodes.",
+     "suggestion": "Keep references to nodes created by this module and remove only those it owns; let Slicer assign unique names when existing nodes conflict.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+      "line": 28
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Phantom.py:29-34 removes the first node named 'phantCalibTransfo' and Phantom.py:61-63 removes 'PhantomModel'. Pointer.py:79, WorkingVolume.py:120,180 and AstmPhantomTest.py:262-264 do the same for other nodes. The names are specific to this module, so it is unlikely to hit unrelated user data. It would only remove a stale node from an earlier run of this module, or a user node that happens to share the name. This is an ordinary robustness issue, not a concrete path to harm, so not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "AstmPhantomTest/AstmPhantomTest.py:124-137,152 and 914-918 show that choosing the output folder initializes Phantom; AstmPhantomTest/AstmPhantomTestClasses/Phantom.py:28-34 says exactly: \"    prevTransfoNode = slicer.mrmlScene.GetFirstNodeByName('phantCalibTransfo')\" and \"      slicer.mrmlScene.RemoveNode(prevTransfoNode)\". No ownership check is made. A same-named unsaved node in the user's scene can be removed; this is a concrete data-loss path. Similar name-based removal occurs for models and PointerConnector (Pointer.py:76-79; AstmPhantomTest.py:261-264)."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked AstmPhantomTest/AstmPhantomTestClasses/Phantom.py:28-34 and 60-63, Pointer.py:76-79, WorkingVolume.py:118-120 and 178-180, and AstmPhantomTest/AstmPhantomTest.py:262-264. The module removes existing MRML nodes with specific internal names ('phantCalibTransfo', 'PhantomModel', 'PointerModel', 'SimpPhantomModel', 'TrackerModel', 'PointerConnector') before recreating them. While deleting by name instead of keeping node references is poor Slicer practice, these are specific module-internal node names in a dedicated phantom testing workflow, not a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Acquisition checks pointer status but not phantom-relative transform status",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+   "line": 183,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Acquisition checks pointer status but not phantom-relative transform status",
+     "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+     "line_start": 203,
+     "line_end": 207,
+     "evidence": "  @vtk.calldata_type(vtk.VTK_STRING)\n  def onPtrRefTransformModified(self, caller, event=None, calldata=None):\n    if self.ptrTransfoNode.GetAttribute(\"TransformStatus\") == \"OK\":\n      # update current matrix\n      self.ptrRefMat = slicer.util.arrayFromTransformMatrix(self.ptrRefTransfoNode)",
+     "explanation": "After the initial connection check, a pointer-to-phantom update is accepted based only on PointerToTracker status. If the phantom is missing while the pointer remains tracked, an invalid or stale relative transform can enter the acquisition queue and affect measured points; the red status display does not itself halt acquisition. This is non-blocking correctness feedback.",
+     "suggestion": "Require valid status for the phantom and relative transforms as well, and abort or pause an active acquisition on tracking loss.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+      "line": 183
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Pointer.py:205 checks self.ptrTransfoNode's TransformStatus inside onPtrRefTransformModified. It does not check ptrRefTransfoNode, which is the transform actually read on line 207. The status of the phantom-relative transform is therefore not validated there. I did not trace the handling of a missing phantom elsewhere, so the actual impact on acquisition is unconfirmed. It is a correctness weakness, not a safety issue."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Pointer.py:203-212 says \"    if self.ptrTransfoNode.GetAttribute(\\\"TransformStatus\\\") == \\\"OK\\\":\" and \"      self.pq.push(self.pos())\"; lines 237-256 then accumulate and emit samples without checking relative or phantom status. AstmPhantomTest.py:771-794 checks all three only for initial startup, subsequently showing status through the border. If relative-transform events continue while the phantom is missing, stale or invalid data can affect an accuracy measurement; exact behavior depends on the tracker stream. This is non-blocking correctness feedback."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked AstmPhantomTest/AstmPhantomTestClasses/Pointer.py:203-207 and AstmPhantomTest/AstmPhantomTest.py:734-794. In onPtrRefTransformModified, it checks `if self.ptrTransfoNode.GetAttribute(\"TransformStatus\") == \"OK\":` instead of checking `self.ptrRefTransfoNode.GetAttribute(\"TransformStatus\") == \"OK\"` (or both). If PointerToPhantom is MISSING while PointerToTracker is OK, stale/invalid relative transforms can be processed."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Session log captures unrelated Slicer logs and remains attached",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "AstmPhantomTest/AstmPhantomTest.py",
+   "line": 127,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Modal directory dialog and global UI/logger side effects in widget `setup()`",
+     "file": "AstmPhantomTest/AstmPhantomTest.py",
+     "line_start": 121,
+     "line_end": 131,
+     "evidence": "    self.saveDialog = qt.QFileDialog()\n    self.saveDialog.setFileMode(qt.QFileDialog().DirectoryOnly)\n\n    if self.saveDialog.exec():\n      # Path where the ouput files (including the log) will be saved\n      savePath = self.saveDialog.selectedFiles()[0]\n      # The log file doesn't overwrite itself and is named after the date,\n      # so any use of this module on a same day will be logged in the same file\n      fh = logging.FileHandler(savePath + \"/AstmPhantomTest_log_\" + datetime.now().strftime(\"%Y.%m.%d\") + \".log\")\n      fh.setLevel(logging.INFO)\n      logging.getLogger().addHandler(fh)",
+     "explanation": "When the module widget is initialized (`setup`), it immediately blocks on a modal `QFileDialog.exec()`, resizes and maximizes the Slicer main window (lines 73-75), attaches a `FileHandler` to the root Python logger (`logging.getLogger().addHandler(fh)`) without removing it on cleanup, and starts an OpenIGTLink client connector on the default localhost port (`self.cnode.Start()`). Furthermore, if the user cancels the file dialog (`self.saveDialog.exec()` returns 0), `self.logic`, UI signal connections, and the OpenIGTLink connector are never initialized, leaving the module UI in a broken/unresponsive state for the rest of the Slicer session.",
+     "suggestion": "Avoid blocking modal dialogs, root logger mutations, and main window resizing inside `setup()`. Provide a directory selector widget (e.g., `ctkDirectoryButton`) in the module UI to choose the output folder and start the session explicitly.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AstmPhantomTest/AstmPhantomTest.py",
+      "line": 121
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Session log captures unrelated Slicer logs and remains attached",
+     "file": "AstmPhantomTest/AstmPhantomTest.py",
+     "line_start": 127,
+     "line_end": 132,
+     "evidence": "      # The log file doesn't overwrite itself and is named after the date,\n      # so any use of this module on a same day will be logged in the same file\n      fh = logging.FileHandler(savePath + \"/AstmPhantomTest_log_\" + datetime.now().strftime(\"%Y.%m.%d\") + \".log\")\n      fh.setLevel(logging.INFO)\n      logging.getLogger().addHandler(fh)\n      logging.info(f\"Save path set to {savePath}\")",
+     "explanation": "The handler is attached to the process-wide root logger and is not retained or removed in cleanup. INFO-and-higher records from other modules that propagate to the root can therefore be written to the selected session folder even after the user leaves this module, potentially exposing other session information in a shared report directory.",
+     "suggestion": "Use a module-specific logger and remove and close its handler when the session or widget ends; describe the contents of the output log.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AstmPhantomTest/AstmPhantomTest.py",
+      "line": 127
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "AstmPhantomTest.py:121-131 shows a modal QFileDialog.exec() in setup(). It then adds a FileHandler to the root logger (line 131) and never removes it. Everything else from line 134 onward, including logic creation and UI connections, sits inside `if self.saveDialog.exec():`. If the user cancels, the module is left half-initialized. The log goes to a folder the user chose and the level is INFO, so this is not a safety problem. It is a soundness and side-effect issue. Setup() also maximizes the main window (lines 73-75)."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "AstmPhantomTest.py:124-132 attaches a file handler to the root logger: \"      fh.setLevel(logging.INFO)\" and \"      logging.getLogger().addHandler(fh)\". The handler is local, while cleanup at 796-800 only calls \"    self.removeObservers()\" and exit at 807-810 has no teardown. Thus other propagating log records can persist in the selected directory after switching modules, potentially disclosing sensitive information if shared. The dialog cancellation also skips logic and signal initialization (124-136,162-169). The code starts a connector at 261-270, but its actual default mode/address was not verified; no assumption of a localhost client is needed for this finding."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Checked AstmPhantomTest/AstmPhantomTest.py:73-75, 121-132, 267-270, and 796-800. In setup(), the widget resizes/maximizes the main window, opens a modal QFileDialog, adds a FileHandler to the root logger (`logging.getLogger().addHandler(fh)`) that is never removed in cleanup(), starts an OpenIGTLink connector, and leaves `self.logic` uninitialized if the dialog is canceled. Writing root logger messages to the user-selected local save directory is a soundness/cleanup flaw, not a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Similarity calibration scales the reference distances used in accuracy results",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+   "line": 193,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Similarity calibration scales the reference distances used in accuracy results",
+     "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+     "line_start": 193,
+     "line_end": 199,
+     "evidence": "    ldmkTransfo = vtk.vtkLandmarkTransform()\n    ldmkTransfo.SetSourceLandmarks(ptsFrom)\n    ldmkTransfo.SetTargetLandmarks(ptsTo)\n    ldmkTransfo.SetModeToSimilarity()\n    ldmkTransfo.Update()\n    transfoMat = ldmkTransfo.GetMatrix()\n    self.calibTransfoNode.SetMatrixTransformToParent(transfoMat)",
+     "explanation": "Similarity registration permits scale as well as rigid alignment. The resulting transform is applied to all CMM ground-truth points, and the scaled points are subsequently used for multi-point distance comparisons; a tracker scale error can therefore be partly absorbed into the reference and underreported. This is non-blocking correctness feedback.",
+     "suggestion": "Use rigid registration for the physical phantom reference, or justify and validate scaling separately and compare distances against the original CMM geometry.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+      "line": 193
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Phantom.py:196 uses SetModeToSimilarity(), which allows scaling. Lines 201-205 apply the fitted transform to all ground-truth points. Scale error in the tracker can therefore be partly absorbed into the reference. This may be a deliberate design choice, and I could not verify the ASTM method's intent. It is a methodological point, not a defect that blocks anything."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Phantom.py:190-205 fits CMM points to acquired points with \"    ldmkTransfo.SetModeToSimilarity()\" and then \"      self.calGtPts[k] = np.array([p1[0], p1[1], p1[2]])\". AstmPhantomTest.py:1249-1265 passes these points to the distance measurement, which computes \"      gtDist = Dist(self.gtPts[kp[0]], self.gtPts[kp[1]])\" and \"      errors.append(abs(gtDist - ptrDist))\" (Measurements.py:218-224). A fitted scale can therefore absorb a tracker scale error and reduce reported distance errors. This is non-blocking correctness feedback."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Checked AstmPhantomTest/AstmPhantomTestClasses/Phantom.py:185-206, AstmPhantomTest/AstmPhantomTest.py:1250-1279, and AstmPhantomTest/AstmPhantomTestClasses/Measurements.py:218-225. `Phantom.calibrate()` uses `ldmkTransfo.SetModeToSimilarity()` (allowing isotropic scaling) and transforms `self.gtPts` into `self.calGtPts`. `self.calGtPts` is then passed to `distMeasurement.fullReset` / `setGtPts` and used in `updateDistStats` to compute ground-truth pairwise distances `gtDist = Dist(self.gtPts[kp[0]], self.gtPts[kp[1]])`, scaling the ground-truth reference distances instead of using rigid registration or unscaled CMM coordinates `Phantom.gtPts`."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (blocking, ok)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": null,
+     "rating": null,
+     "reason": "My search found no pip_install, subprocess, os.system, urllib or requests, and no pickle, eval or exec. ast.literal_eval is used only on module-generated strings. The only network use is an OpenIGTLink client connector (AstmPhantomTest.py:267-270), which is part of the tracker workflow and sends no data out. Name-based node removal and the root-logger file handler are ordinary robustness issues, not harm paths. I did not audit the license or the other files in full."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": null,
+     "rating": "blocking",
+     "reason": "Safety rating: blocking because the scene-node deletion in Phantom.py:28-32 (\"      slicer.mrmlScene.RemoveNode(prevTransfoNode)\") can destroy unrelated unsaved scene data; it occurs after output-folder selection and initialization (AstmPhantomTest.py:124-152,914-918). Root-logger persistence at AstmPhantomTest.py:129-131 and 796-800 adds a privacy concern. I inspected the source file list, imports, build scripts and searched for network, execution and file operations; actual connector defaults, external dependencies, runtime behavior and independent commit verification were not available."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Checked all Python files in AstmPhantomTest/ and AstmPhantomTest/AstmPhantomTestClasses/. There is no malicious behavior, unauthorized network transmission (only local OpenIGTLink connector on default localhost), command injection, or user file destruction. Note: `ast.literal_eval` is used only on internal VTK event calldata strings, and the salted SHA-256 hash in AstmPhantomTest.py:640-645 only unlocks UI developer shortcut buttons (`hackCollapsibleButton`)."
+    }
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D6",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "concern"
+   },
+   "outcome": "still disputed (concern, ok)",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "I found no package installation. There are some global side effects when the module widget opens: it resizes and maximizes the main window (AstmPhantomTest.py:73-75), registers a custom layout, hides the box and axis labels on all view nodes (lines 105-108), and adds a root-logger FileHandler (line 131). These only happen when the user opens the module, not at Slicer startup or import. They are minor."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": null,
+     "rating": "concern",
+     "reason": "Environment rating: concern. On module setup, AstmPhantomTest.py:129-131 uses \"      logging.getLogger().addHandler(fh)\" and cleanup at 796-800 only has \"    self.removeObservers()\", so process-wide logging continues to be redirected into the chosen folder after leaving. Setup also changes the shared main window and layout (73-75,98-108). I inspected imports, CMake and searched for pip installation, sys.path and environment changes; none were found in the available source. These effects are triggered on opening the module, not merely installing it; runtime and external dependency behavior were not checked."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Checked AstmPhantomTest/AstmPhantomTest.py:1-15 and AstmPhantomTest/AstmPhantomTestClasses/*.py. Nothing is installed via pip, no global environment variables or package pins are modified at import/startup. Window resizing, layout switching, and root logger handler attachment happen only in `AstmPhantomTestWidget.setup()` when the user opens the module, not at module import or Slicer startup."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "concern"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "minor issues",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 6,
+  "single": 4,
+  "unverified": 0,
+  "total": 6,
+  "open_disputes": 2
+ }
+}

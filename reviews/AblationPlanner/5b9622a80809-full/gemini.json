@@ -1,0 +1,111 @@
+{
+ "purpose": "AblationPlanner is a 3D Slicer extension for planning and evaluating thermal or cryoablation procedures for tumors (such as kidney, liver, and lung lesions). It enables users to place virtual ablation probe profiles using fiducial endpoints, align pre-procedural tumor segmentations to intra-operative scans via fiducial registration, and compute tumor ablation margins using ModelToModelDistance.",
+ "summary": "AblationPlanner is a clean, self-contained scripted extension for planning tumor ablation probe placements and evaluating ablation margins using `ModelToModelDistance` and `FiducialRegistration`. It has no safety, environment, or licensing issues, and its CMake packaging and dependency declarations (`ModelToModelDistance`) are properly configured. However, the code contains several soundness issues—most notably calls to legacy Slicer 4 Markups API methods (`GetNumberOfFiducials`, `GetNthFiducialPosition`, `GetNthFiducialLabel`) removed in Slicer 5, a typo in `\"NativeFiducialsƒ\"` when updating the GUI from the parameter node, and fragile SubjectHierarchy ID arithmetic (`modelNode + 1`). These bugs are non-blocking for catalog admission Policy requirements. 🟢 Recommend merge",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all Python, CMake, UI, JSON, and documentation files in the repository. There is no network communication (aside from standard Slicer TestingData sample registration), command execution, file deletion, or unsafe deserialization."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected `AblationPlanner/AblationPlanner.py` and `CMakeLists.txt`. The extension does not install external Python packages, modify `sys.path`, or alter Slicer's global Python environment; it only registers a sample data source on startup."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected the catalog entry, `CMakeLists.txt`, `AblationPlanner/CMakeLists.txt`, and `AblationPlanner.s4ext`. Build dependencies (`ModelToModelDistance`) match across the catalog entry, `CMakeLists.txt`, and module metadata, and all required Python scripts and UI/icon resources exist and are installed by CMake. Note that a 10 MB test STL file (`AblationPlanner/Testing/solid_LT6015.stl`) is committed in the repo."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `license.txt`, which provides the standard 3D Slicer Contribution and Software License Agreement (BSD-style open source license) permitting distribution."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected `AblationPlanner/AblationPlanner.py` and `AblationPlanner/Resources/UI/AblationPlanner.ui`. The module uses deprecated/removed Slicer 4 `vtkMRMLMarkupsNode` methods (`GetNumberOfFiducials`, `GetNthFiducialPosition`, `GetNthFiducialLabel`) that fail in Slicer 5, has a typo in a parameter node reference (`\"NativeFiducialsƒ\"`), a bug in `setParameterNode` observer setup, and fragile SubjectHierarchy item ID arithmetic."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md` and `AblationPlanner/AblationPlanner.py`. The README provides a thorough step-by-step workflow with screenshots, links to a probe profile library, and an explicit clinical-use disclaimer, though the automated unit test is an unimplemented stub."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Use of removed Slicer 4 Markups fiducial API methods",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 307,
+   "line_end": 309,
+   "evidence": "    for i in range(0,numNodePoints,2):\n        fiducialLabel = endPointsMarkupsNode.GetNthFiducialLabel(i)        \n        ras1 = vtk.vtkVector3d(0,0,0)",
+   "explanation": "`vtkMRMLMarkupsNode.GetNthFiducialLabel()` was deprecated in Slicer 4 and removed in Slicer 5 (replaced by `GetNthControlPointLabel()`). Similarly, `GetNumberOfFiducials()` and `GetNthFiducialPosition()` used in `onProbeButton` (lines 413-428) are removed in Slicer 5. Calling `onLineButton` or `onProbeButton` in Slicer 5 will raise an `AttributeError`.",
+   "suggestion": "Replace `GetNthFiducialLabel`, `GetNumberOfFiducials`, and `GetNthFiducialPosition` with `GetNthControlPointLabel`, `GetNumberOfControlPoints`, and `GetNthControlPointPosition`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Typo in parameter node reference role \"NativeFiducialsƒ\" resets selector",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 249,
+   "line_end": 251,
+   "evidence": "    wasBlocked = self.ui.nativeFiducialsSelector.blockSignals(True)\n    self.ui.nativeFiducialsSelector.setCurrentNode(self._parameterNode.GetNodeReference(\"NativeFiducialsƒ\"))\n    self.ui.nativeFiducialsSelector.blockSignals(wasBlocked)",
+   "explanation": "In `updateGUIFromParameterNode`, the node reference role has a stray `ƒ` character (`\"NativeFiducialsƒ\"`), whereas `self.nodeSelectors` (line 122) and `onTumorButton` (line 277) use `\"NativeFiducials\"`. Whenever `updateGUIFromParameterNode` runs, `nativeFiducialsSelector` will be reset to `None`.",
+   "suggestion": "Change `\"NativeFiducialsƒ\"` to `\"NativeFiducials\"`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Parameter node observer is attached to old parameter node instead of new one",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 220,
+   "line_end": 225,
+   "evidence": "    if self._parameterNode is not None:\n      self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)\n    if self._parameterNode is not None:\n      self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)\n\n    self._parameterNode = inputParameterNode",
+   "explanation": "In `setParameterNode`, `self.addObserver(self._parameterNode, ...)` is called before `self._parameterNode = inputParameterNode` is assigned. This re-observes the old parameter node instead of observing the newly set `inputParameterNode`, and when `self._parameterNode` starts as `None`, the new parameter node is never observed at all.",
+   "suggestion": "Assign `self._parameterNode = inputParameterNode` before checking `if self._parameterNode is not None:` to add the observer.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Off-by-one segment index in convertSegmentsToSegment union loop",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 689,
+   "line_end": 693,
+   "evidence": "    for i in range(1, segmentationNode.GetSegmentation().GetNumberOfSegments()+1):  #TWO ADDITIONAL PROBES\n        segmentEditorWidget.setActiveEffectByName(\"Logical operators\")\n        effect = segmentEditorWidget.activeEffect()\n        effect.self().scriptedEffect.setParameter(\"Operation\",\"UNION\")\n        effect.self().scriptedEffect.setParameter(\"ModifierSegmentID\",segmentationNode.GetSegmentation().GetNthSegmentID(i))",
+   "explanation": "The loop iterates up to `GetNumberOfSegments() + 1`, so on the last iteration `i == GetNumberOfSegments()`, which is out of bounds for 0-indexed `GetNthSegmentID(i)` (returning an empty/None segment ID). Additionally, `convertSegmentsToSegment` instantiates a GUI widget (`slicer.qMRMLSegmentEditorWidget()`) inside the Logic class and leaks `vtkMRMLSegmentEditorNode` in the scene.",
+   "suggestion": "Iterate over `range(1, segmentationNode.GetSegmentation().GetNumberOfSegments())` and remove the temporary `segmentEditorNode` from `slicer.mrmlScene` when finished.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Fragile assumption that child SubjectHierarchy item ID is folderItemID + 1",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 793,
+   "line_end": 798,
+   "evidence": "def convertSegmentToModel(segmentNode, folderName=\"Folder\"):\n\n    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()\n    modelNode = shNode.CreateFolderItem(shNode.GetSceneItemID(), folderName)\n    slicer.modules.segmentations.logic().ExportVisibleSegmentsToModels(segmentNode,modelNode)\n    folder = shNode.GetItemDataNode(modelNode +1)",
+   "explanation": "`convertSegmentToModel` assumes that the exported model's subject hierarchy item ID is `modelNode + 1`. Subject hierarchy item IDs are not guaranteed to be sequential integers (`modelNode + 1`), which can cause `shNode.GetItemDataNode(modelNode + 1)` to return `None` and raise an `AttributeError` on `folder.GetDisplayNode()`.",
+   "suggestion": "Use `vtkIdList` with `shNode.GetItemChildren(modelNode, childIds)` to retrieve the exported child item ID reliably.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Unmodified boilerplate SampleData registration and 10 MB test STL in repository",
+   "file": "AblationPlanner/AblationPlanner.py",
+   "line_start": 57,
+   "line_end": 63,
+   "evidence": "  SampleData.SampleDataLogic.registerCustomSampleDataSource(\n    # Category and sample name displayed in Sample Data module\n    category='AblationPlanner',\n    sampleName='AblationPlanner1',\n    # Thumbnail should have size of approximately 260x280 pixels and stored in Resources/Icons folder.\n    # It can be created by Screen Capture module, \"Capture all views\" option enabled, \"Number of images\" set to \"Single\".\n    thumbnailFileName=os.path.join(iconsPath, 'AblationPlanner1.png'),",
+   "explanation": "`registerSampleData()` registers boilerplate sample data pointing to `AblationPlanner1.png` (which does not exist in `AblationPlanner/Resources/Icons`) and the default Slicer MRHead testing volume checksum. Meanwhile, actual test data (`AblationPlanner/Testing/solid_LT6015.stl` (10 MB), `tumor.seg.nrrd`, `Endpoints.mrk.json`) is committed directly to the git repository, and `AblationPlannerTest` is an empty stub.",
+   "suggestion": "Either remove the unused template `registerSampleData` function or update it to load the actual ablation planning sample data from a release asset rather than committing a 10 MB STL file in `Testing/`.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "AblationPlanner/Testing/solid_LT6015.stl (10 MB binary/large file not inspected)"
+ ],
+ "questions_for_author": [
+  "Have you tested the module on Slicer 5, where legacy Markups methods like `GetNumberOfFiducials()`, `GetNthFiducialPosition()`, and `GetNthFiducialLabel()` were removed in favor of the `ControlPoint` equivalents?"
+ ]
+}

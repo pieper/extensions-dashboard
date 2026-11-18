@@ -1,0 +1,101 @@
+{
+ "purpose": "AstmPhantomTest guides operators through ASTM F2554 tracking-system accuracy and precision tests using a tracked phantom and pointer. It consumes OpenIGTLink transforms and produces measurement data and an HTML report.",
+ "summary": "Opening the module can remove pre-existing, potentially unsaved scene nodes solely because their names match its own. Its process-wide log handler also captures unrelated application logs beyond the session. Non-blocking correctness concerns include accepting measurements when the phantom transform is invalid and scaling the reference geometry during calibration. The supplied catalog points to a moving branch; its resolution and an actual build were not independently verified. 🔴 Do not merge yet: fix the unintended scene-node deletion and address the cross-module logging exposure.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected module setup, scene-node creation, file output, transform handling and repository-wide searches for networking and execution. Setup deletes existing nodes by name and attaches a persistent handler to the root logger; the advertised Plus connection is documented as an OpenIGTLink client."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Inspected imports, CMake, module setup and repository-wide dependency-install searches. No package installation was found, but setup adds a persistent handler to the shared root logger and changes the main window dimensions."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "The CMake dependency matches the supplied catalog entry and the imported Python classes are listed for installation. One supplied working-volume configuration is not listed in CMake; the exact branch resolution and build were not verified."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "License.txt includes the Slicer software license and permission to distribute subject to its conditions, and notes that clinical applications are not recommended. Independent provenance and separate terms for binary assets were not verified."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected transform acquisition, calibration, statistics and output generation. Invalid phantom transforms can still contribute samples, and similarity calibration changes reference distances used in accuracy calculations."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md documents hardware, Plus configuration, parameter files and step-by-step use. The source includes a MATLAB analysis helper, but no automated Slicer tests were found or run."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Existing scene nodes are deleted by name without checking ownership",
+   "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+   "line_start": 28,
+   "line_end": 34,
+   "evidence": "    # Detects if a transfo node with the same name is already present\n    prevTransfoNode = slicer.mrmlScene.GetFirstNodeByName('phantCalibTransfo')\n    # if so, remove it\n    if prevTransfoNode:\n      slicer.mrmlScene.RemoveNode(prevTransfoNode)\n    # Create the transfo node",
+   "explanation": "Opening the module initializes Phantom and removes the first existing node named phantCalibTransfo, even if it belongs to the user's current scene. Unsaved transform data can be lost. Similar name-based deletion occurs for model and connector nodes.",
+   "suggestion": "Keep references to nodes created by this module and remove only those it owns; let Slicer assign unique names when existing nodes conflict.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Session log captures unrelated Slicer logs and remains attached",
+   "file": "AstmPhantomTest/AstmPhantomTest.py",
+   "line_start": 127,
+   "line_end": 132,
+   "evidence": "      # The log file doesn't overwrite itself and is named after the date,\n      # so any use of this module on a same day will be logged in the same file\n      fh = logging.FileHandler(savePath + \"/AstmPhantomTest_log_\" + datetime.now().strftime(\"%Y.%m.%d\") + \".log\")\n      fh.setLevel(logging.INFO)\n      logging.getLogger().addHandler(fh)\n      logging.info(f\"Save path set to {savePath}\")",
+   "explanation": "The handler is attached to the process-wide root logger and is not retained or removed in cleanup. INFO-and-higher records from other modules that propagate to the root can therefore be written to the selected session folder even after the user leaves this module, potentially exposing other session information in a shared report directory.",
+   "suggestion": "Use a module-specific logger and remove and close its handler when the session or widget ends; describe the contents of the output log.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Acquisition checks pointer status but not phantom-relative transform status",
+   "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+   "line_start": 203,
+   "line_end": 207,
+   "evidence": "  @vtk.calldata_type(vtk.VTK_STRING)\n  def onPtrRefTransformModified(self, caller, event=None, calldata=None):\n    if self.ptrTransfoNode.GetAttribute(\"TransformStatus\") == \"OK\":\n      # update current matrix\n      self.ptrRefMat = slicer.util.arrayFromTransformMatrix(self.ptrRefTransfoNode)",
+   "explanation": "After the initial connection check, a pointer-to-phantom update is accepted based only on PointerToTracker status. If the phantom is missing while the pointer remains tracked, an invalid or stale relative transform can enter the acquisition queue and affect measured points; the red status display does not itself halt acquisition. This is non-blocking correctness feedback.",
+   "suggestion": "Require valid status for the phantom and relative transforms as well, and abort or pause an active acquisition on tracking loss.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Similarity calibration scales the reference distances used in accuracy results",
+   "file": "AstmPhantomTest/AstmPhantomTestClasses/Phantom.py",
+   "line_start": 193,
+   "line_end": 199,
+   "evidence": "    ldmkTransfo = vtk.vtkLandmarkTransform()\n    ldmkTransfo.SetSourceLandmarks(ptsFrom)\n    ldmkTransfo.SetTargetLandmarks(ptsTo)\n    ldmkTransfo.SetModeToSimilarity()\n    ldmkTransfo.Update()\n    transfoMat = ldmkTransfo.GetMatrix()\n    self.calibTransfoNode.SetMatrixTransformToParent(transfoMat)",
+   "explanation": "Similarity registration permits scale as well as rigid alignment. The resulting transform is applied to all CMM ground-truth points, and the scaled points are subsequently used for multi-point distance comparisons; a tracker scale error can therefore be partly absorbed into the reference and underreported. This is non-blocking correctness feedback.",
+   "suggestion": "Use rigid registration for the physical phantom reference, or justify and validate scaling separately and compare distances against the original CMM geometry.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "No-sample acquisition error path references an undefined variable",
+   "file": "AstmPhantomTest/AstmPhantomTestClasses/Pointer.py",
+   "line_start": 279,
+   "line_end": 284,
+   "evidence": "        if np.size(self.coordAccumulator,0) == 0:\n          msgBox = qt.QMessageBox()\n          msgBox.setText(\"No sample taken during timer duration for point acquisition. Restart module and try again with increased duration.\")\n          msgBoxsgBox.setIcon(qt.QMessageBox().Warning)\n          msgBoxsgBox.setStandardButtons(qt.QMessageBox().Ok)\n          msgBoxsgBox.exec()",
+   "explanation": "If a timed acquisition receives no samples, the misspelled variable raises NameError instead of displaying the recovery instructions. This is non-blocking correctness feedback.",
+   "suggestion": "Use msgBox consistently and reset the acquisition state so the operator can retry.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No code was executed; Slicer runtime behavior, build and automated tests were not verified.",
+  "The supplied commit identifier and the current resolution and accessibility of the catalog's master branch could not be independently verified with the available tools.",
+  "The two large phantom STL files and other binary assets were not inspected; their independent provenance and any third-party licensing were not verified.",
+  "OpenIGTLink and Plus Toolkit implementation and network security were not inspected.",
+  "No previous catalog entry, prior reviewed commit, PR checklist or CI results were available for comparison."
+ ],
+ "questions_for_author": []
+}
