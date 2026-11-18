@@ -1,0 +1,75 @@
+{
+ "purpose": "SPoM (Signed Poisson Shape Analysis) provides a C++ CLI module (PoissonShapeAnalysis) for 3D Slicer that performs statistical shape analysis between two groups of 3D binary shape volumes using the 3D Poisson equation, outputting a mean shape volume and surface mesh with per-vertex p-values. It is intended for neuroimaging and medical image researchers comparing anatomical shapes across cohorts.",
+ "summary": "SPoM provides the `PoissonShapeAnalysis` C++ CLI module for statistical shape analysis between two groups of 3D binary volumes using the 3D Poisson equation. All three admission requirements are met: the code has no malicious behavior or network/environment side effects, is licensed under the 3D Slicer license (`License.txt`) with permissive headers in `PoissonShapeAnalysis/lib/`, and has a valid catalog entry and CMake build configuration. Non-blocking issues to address include removing leftover debug file writes (`group1_*.nrrd`, `group2_*.nrrd`, `outsidePoisson.nrrd`, `insidePoisson.nrrd`, `indexMap.nrrd`, `m_meanShapeSurface.vtp`) to the current working directory, updating the template CTest arguments, and removing the unused `jjj/` directory.\n\n🟢 Recommend merge",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all CMake, C++, XML, and Python files in the repository at commit e6333cce57ef2ee2b1f2baf02b2cf90fe690e3c6. There is no network activity, telemetry, external command execution, or unsafe deserialization."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected all CMakeLists.txt files and source files; the extension only builds a C++ CLI module (`PoissonShapeAnalysis`) using bundled ITK and VTK, without modifying Slicer's Python environment or installing packages."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected the catalog entry and `CMakeLists.txt` / `PoissonShapeAnalysis/CMakeLists.txt`. `EXTENSION_DEPENDS` is `\"NA\"` matching `build_dependencies: []`, and `PoissonShapeAnalysis` builds cleanly as a CLI module via `SEMMacroBuildCLI`."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `License.txt` (3D Slicer Contribution and Software License Agreement v1.0) and the permissive MIT-style copyright headers by Yi Gao across all files in `PoissonShapeAnalysis/lib/` (noting `studentTtest.h` uses a clean-room incomplete beta implementation with no GPL/ALGLIB code)."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected `PoissonShapeAnalysis.cxx`, `PoissonShapeAnalysis.xml`, and all headers in `PoissonShapeAnalysis/lib/`. The C++ library leaves several debug `writeImage` and `writePolydataToXMLFile` calls active that write to relative paths in the current working directory (and `raise(SIGABRT)` if writing fails), and the CTest configuration still passes `--sigma 2.5` from the CLI template."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md` and `PoissonShapeAnalysis.xml`. The extension implements a published statistical shape analysis method (Gao & Bouix, Medical Image Analysis 2016) with clear usage documentation in `README.md`."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Unconditional debug file writes to current working directory can fail or litter user directories",
+   "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+   "line_start": 135,
+   "line_end": 143,
+   "evidence": "    for (std::size_t it = 0; it < m_shapeGroup1.size(); ++it)\n      {\n        m_shapeGroup1[it] = cropNonZeroRegionFromImage<ShapeImageType>(m_shapeGroup1[it]);\n\n    //dbg\n        sprintf(group1Name, \"group1_%lu.nrrd\", it);\n        writeImage<ShapeImageType>(m_shapeGroup1[it], group1Name);\n    //dbg, end\n      }",
+   "explanation": "The C++ library unconditionally writes several debug files using relative filenames into the process's current working directory during normal execution: `group1_%lu.nrrd` and `group2_%lu.nrrd` in `SumOfTwoPoissonShapeAnalysis.hxx` (lines 140-152), `m_meanShapeSurface.vtp` in `SumOfTwoPoissonShapeAnalysis.hxx` (line 403), `outsidePoisson.nrrd` and `insidePoisson.nrrd` in `ShapeSumOfTwoPoissonFilter.hxx` (lines 202-203), and `indexMap.nrrd` in `DirichletPoissonSolver3D.hxx` (line 175) and `NeumannDirichletPoissonSolver3D.hxx` (line 175). If the current working directory is read-only (for example, Slicer's installation directory on Windows or macOS), `writeImage` catches `itk::ExceptionObject` and calls `raise(SIGABRT)`, crashing the CLI execution; if the directory is writable, it silently litters or overwrites files in the working directory.",
+   "suggestion": "Remove or comment out the debug `writeImage` and `writePolydataToXMLFile` calls across `SumOfTwoPoissonShapeAnalysis.hxx`, `ShapeSumOfTwoPoissonFilter.hxx`, `DirichletPoissonSolver3D.hxx`, and `NeumannDirichletPoissonSolver3D.hxx`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "CLI test uses leftover template arguments (--sigma) that do not match the CLI XML parameters",
+   "file": "PoissonShapeAnalysis/Testing/Cxx/CMakeLists.txt",
+   "line_start": 21,
+   "line_end": 26,
+   "evidence": "  ExternalData_add_test(${SEM_DATA_MANAGEMENT_TARGET} NAME ${testname} COMMAND ${SEM_LAUNCH_COMMAND} $<TARGET_FILE:${CLP}Test>\n    --compare DATA{${BASELINE}/${CLP}Test.nrrd}\n    ${TEMP}/${CLP}Test.nrrd\n    ModuleEntryPoint\n    --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nrrd\n    )",
+   "explanation": "`PoissonShapeAnalysis/Testing/Cxx/CMakeLists.txt` still contains the default CLI template test invocation passing `--sigma 2.5` and positional arguments, which do not match `PoissonShapeAnalysis.xml` (`--shapeNameList1`, `--shapeNameList2`, `--meanImageName`, `--meanVTKName`, `--doRegistration`). Running ctest will fail on this test.",
+   "suggestion": "Update the CTest command in `PoissonShapeAnalysis/Testing/Cxx/CMakeLists.txt` to pass valid input folders and output paths matching `PoissonShapeAnalysis.xml`.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Unused scratch module directory `jjj/` and `.vscode/settings.json` committed to repository",
+   "file": "jjj/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 7,
+   "evidence": "#-----------------------------------------------------------------------------\nset(MODULE_NAME jjj)\n\n#-----------------------------------------------------------------------------\nset(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n  )",
+   "explanation": "The repository contains an unused prototype scripted module folder `jjj/` (with broken recursion in `jjjLogic.process` at line 366 and leftover template code) as well as `.vscode/settings.json` with a hardcoded local path. Although `jjj` is not added via `add_subdirectory` in the root `CMakeLists.txt` and therefore does not break the build, removing unused scratch directories keeps the repository clean.",
+   "suggestion": "Remove the unused `jjj/` directory and `.vscode/settings.json` from the repository.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Binary image files SlicerSPoM.png and SlicerSPoMScreenShot.png and binary test data under PoissonShapeAnalysis/Data/ were not rendered or executed."
+ ],
+ "questions_for_author": [
+  "Could you remove the unconditional debug file writes (`group1_*.nrrd`, `group2_*.nrrd`, `m_meanShapeSurface.vtp`, `outsidePoisson.nrrd`, `insidePoisson.nrrd`, `indexMap.nrrd`) from the C++ headers so the CLI does not write into or crash on a read-only working directory?"
+ ]
+}

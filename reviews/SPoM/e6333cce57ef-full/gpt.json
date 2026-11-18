@@ -1,0 +1,91 @@
+{
+ "purpose": "SPoM compares two groups of 3D binary shapes using Poisson-based statistical shape analysis and produces a mean volume and surface with p-values. It is intended for researchers studying differences in anatomical or other shapes in 3D Slicer.",
+ "summary": "Analysis silently writes subject-derived debug images and a surface to fixed filenames in the process working directory, risking disclosure and overwriting existing files. Cropping and statistical edge cases can also compromise results, and the supplied test does not exercise the actual CLI interface. The source snapshot was provided but its relationship to the catalog's moving main branch, the build, and the scope of distribution permission were not independently verified. 🔴 Do not merge yet: remove uncontrolled debug writes; review incomplete pending source revision and licensing clarification.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Traced the CLI through SumOfTwoPoissonShapeAnalysis.hxx, ShapeSumOfTwoPoissonFilter.hxx and utilitiesIO.hxx. Normal analysis writes fixed-name subject-derived files without a user-selected location, potentially overwriting existing files and leaving sensitive data behind."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected root and CLI CMake files and the included Python module: the root build only adds the C++ CLI and declares no external extension dependencies. I saw no package installation or Python startup effects on the built path."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "CMake builds the C++ CLI and does not add the jjj scripted module; its dependencies agree with the supplied empty build_dependencies. The remote main revision, catalog fetch, and actual build were not independently verified."
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": "License.txt includes distribution permission only for Brigham's rights; source headers separately identify Yi Gao and refer to a COPYING file absent from the supplied file listing. It is not clear from the available evidence whether those separately copyrighted files are covered by rights granted under the supplied agreement."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Traced preprocessing, reference-image selection, and studentTTest. Independently cropped inputs are resampled onto the first crop and insufficient or zero-variance samples are not handled before computing p-values."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md documents the two-folder workflow and cites a method paper, but the registered C++ test uses an unrelated thresholding interface instead of exercising shape analysis. License.txt cautions that clinical applications are not recommended."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Analysis writes sensitive intermediate files to uncontrolled fixed paths",
+   "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+   "line_start": 135,
+   "line_end": 141,
+   "evidence": "    for (std::size_t it = 0; it < m_shapeGroup1.size(); ++it)\n      {\n        m_shapeGroup1[it] = cropNonZeroRegionFromImage<ShapeImageType>(m_shapeGroup1[it]);\n\n    //dbg\n        sprintf(group1Name, \"group1_%lu.nrrd\", it);\n        writeImage<ShapeImageType>(m_shapeGroup1[it], group1Name);",
+   "explanation": "Every analysis writes cropped individual input shapes as predictable relative filenames in the process working directory, regardless of selected output paths. Existing files with these names can be overwritten and derived patient images can persist in an unexpected or shared location. The same path writes group2 files and m_meanShapeSurface.vtp; ShapeSumOfTwoPoissonFilter.hxx and the solvers also write fixed-name intermediate images.",
+   "suggestion": "Remove debug writes from normal processing, or make them explicitly opt-in with a user-selected private output directory and safe collision handling.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "First cropped shape defines the analysis field of view for all subjects",
+   "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+   "line_start": 231,
+   "line_end": 239,
+   "evidence": "      {\n        m_registrationFixedImage = castItkImage<typename ShapeImageType::PixelType, typename FloatImageType::PixelType>( m_shapeGroup1[0] );\n\n        m_meanShape = FloatImageType::New();\n        m_meanShape->SetRegions(m_shapeGroup1[0]->GetLargestPossibleRegion() );\n        m_meanShape->Allocate();\n        m_meanShape->FillBuffer(0.0);\n        m_meanShape->CopyInformation(m_shapeGroup1[0]);\n      }",
+   "explanation": "Preprocessing independently crops each input around its own foreground (lines 135-151), and later resamples every subject onto this first cropped image. Even already registered shapes extending beyond the first subject's cropped field of view are truncated, biasing the mean and surface statistics; the result can depend on which group-1 filename sorts first.",
+   "suggestion": "Compute a common physical-space bounding region covering all registered shapes, and add a regression test with differently sized aligned shapes.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "P-values are undefined for small groups or zero pooled variance",
+   "file": "PoissonShapeAnalysis/lib/studentTtest.h",
+   "line_start": 153,
+   "line_end": 161,
+   "evidence": "    Sd2 = sqrt(tempsum2 / (Sn2 - 1));\n\n    double v = Sn1 + Sn2 - 2.0;\n    double sp = sqrt(((Sn1 - 1) * Sd1 * Sd1 + (Sn2 - 1) * Sd2 * Sd2) / v);\n    double t_stat = (Sm1 - Sm2) / (sp * sqrt(1.0 / Sn1 + 1.0 / Sn2));\n\n    // Two-sided p-value of Student's t distribution:\n    //   P(|T| > |t|) = I_{v / (v + t^2)}(v / 2, 1 / 2)\n    double pValue = detail::incompleteBetaRegularized(0.5 * v, 0.5, v / (v + t_stat * t_stat));",
+   "explanation": "The CLI accepts any nonempty input folder, so a group can contain only one subject, giving division by zero in its sample variance. Identical observations in both groups also give zero pooled variance and a 0/0 t-statistic; NaN p-values are then attached to the output surface without an error.",
+   "suggestion": "Require sufficient subjects per group, handle degenerate variance explicitly, and test p-values against a validated implementation.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Registered CLI test exercises an unrelated thresholding interface",
+   "file": "PoissonShapeAnalysis/Testing/Cxx/CMakeLists.txt",
+   "line_start": 20,
+   "line_end": 26,
+   "evidence": "set(testname ${CLP}Test)\nExternalData_add_test(${SEM_DATA_MANAGEMENT_TARGET} NAME ${testname} COMMAND ${SEM_LAUNCH_COMMAND} $<TARGET_FILE:${CLP}Test>\n  --compare DATA{${BASELINE}/${CLP}Test.nrrd}\n  ${TEMP}/${CLP}Test.nrrd\n  ModuleEntryPoint\n  --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nrrd\n  )",
+   "explanation": "The test invokes --sigma and positional input/output arguments, whereas PoissonShapeAnalysis.xml requires two shape folders and named volume/model outputs. It therefore does not provide a working regression test for the documented shape-analysis workflow.",
+   "suggestion": "Replace it with two small groups of synthetic shapes and verify both mean output and statistical scalars.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No code was executed: Slicer loading, build, CLI execution, and tests were not verified.",
+  "No network access was available to resolve main to the provided commit e6333cce57ef2ee2b1f2baf02b2cf90fe690e3c6 or check the catalog entry and CI results independently.",
+  "The complete third-party provenance and distribution rights for copyrighted source, bundled test data, and Numerical Recipes-referenced implementation were not independently verified.",
+  "No prior reviewed revision or PR submission checklist was available for comparison."
+ ],
+ "questions_for_author": [
+  "Does the Slicer license in License.txt cover the Yi Gao and Zhenkai Ou copyrighted source files, including the files referring to a missing COPYING file? Please provide explicit distribution terms or clarify the rights under which they are distributed.",
+  "Can the current main branch and catalog build be verified against the supplied source snapshot?"
+ ]
+}

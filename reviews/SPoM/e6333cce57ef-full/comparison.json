@@ -1,0 +1,602 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Analysis writes sensitive intermediate files to uncontrolled fixed paths",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+   "line": 135,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Unconditional debug file writes to current working directory can fail or litter user directories",
+     "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+     "line_start": 135,
+     "line_end": 143,
+     "evidence": "    for (std::size_t it = 0; it < m_shapeGroup1.size(); ++it)\n      {\n        m_shapeGroup1[it] = cropNonZeroRegionFromImage<ShapeImageType>(m_shapeGroup1[it]);\n\n    //dbg\n        sprintf(group1Name, \"group1_%lu.nrrd\", it);\n        writeImage<ShapeImageType>(m_shapeGroup1[it], group1Name);\n    //dbg, end\n      }",
+     "explanation": "The C++ library unconditionally writes several debug files using relative filenames into the process's current working directory during normal execution: `group1_%lu.nrrd` and `group2_%lu.nrrd` in `SumOfTwoPoissonShapeAnalysis.hxx` (lines 140-152), `m_meanShapeSurface.vtp` in `SumOfTwoPoissonShapeAnalysis.hxx` (line 403), `outsidePoisson.nrrd` and `insidePoisson.nrrd` in `ShapeSumOfTwoPoissonFilter.hxx` (lines 202-203), and `indexMap.nrrd` in `DirichletPoissonSolver3D.hxx` (line 175) and `NeumannDirichletPoissonSolver3D.hxx` (line 175). If the current working directory is read-only (for example, Slicer's installation directory on Windows or macOS), `writeImage` catches `itk::ExceptionObject` and calls `raise(SIGABRT)`, crashing the CLI execution; if the directory is writable, it silently litters or overwrites files in the working directory.",
+     "suggestion": "Remove or comment out the debug `writeImage` and `writePolydataToXMLFile` calls across `SumOfTwoPoissonShapeAnalysis.hxx`, `ShapeSumOfTwoPoissonFilter.hxx`, `DirichletPoissonSolver3D.hxx`, and `NeumannDirichletPoissonSolver3D.hxx`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+      "line": 135
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Analysis writes sensitive intermediate files to uncontrolled fixed paths",
+     "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+     "line_start": 135,
+     "line_end": 141,
+     "evidence": "    for (std::size_t it = 0; it < m_shapeGroup1.size(); ++it)\n      {\n        m_shapeGroup1[it] = cropNonZeroRegionFromImage<ShapeImageType>(m_shapeGroup1[it]);\n\n    //dbg\n        sprintf(group1Name, \"group1_%lu.nrrd\", it);\n        writeImage<ShapeImageType>(m_shapeGroup1[it], group1Name);",
+     "explanation": "Every analysis writes cropped individual input shapes as predictable relative filenames in the process working directory, regardless of selected output paths. Existing files with these names can be overwritten and derived patient images can persist in an unexpected or shared location. The same path writes group2 files and m_meanShapeSurface.vtp; ShapeSumOfTwoPoissonFilter.hxx and the solvers also write fixed-name intermediate images.",
+     "suggestion": "Remove debug writes from normal processing, or make them explicitly opt-in with a user-selected private output directory and safe collision handling.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+      "line": 135
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in SumOfTwoPoissonShapeAnalysis.hxx:135-153 (group1_%lu.nrrd/group2_%lu.nrrd written via writeImage to CWD), :403 (m_meanShapeSurface.vtp), ShapeSumOfTwoPoissonFilter.hxx:202-203, DirichletPoissonSolver3D.hxx:175 and others (indexMap.nrrd). These are leftover '//dbg' writes with fixed relative names. They are real, but the data stays local and the only effects are clutter, possible overwrite of same-named files in the CWD, or a failure if the CWD is read-only. No network egress or concrete path to harm, so I rate it a soundness or minor issue, not blocking safety. Note _isotropicizeFirstImage has exit(0) but it is commented out at line 121 and not called."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "PoissonShapeAnalysis/PoissonShapeAnalysis.cxx:23-27 calls update; SumOfTwoPoissonShapeAnalysis.hxx:68-70 and 87-90 call preprocessing and cropping. Lines 135-141 explicitly write each crop: `sprintf(group1Name, \"group1_%lu.nrrd\", it);` and `writeImage<ShapeImageType>(m_shapeGroup1[it], group1Name);`; lines 145-151 do the same for group 2. utilitiesIO.hxx:91-102 passes the name to an ITK file writer and calls Update. Existing same-named files in the process working directory can be overwritten, and patient-derived masks can persist in an unintended/shared directory; the actual working directory depends on launch context and was not verified. This is a concrete unintended data-loss and confidentiality risk, warranting blocking severity. Additional fixed-name writes are at SumOfTwoPoissonShapeAnalysis.hxx:403, ShapeSumOfTwoPoissonFilter.hxx:202-203, and DirichletPoissonSolver3D.hxx and NeumannDirichletPoissonSolver3D.hxx:175. On a write failure utilitiesIO.hxx:104-108 calls `raise(SIGABRT);`."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx (lines 140-152 and 403), PoissonShapeAnalysis/lib/ShapeSumOfTwoPoissonFilter.hxx (lines 202-203), PoissonShapeAnalysis/lib/DirichletPoissonSolver3D.hxx (line 175), and PoissonShapeAnalysis/lib/NeumannDirichletPoissonSolver3D.hxx (line 175). These functions unconditionally call writeImage or writePolydataToXMLFile with hardcoded relative paths ('group1_%lu.nrrd', 'group2_%lu.nrrd', 'm_meanShapeSurface.vtp', 'outsidePoisson.nrrd', 'insidePoisson.nrrd', 'indexMap.nrrd') in the current working directory. Note that in PoissonShapeAnalysis/lib/utilitiesIO.hxx (lines 100-109), if writing fails (e.g. read-only working directory), writeImage catches the exception and calls raise(SIGABRT), crashing the CLI, or if writable, overwrites any existing files with those names in the CWD. This is a soundness/hygiene issue (leftover //dbg code writing to CWD rather than temporary or user-chosen folders) rather than a blocking safety vulnerability, so minor/major under soundness or minor under safety is appropriate; I rate its severity as minor."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "First cropped shape defines the analysis field of view for all subjects",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+   "line": 66,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "First cropped shape defines the analysis field of view for all subjects",
+     "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+     "line_start": 231,
+     "line_end": 239,
+     "evidence": "      {\n        m_registrationFixedImage = castItkImage<typename ShapeImageType::PixelType, typename FloatImageType::PixelType>( m_shapeGroup1[0] );\n\n        m_meanShape = FloatImageType::New();\n        m_meanShape->SetRegions(m_shapeGroup1[0]->GetLargestPossibleRegion() );\n        m_meanShape->Allocate();\n        m_meanShape->FillBuffer(0.0);\n        m_meanShape->CopyInformation(m_shapeGroup1[0]);\n      }",
+     "explanation": "Preprocessing independently crops each input around its own foreground (lines 135-151), and later resamples every subject onto this first cropped image. Even already registered shapes extending beyond the first subject's cropped field of view are truncated, biasing the mean and surface statistics; the result can depend on which group-1 filename sorts first.",
+     "suggestion": "Compute a common physical-space bounding region covering all registered shapes, and add a regression test with differently sized aligned shapes.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+      "line": 66
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "SumOfTwoPoissonShapeAnalysis.hxx:127-153 crops each image to its own nonzero bounding box. Lines 233-239 use m_shapeGroup1[0] as the registration fixed image and mean-shape grid. transformImage resamples every shape onto that grid (lines 274-275, 313-314) with fill value 0. Parts of other shapes outside the first cropped box are truncated, so the result depends on the first file. This is a real methodological weakness, but it is a soundness issue, not safety."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "SumOfTwoPoissonShapeAnalysis.hxx:135-151 crops each group member, and utilitiesImage.hxx:343-349 constructs a separate enlarged foreground ROI. With no externally supplied mean shape, SumOfTwoPoissonShapeAnalysis.hxx:231-239 sets the first group-1 image as the fixed reference: `m_registrationFixedImage = castItkImage<typename ShapeImageType::PixelType, typename FloatImageType::PixelType>( m_shapeGroup1[0] );`. Lines 261-275 and 300-314 transform both groups against that reference, with identity transforms when registration is disabled. transformImage.hxx:89-95 takes the output size and geometry from the reference. Thus already-aligned subject foreground beyond that reference's cropped, padded field is excluded; this can bias the mean and downstream statistics. utilitiesIO.hxx:191-194 sorts directory entries, so changing the first filename can change the reference. This is a major correctness issue, not a safety admission blocker."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx: _preprocess() calls _cropInputImages() (lines 90, 135-153), which crops each image in m_shapeGroup1 and m_shapeGroup2 independently to its own enlarged non-zero bounding box via cropNonZeroRegionFromImage (utilitiesImage.hxx:343-350). Then in _computeMeanShape() (lines 231-240), m_registrationFixedImage and m_meanShape take their region, size, origin, and spacing directly from the already-cropped m_shapeGroup1[0]. All shapes in both groups are then resampled onto m_registrationFixedImage's grid via transformImage (lines 274-275, 313-314; transformImage.hxx:91-94). When registration is disabled or shapes differ in size/extent, any part of a shape extending outside m_shapeGroup1[0]'s cropped ROI is clipped, and the result depends on which file sorts first in collectFilesInPath (utilitiesIO.hxx:194)."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "P-values are undefined for small groups or zero pooled variance",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "PoissonShapeAnalysis/lib/studentTtest.h",
+   "line": 153,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "P-values are undefined for small groups or zero pooled variance",
+     "file": "PoissonShapeAnalysis/lib/studentTtest.h",
+     "line_start": 153,
+     "line_end": 161,
+     "evidence": "    Sd2 = sqrt(tempsum2 / (Sn2 - 1));\n\n    double v = Sn1 + Sn2 - 2.0;\n    double sp = sqrt(((Sn1 - 1) * Sd1 * Sd1 + (Sn2 - 1) * Sd2 * Sd2) / v);\n    double t_stat = (Sm1 - Sm2) / (sp * sqrt(1.0 / Sn1 + 1.0 / Sn2));\n\n    // Two-sided p-value of Student's t distribution:\n    //   P(|T| > |t|) = I_{v / (v + t^2)}(v / 2, 1 / 2)\n    double pValue = detail::incompleteBetaRegularized(0.5 * v, 0.5, v / (v + t_stat * t_stat));",
+     "explanation": "The CLI accepts any nonempty input folder, so a group can contain only one subject, giving division by zero in its sample variance. Identical observations in both groups also give zero pooled variance and a 0/0 t-statistic; NaN p-values are then attached to the output surface without an error.",
+     "suggestion": "Require sufficient subjects per group, handle degenerate variance explicitly, and test p-values against a validated implementation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PoissonShapeAnalysis/lib/studentTtest.h",
+      "line": 153
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "studentTtest.h:140 and :153 divide by (n-1), and :156-157 divide by sp, which is zero when the pooled variance is zero. A group of one subject or identical data gives NaN or inf. A grep found no group-size validation before the call at SumOfTwoPoissonShapeAnalysis.hxx:669. It is real but an edge case with unrealistic group sizes, so minor."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "PoissonShapeAnalysis.cxx:16-27 reads and runs both groups with no minimum size check; utilitiesIO.hxx:191-205 only rejects an empty file list. studentTtest.h:140 and 153-161 computes sample standard deviations with `Sd2 = sqrt(tempsum2 / (Sn2 - 1));` and then `double t_stat = (Sm1 - Sm2) / (sp * sqrt(1.0 / Sn1 + 1.0 / Sn2));` without guarding singleton groups or zero pooled variance. A singleton or identical observations can produce NaN under normal floating-point semantics. SumOfTwoPoissonShapeAnalysis.hxx:669-683 stores each returned p-value as surface scalars without checking it. This is a major statistical correctness issue; the full pipeline was not run, and earlier failures can prevent reaching the test."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in PoissonShapeAnalysis/lib/studentTtest.h (lines 129-163) and PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx (lines 651-683). Neither PoissonShapeAnalysis.cxx nor SumOfTwoPoissonShapeAnalysis checks that each group has at least 2 shapes (lines 739, 750 have '// TODO check size is 0?'). In studentTTest, Sn1 == 1 or Sn2 == 1 causes division by zero in tempsum1 / (Sn1 - 1) or tempsum2 / (Sn2 - 1) (lines 140, 153), and Sn1 + Sn2 == 2 makes v = 0 (line 155). Furthermore, if all observations at a surface vertex have zero variance in both groups (sp == 0), line 157 divides by zero, propagating NaN into incompleteBetaRegularized and storing NaN in the output surface's pValue scalar array without warning."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "CLI test uses leftover template arguments (--sigma) that do not match the CLI XML parameters",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "PoissonShapeAnalysis/Testing/Cxx/CMakeLists.txt",
+   "line": 21,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "CLI test uses leftover template arguments (--sigma) that do not match the CLI XML parameters",
+     "file": "PoissonShapeAnalysis/Testing/Cxx/CMakeLists.txt",
+     "line_start": 21,
+     "line_end": 26,
+     "evidence": "  ExternalData_add_test(${SEM_DATA_MANAGEMENT_TARGET} NAME ${testname} COMMAND ${SEM_LAUNCH_COMMAND} $<TARGET_FILE:${CLP}Test>\n    --compare DATA{${BASELINE}/${CLP}Test.nrrd}\n    ${TEMP}/${CLP}Test.nrrd\n    ModuleEntryPoint\n    --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nrrd\n    )",
+     "explanation": "`PoissonShapeAnalysis/Testing/Cxx/CMakeLists.txt` still contains the default CLI template test invocation passing `--sigma 2.5` and positional arguments, which do not match `PoissonShapeAnalysis.xml` (`--shapeNameList1`, `--shapeNameList2`, `--meanImageName`, `--meanVTKName`, `--doRegistration`). Running ctest will fail on this test.",
+     "suggestion": "Update the CTest command in `PoissonShapeAnalysis/Testing/Cxx/CMakeLists.txt` to pass valid input folders and output paths matching `PoissonShapeAnalysis.xml`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PoissonShapeAnalysis/Testing/Cxx/CMakeLists.txt",
+      "line": 21
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Registered CLI test exercises an unrelated thresholding interface",
+     "file": "PoissonShapeAnalysis/Testing/Cxx/CMakeLists.txt",
+     "line_start": 20,
+     "line_end": 26,
+     "evidence": "set(testname ${CLP}Test)\nExternalData_add_test(${SEM_DATA_MANAGEMENT_TARGET} NAME ${testname} COMMAND ${SEM_LAUNCH_COMMAND} $<TARGET_FILE:${CLP}Test>\n  --compare DATA{${BASELINE}/${CLP}Test.nrrd}\n  ${TEMP}/${CLP}Test.nrrd\n  ModuleEntryPoint\n  --sigma 2.5 DATA{${INPUT}/CTHeadAxial.nhdr,CTHeadAxial.raw.gz} ${TEMP}/${CLP}Test.nrrd\n  )",
+     "explanation": "The test invokes --sigma and positional input/output arguments, whereas PoissonShapeAnalysis.xml requires two shape folders and named volume/model outputs. It therefore does not provide a working regression test for the documented shape-analysis workflow.",
+     "suggestion": "Replace it with two small groups of synthetic shapes and verify both mean output and statistical scalars.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PoissonShapeAnalysis/Testing/Cxx/CMakeLists.txt",
+      "line": 20
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unused scratch module directory `jjj/` and `.vscode/settings.json` committed to repository",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "jjj/CMakeLists.txt",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Unused scratch module directory `jjj/` and `.vscode/settings.json` committed to repository",
+     "file": "jjj/CMakeLists.txt",
+     "line_start": 1,
+     "line_end": 7,
+     "evidence": "#-----------------------------------------------------------------------------\nset(MODULE_NAME jjj)\n\n#-----------------------------------------------------------------------------\nset(MODULE_PYTHON_SCRIPTS\n  ${MODULE_NAME}.py\n  )",
+     "explanation": "The repository contains an unused prototype scripted module folder `jjj/` (with broken recursion in `jjjLogic.process` at line 366 and leftover template code) as well as `.vscode/settings.json` with a hardcoded local path. Although `jjj` is not added via `add_subdirectory` in the root `CMakeLists.txt` and therefore does not break the build, removing unused scratch directories keeps the repository clean.",
+     "suggestion": "Remove the unused `jjj/` directory and `.vscode/settings.json` from the repository.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "jjj/CMakeLists.txt",
+      "line": 1
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Analysis writes sensitive intermediate files to uncontrolled fixed paths",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+   "line": 135,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Unconditional debug file writes to current working directory can fail or litter user directories",
+     "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+     "line_start": 135,
+     "line_end": 143,
+     "evidence": "    for (std::size_t it = 0; it < m_shapeGroup1.size(); ++it)\n      {\n        m_shapeGroup1[it] = cropNonZeroRegionFromImage<ShapeImageType>(m_shapeGroup1[it]);\n\n    //dbg\n        sprintf(group1Name, \"group1_%lu.nrrd\", it);\n        writeImage<ShapeImageType>(m_shapeGroup1[it], group1Name);\n    //dbg, end\n      }",
+     "explanation": "The C++ library unconditionally writes several debug files using relative filenames into the process's current working directory during normal execution: `group1_%lu.nrrd` and `group2_%lu.nrrd` in `SumOfTwoPoissonShapeAnalysis.hxx` (lines 140-152), `m_meanShapeSurface.vtp` in `SumOfTwoPoissonShapeAnalysis.hxx` (line 403), `outsidePoisson.nrrd` and `insidePoisson.nrrd` in `ShapeSumOfTwoPoissonFilter.hxx` (lines 202-203), and `indexMap.nrrd` in `DirichletPoissonSolver3D.hxx` (line 175) and `NeumannDirichletPoissonSolver3D.hxx` (line 175). If the current working directory is read-only (for example, Slicer's installation directory on Windows or macOS), `writeImage` catches `itk::ExceptionObject` and calls `raise(SIGABRT)`, crashing the CLI execution; if the directory is writable, it silently litters or overwrites files in the working directory.",
+     "suggestion": "Remove or comment out the debug `writeImage` and `writePolydataToXMLFile` calls across `SumOfTwoPoissonShapeAnalysis.hxx`, `ShapeSumOfTwoPoissonFilter.hxx`, `DirichletPoissonSolver3D.hxx`, and `NeumannDirichletPoissonSolver3D.hxx`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+      "line": 135
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Analysis writes sensitive intermediate files to uncontrolled fixed paths",
+     "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+     "line_start": 135,
+     "line_end": 141,
+     "evidence": "    for (std::size_t it = 0; it < m_shapeGroup1.size(); ++it)\n      {\n        m_shapeGroup1[it] = cropNonZeroRegionFromImage<ShapeImageType>(m_shapeGroup1[it]);\n\n    //dbg\n        sprintf(group1Name, \"group1_%lu.nrrd\", it);\n        writeImage<ShapeImageType>(m_shapeGroup1[it], group1Name);",
+     "explanation": "Every analysis writes cropped individual input shapes as predictable relative filenames in the process working directory, regardless of selected output paths. Existing files with these names can be overwritten and derived patient images can persist in an unexpected or shared location. The same path writes group2 files and m_meanShapeSurface.vtp; ShapeSumOfTwoPoissonFilter.hxx and the solvers also write fixed-name intermediate images.",
+     "suggestion": "Remove debug writes from normal processing, or make them explicitly opt-in with a user-selected private output directory and safe collision handling.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+      "line": 135
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in SumOfTwoPoissonShapeAnalysis.hxx:135-153 (group1_%lu.nrrd/group2_%lu.nrrd written via writeImage to CWD), :403 (m_meanShapeSurface.vtp), ShapeSumOfTwoPoissonFilter.hxx:202-203, DirichletPoissonSolver3D.hxx:175 and others (indexMap.nrrd). These are leftover '//dbg' writes with fixed relative names. They are real, but the data stays local and the only effects are clutter, possible overwrite of same-named files in the CWD, or a failure if the CWD is read-only. No network egress or concrete path to harm, so I rate it a soundness or minor issue, not blocking safety. Note _isotropicizeFirstImage has exit(0) but it is commented out at line 121 and not called."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "PoissonShapeAnalysis/PoissonShapeAnalysis.cxx:23-27 calls update; SumOfTwoPoissonShapeAnalysis.hxx:68-70 and 87-90 call preprocessing and cropping. Lines 135-141 explicitly write each crop: `sprintf(group1Name, \"group1_%lu.nrrd\", it);` and `writeImage<ShapeImageType>(m_shapeGroup1[it], group1Name);`; lines 145-151 do the same for group 2. utilitiesIO.hxx:91-102 passes the name to an ITK file writer and calls Update. Existing same-named files in the process working directory can be overwritten, and patient-derived masks can persist in an unintended/shared directory; the actual working directory depends on launch context and was not verified. This is a concrete unintended data-loss and confidentiality risk, warranting blocking severity. Additional fixed-name writes are at SumOfTwoPoissonShapeAnalysis.hxx:403, ShapeSumOfTwoPoissonFilter.hxx:202-203, and DirichletPoissonSolver3D.hxx and NeumannDirichletPoissonSolver3D.hxx:175. On a write failure utilitiesIO.hxx:104-108 calls `raise(SIGABRT);`."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx (lines 140-152 and 403), PoissonShapeAnalysis/lib/ShapeSumOfTwoPoissonFilter.hxx (lines 202-203), PoissonShapeAnalysis/lib/DirichletPoissonSolver3D.hxx (line 175), and PoissonShapeAnalysis/lib/NeumannDirichletPoissonSolver3D.hxx (line 175). These functions unconditionally call writeImage or writePolydataToXMLFile with hardcoded relative paths ('group1_%lu.nrrd', 'group2_%lu.nrrd', 'm_meanShapeSurface.vtp', 'outsidePoisson.nrrd', 'insidePoisson.nrrd', 'indexMap.nrrd') in the current working directory. Note that in PoissonShapeAnalysis/lib/utilitiesIO.hxx (lines 100-109), if writing fails (e.g. read-only working directory), writeImage catches the exception and calls raise(SIGABRT), crashing the CLI, or if writable, overwrites any existing files with those names in the CWD. This is a soundness/hygiene issue (leftover //dbg code writing to CWD rather than temporary or user-chosen folders) rather than a blocking safety vulnerability, so minor/major under soundness or minor under safety is appropriate; I rate its severity as minor."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "First cropped shape defines the analysis field of view for all subjects",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+   "line": 66,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "First cropped shape defines the analysis field of view for all subjects",
+     "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+     "line_start": 231,
+     "line_end": 239,
+     "evidence": "      {\n        m_registrationFixedImage = castItkImage<typename ShapeImageType::PixelType, typename FloatImageType::PixelType>( m_shapeGroup1[0] );\n\n        m_meanShape = FloatImageType::New();\n        m_meanShape->SetRegions(m_shapeGroup1[0]->GetLargestPossibleRegion() );\n        m_meanShape->Allocate();\n        m_meanShape->FillBuffer(0.0);\n        m_meanShape->CopyInformation(m_shapeGroup1[0]);\n      }",
+     "explanation": "Preprocessing independently crops each input around its own foreground (lines 135-151), and later resamples every subject onto this first cropped image. Even already registered shapes extending beyond the first subject's cropped field of view are truncated, biasing the mean and surface statistics; the result can depend on which group-1 filename sorts first.",
+     "suggestion": "Compute a common physical-space bounding region covering all registered shapes, and add a regression test with differently sized aligned shapes.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx",
+      "line": 66
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "SumOfTwoPoissonShapeAnalysis.hxx:127-153 crops each image to its own nonzero bounding box. Lines 233-239 use m_shapeGroup1[0] as the registration fixed image and mean-shape grid. transformImage resamples every shape onto that grid (lines 274-275, 313-314) with fill value 0. Parts of other shapes outside the first cropped box are truncated, so the result depends on the first file. This is a real methodological weakness, but it is a soundness issue, not safety."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "SumOfTwoPoissonShapeAnalysis.hxx:135-151 crops each group member, and utilitiesImage.hxx:343-349 constructs a separate enlarged foreground ROI. With no externally supplied mean shape, SumOfTwoPoissonShapeAnalysis.hxx:231-239 sets the first group-1 image as the fixed reference: `m_registrationFixedImage = castItkImage<typename ShapeImageType::PixelType, typename FloatImageType::PixelType>( m_shapeGroup1[0] );`. Lines 261-275 and 300-314 transform both groups against that reference, with identity transforms when registration is disabled. transformImage.hxx:89-95 takes the output size and geometry from the reference. Thus already-aligned subject foreground beyond that reference's cropped, padded field is excluded; this can bias the mean and downstream statistics. utilitiesIO.hxx:191-194 sorts directory entries, so changing the first filename can change the reference. This is a major correctness issue, not a safety admission blocker."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx: _preprocess() calls _cropInputImages() (lines 90, 135-153), which crops each image in m_shapeGroup1 and m_shapeGroup2 independently to its own enlarged non-zero bounding box via cropNonZeroRegionFromImage (utilitiesImage.hxx:343-350). Then in _computeMeanShape() (lines 231-240), m_registrationFixedImage and m_meanShape take their region, size, origin, and spacing directly from the already-cropped m_shapeGroup1[0]. All shapes in both groups are then resampled onto m_registrationFixedImage's grid via transformImage (lines 274-275, 313-314; transformImage.hxx:91-94). When registration is disabled or shapes differ in size/extent, any part of a shape extending outside m_shapeGroup1[0]'s cropped ROI is clipped, and the result depends on which file sorts first in collectFilesInPath (utilitiesIO.hxx:194)."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "P-values are undefined for small groups or zero pooled variance",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "PoissonShapeAnalysis/lib/studentTtest.h",
+   "line": 153,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "P-values are undefined for small groups or zero pooled variance",
+     "file": "PoissonShapeAnalysis/lib/studentTtest.h",
+     "line_start": 153,
+     "line_end": 161,
+     "evidence": "    Sd2 = sqrt(tempsum2 / (Sn2 - 1));\n\n    double v = Sn1 + Sn2 - 2.0;\n    double sp = sqrt(((Sn1 - 1) * Sd1 * Sd1 + (Sn2 - 1) * Sd2 * Sd2) / v);\n    double t_stat = (Sm1 - Sm2) / (sp * sqrt(1.0 / Sn1 + 1.0 / Sn2));\n\n    // Two-sided p-value of Student's t distribution:\n    //   P(|T| > |t|) = I_{v / (v + t^2)}(v / 2, 1 / 2)\n    double pValue = detail::incompleteBetaRegularized(0.5 * v, 0.5, v / (v + t_stat * t_stat));",
+     "explanation": "The CLI accepts any nonempty input folder, so a group can contain only one subject, giving division by zero in its sample variance. Identical observations in both groups also give zero pooled variance and a 0/0 t-statistic; NaN p-values are then attached to the output surface without an error.",
+     "suggestion": "Require sufficient subjects per group, handle degenerate variance explicitly, and test p-values against a validated implementation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "PoissonShapeAnalysis/lib/studentTtest.h",
+      "line": 153
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "studentTtest.h:140 and :153 divide by (n-1), and :156-157 divide by sp, which is zero when the pooled variance is zero. A group of one subject or identical data gives NaN or inf. A grep found no group-size validation before the call at SumOfTwoPoissonShapeAnalysis.hxx:669. It is real but an edge case with unrealistic group sizes, so minor."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "PoissonShapeAnalysis.cxx:16-27 reads and runs both groups with no minimum size check; utilitiesIO.hxx:191-205 only rejects an empty file list. studentTtest.h:140 and 153-161 computes sample standard deviations with `Sd2 = sqrt(tempsum2 / (Sn2 - 1));` and then `double t_stat = (Sm1 - Sm2) / (sp * sqrt(1.0 / Sn1 + 1.0 / Sn2));` without guarding singleton groups or zero pooled variance. A singleton or identical observations can produce NaN under normal floating-point semantics. SumOfTwoPoissonShapeAnalysis.hxx:669-683 stores each returned p-value as surface scalars without checking it. This is a major statistical correctness issue; the full pipeline was not run, and earlier failures can prevent reaching the test."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in PoissonShapeAnalysis/lib/studentTtest.h (lines 129-163) and PoissonShapeAnalysis/lib/SumOfTwoPoissonShapeAnalysis.hxx (lines 651-683). Neither PoissonShapeAnalysis.cxx nor SumOfTwoPoissonShapeAnalysis checks that each group has at least 2 shapes (lines 739, 750 have '// TODO check size is 0?'). In studentTTest, Sn1 == 1 or Sn2 == 1 causes division by zero in tempsum1 / (Sn1 - 1) or tempsum2 / (Sn2 - 1) (lines 140, 153), and Sn1 + Sn2 == 2 makes v = 0 (line 155). Furthermore, if all observations at a surface vertex have zero variance in both groups (sp == 0), line 157 divides by zero, propagating NaN into incompleteBetaRegularized and storing NaN in the output surface's pValue scalar array without warning."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (minor, blocking, minor)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": "minor",
+     "reason": "I found only the local debug-file writes (D1). I did not exhaustively audit the whole repository for network, download or exec behavior. A search of the Poisson sources turned up no such behavior, but I did not search the Python module and CMake files. The debug writes do not justify a blocking safety rating, since there is no data egress or concrete harm path."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "The safety rating should be blocking because of the verified uncontrolled writes in D1, independently of any broader safety audit. SumOfTwoPoissonShapeAnalysis.hxx:137-141 includes `sprintf(group1Name, \"group1_%lu.nrrd\", it);` followed by `writeImage<ShapeImageType>(m_shapeGroup1[it], group1Name);`; utilitiesIO.hxx:93-102 configures and updates the writer. Files can be overwritten and sensitive derived data left in a shared working directory. I inspected the CLI entry, image writer, preprocessing, filter and solver writes, CMake configuration and searched repository text for network/process/file operations. I could not run Slicer, verify runtime working directories or independently resolve the exact repository revision, and external payloads were not inspected."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": null,
+     "rating": "minor",
+     "reason": "Checked all files in the repository (CMakeLists.txt, PoissonShapeAnalysis/*, jjj/*). There is no malicious behavior, network communication, telemetry, command injection, or unsafe deserialization. The only safety-adjacent issue is leftover debug file writes to hardcoded relative filenames in the current working directory (D1: SumOfTwoPoissonShapeAnalysis.hxx:140-152, 403; ShapeSumOfTwoPoissonFilter.hxx:202-203; DirichletPoissonSolver3D.hxx:175; NeumannDirichletPoissonSolver3D.hxx:175), which could overwrite identically named files in the working directory or abort if the working directory is read-only. Under the Slicer review policy, this is an ordinary bug / leftover debug code rather than a blocking security issue, warranting a 'minor' rating for safety."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "concern",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "minor issues",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 4,
+  "single": 3,
+  "unverified": 0,
+  "total": 5,
+  "open_disputes": 1
+ }
+}
