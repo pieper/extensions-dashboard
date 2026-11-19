@@ -1,0 +1,125 @@
+{
+ "purpose": "Auto3dgm performs automated 3D geometric morphometric analysis on collections of biological surface meshes by subsampling pseudolandmarks and computing pairwise and globalized surface alignments. It is intended for biologists and morphometrics researchers using 3D Slicer to align and compare 3D surface models.",
+ "summary": "Auto3dgm brings automated 3D geometric morphometric surface alignment to 3D Slicer. However, there are key issues that should be addressed: (1) there is no root-level LICENSE file covering the Slicer extension wrapper code (`Auto3dgm.py` and `meshviewer/`), (2) `correspondence.py` uses `from scipy import square`, which raises an `ImportError` on SciPy >= 1.8 (used by modern Slicer builds), and (3) the legacy `meshviewer` CLI module exposes an HTTP server on all network interfaces (`0.0.0.0:8000`) with a path traversal vulnerability in `translate_path`.\n\n🔴 Do not merge yet: missing top-level license file covering the extension repository (and `meshviewer` path-traversal HTTP server / `scipy.square` import failure).",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Inspected all Python, CMake, XML, and HTML files. No malicious behavior or silent data exfiltration was found, and the `mosek` installation prompts for user consent. However, the bundled `meshviewer` CLI module starts an HTTP server bound to all interfaces (`\"\"`, port 8000) with a custom `translate_path` method that concatenates raw URL paths without traversal protection, exposing arbitrary local files on the network if invoked."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Inspected `Auto3dgm/Auto3dgm.py` and `Auto3dgm/auto3dgm_nazar/analysis/correspondence.py`. The module prompts the user with `confirmOkCancelDisplay` before running `slicer.util.pip_install('mosek')` when the widget is instantiated (not at module import/startup), and sets `MOSEKLM_LICENSE_FILE` via `os.environ.setdefault` when `correspondence` is imported."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Inspected `CMakeLists.txt`, `Auto3dgm/CMakeLists.txt`, and `meshviewer/CMakeLists.txt`. The CMake configuration installs the needed Python packages, but also installs a 16 MB test fixture (`test.ply`), unused texture files, `.pyc` files, and an unused Python 3.6 Windows binary (`_lapjv.cp36-win_amd64.pyd`)."
+  },
+  "license": {
+   "rating": "blocking",
+   "rationale": "Inspected all files in the repository for license notices. While `Auto3dgm/auto3dgm_nazar/LICENSE` provides an MIT license for `auto3dgm_nazar` and `meshviewer/web_view_mesh/js/` includes third-party JS licenses, there is no top-level license file covering the Slicer extension code itself (`Auto3dgm/Auto3dgm.py` and `meshviewer/`). Furthermore, runtime optimization requires the proprietary `mosek` package and a user-supplied MOSEK license file."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected `Auto3dgm/Auto3dgm.py` and all modules under `Auto3dgm/auto3dgm_nazar/`. `correspondence.py` imports `from scipy import square`, which was removed in SciPy 1.8 and causes an `ImportError` in modern 3D Slicer versions; additionally, Phase 2 ignores Phase 1's initial alignment, several UI parameters (max iterations, FPS seed, phase choice) are not wired to the logic, and `.off` mesh loading hardcodes `\"hammas.off\"`."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "Inspected `Auto3dgm/Auto3dgm.py`, `Readme.md`, and tests. The extension provides a useful workflow for automated 3D geometric morphometrics in Slicer, though the in-module help text is still the default Slicer template text, the Slicer unit test is a no-op stub, and users must manually obtain and place a MOSEK license file inside the installed extension directory."
+  }
+ },
+ "findings": [
+  {
+   "category": "license",
+   "severity": "blocking",
+   "title": "Missing top-level license for the extension repository",
+   "file": "Auto3dgm/auto3dgm_nazar/LICENSE",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "Auto3dgm/auto3dgm_nazar/LICENSE",
+   "explanation": "The repository has no top-level LICENSE file covering the Slicer extension wrapper (`Auto3dgm/Auto3dgm.py` and `meshviewer/`). Only the bundled `Auto3dgm/auto3dgm_nazar/LICENSE` (MIT License, Copyright 2018 Julie Winchester et al.) and third-party JavaScript library licenses under `meshviewer/web_view_mesh/js/` are present. Clear distribution permission is required for the entire extension repository.",
+   "suggestion": "Add a top-level LICENSE file in the repository root specifying the license under which the SlicerAuto3dgm extension and its modules are distributed.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Removed `scipy.square` import breaks correspondence analysis on modern SciPy/Slicer",
+   "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+   "line_start": 8,
+   "line_end": 10,
+   "evidence": "from scipy.sparse.linalg import norm\nfrom scipy import square\nimport numpy as np",
+   "explanation": "`from scipy import square` fails with `ImportError: cannot import name 'square' from 'scipy'` in SciPy >= 1.8 (bundled in current 3D Slicer versions), where deprecated NumPy ufunc re-exports were removed from the top-level `scipy` namespace. Calling `Auto3dgmLogic.correspondence()` (Phase 1, Phase 2, or Run all steps) immediately raises an ImportError when importing `auto3dgm_nazar.analysis.correspondence`.",
+   "suggestion": "Replace `from scipy import square` with `from numpy import square` (or `np.square`).",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Network-exposed HTTP server with path traversal in `meshviewer` CLI module",
+   "file": "meshviewer/web_view_mesh/viewer.py",
+   "line_start": 20,
+   "line_end": 30,
+   "evidence": "  def translate_path(self, path):\n    if self.ext_prefix and self.path.startswith(self.ext_prefix):\n      return self.ext_dir_path + path[len(self.ext_prefix):]\n    else:\n      base_path = os.path.dirname(os.path.abspath(__file__))\n      return base_path + path\n\ndef serve_viewer(mesh_path, port = 8000):\n    httpd = WebViewMeshHTTPServer((\"\", port),  WebViewMeshRequestHandler, ext_dir_path = mesh_path, ext_prefix='/mesh')\n    httpd.serve_forever()",
+   "explanation": "The `meshviewer` CLI module starts an HTTP server bound to `\"\"` (all network interfaces, `0.0.0.0:8000`) and overrides `SimpleHTTPRequestHandler.translate_path` with raw string concatenation (`self.ext_dir_path + path[len(self.ext_prefix):]` and `base_path + path`) without normalizing or sanitizing `..` segments. If a user runs the `meshviewer` CLI module (or calls `Auto3dgmLogic.serveWebViewer`), any host on the local network can read arbitrary files from the user's filesystem via path traversal requests to port 8000.",
+   "suggestion": "Remove the unused `meshviewer` CLI module, or bind only to `127.0.0.1` and delegate path resolution to `SimpleHTTPRequestHandler.translate_path` (or verify `os.path.realpath` stays within the allowed directory).",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Large test fixtures and obsolete Python 3.6 binaries are committed and installed into the package",
+   "file": "Auto3dgm/CMakeLists.txt",
+   "line_start": 21,
+   "line_end": 25,
+   "evidence": "install(DIRECTORY \"auto3dgm_nazar\"\n  DESTINATION \"${Slicer_INSTALL_QTSCRIPTEDMODULES_BIN_DIR}\"\n  COMPONENT Runtime\n  USE_SOURCE_PERMISSIONS\n  )",
+   "explanation": "`Auto3dgm/CMakeLists.txt` installs the entire `auto3dgm_nazar` directory into the runtime package, including a 16 MB test fixture (`Auto3dgm/auto3dgm_nazar/tests/fixtures/test.ply`) and a precompiled Python 3.6 Windows binary (`Auto3dgm/auto3dgm_nazar/lap_windows/_lapjv.cp36-win_amd64.pyd`). In addition, `meshviewer/CMakeLists.txt` installs the entire `web_view_mesh` directory including ~4 MB of unused textures and Python 3.6 `.pyc` files.",
+   "suggestion": "Exclude `tests`, `lap_windows`, and `__pycache__` from the CMake `install(DIRECTORY ...)` rules and remove unused binary fixtures from the repository.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Phase 2 does not use Phase 1 alignment, and UI parameters (Max Iterations, FPS Seed) are ignored",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 523,
+   "line_end": 532,
+   "evidence": "    ### INITIAL SUBSAMPLE POINTS ANALYSIS ###\n    ss_i_correspondence_res = Correspondence( # Correspondence should take an initial alignment object with d, p, and r arrays; also correspondence should handle bundling pairwise results into a single data structure\n      meshes=self.dataset[self.ss_label_i],\n      initial_alignment=None, \n      globalize=True,\n      mirror=self.allow_reflection)",
+   "explanation": "In `Auto3dgm/Auto3dgm.py` (lines 277 and 280), Phase 2 correspondence is called via `Auto3dgmLogic.correspondence(self.Auto3dgmData, self.reflectionCheckBox.checked, phase=2)`. However, `Auto3dgmLogic.correspondence` (lines 523-532) never passes Phase 1's `globalized_alignment` as `initial_alignment` to `Correspondence(...)`, nor does it pass the user's `maxIterSliderWidget` value or `fpsSeed` value (in `runAll`, `fpsSeed` is not even stored, and in `subsample`, `seed={}` is hardcoded on line 495). As a result, Phase 2 recomputes alignment from scratch without using Phase 1's alignment, and the UI controls for Maximum Iterations and FPS Seed have no effect.",
+   "suggestion": "Pass the Phase 1 `globalized_alignment` as `initial_alignment` when running Phase 2 in `Auto3dgmLogic.correspondence`, and wire `maxIterSliderWidget.value` and `fpsSeed.value` into `Correspondence` and `Subsample`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "`.off` file parser opens hardcoded `\"hammas.off\"` instead of `file_path`",
+   "file": "Auto3dgm/auto3dgm_nazar/mesh/meshfactory.py",
+   "line_start": 85,
+   "line_end": 88,
+   "evidence": "  @staticmethod\n  def off_parser(file_path):\n      file=open(\"hammas.off\",\"r\")",
+   "explanation": "`MeshFactory.off_parser(file_path)` ignores its `file_path` parameter and attempts to open a hardcoded `\"hammas.off\"` in the current working directory, causing any `.off` mesh import to fail with `FileNotFoundError`.",
+   "suggestion": "Open `file_path` using a context manager (`with open(file_path, \"r\") as file:`).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Visualization buttons clear the entire MRML scene without user confirmation",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 845,
+   "line_end": 846,
+   "evidence": "  def viewAlignedMeshWithinSlicer(viewMeshFolder, viewLmkFolder):\n      slicer.mrmlScene.Clear(0)",
+   "explanation": "Clicking \"View Phase 1 alignment\" or \"View Phase 2 alignment\" calls `slicer.mrmlScene.Clear(0)` without asking the user for confirmation, destroying any existing nodes or unsaved work in the current Slicer scene.",
+   "suggestion": "Confirm with the user before clearing the scene, or only remove nodes created by Auto3dgm.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Binary contents of Auto3dgm/auto3dgm_nazar/tests/fixtures/test.ply (16 MB), meshviewer/web_view_mesh/textures/UVTexture_1.png (2 MB), meshviewer/web_view_mesh/textures/UVTexture_1_resized.png (2 MB), and Auto3dgm/auto3dgm_nazar/lap_windows/_lapjv.cp36-win_amd64.pyd (not imported anywhere in the acti"
+ ],
+ "questions_for_author": [
+  "Can you add a root-level LICENSE file covering the Slicer extension code (`Auto3dgm/` and `meshviewer/`)?",
+  "Since visualization now uses `viewAlignedMeshWithinSlicer`, can the legacy `meshviewer` CLI web server module be removed?",
+  "Can the `mosek` dependency be made optional by falling back to `scipy.optimize.linear_sum_assignment` when a MOSEK license is not installed?"
+ ]
+}

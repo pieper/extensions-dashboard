@@ -1,0 +1,1094 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Distribution terms do not cover the wrapper and forked web viewer",
+   "category": "license",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "meshviewer/web_view_mesh/README.md",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Distribution terms do not cover the wrapper and forked web viewer",
+     "file": "meshviewer/web_view_mesh/README.md",
+     "line_start": 1,
+     "line_end": 3,
+     "evidence": "# web_view_mesh\n\nFork of [Tingran Gao's](https://github.com/trgao10) (trgao10@math.duke.edu) webGL 3D mesh viewer implemented in [PuenteAligment](https://github.com/trgao10/PuenteAlignment) repository. Some modifications made by Julie Winchester (julia.winchester@duke.edu).",
+     "explanation": "The available repository has an MIT license only under Auto3dgm/auto3dgm_nazar, not at the extension root or in meshviewer. The installed viewer is identified as a fork, but its README provides attribution rather than distribution terms; the wrapper Auto3dgm/Auto3dgm.py likewise has no identified license. The bundled libraries' individual notices do not grant rights to these other files.",
+     "suggestion": "Provide an extension-wide license covering the wrapper and author contributions, and identify and include the upstream license and any required notices for the forked viewer.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "meshviewer/web_view_mesh/README.md",
+      "line": 1
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "The repository supplies no identified license for the wrapper or viewer: the only project LICENSE found is Auto3dgm/auto3dgm_nazar/LICENSE:1-8, which is inside that package; meshviewer/web_view_mesh/README.md:3 says \"Fork of [Tingran Gao's](https://github.com/trgao10) (trgao10@math.duke.edu) webGL 3D mesh viewer implemented in [PuenteAligment](https://github.com/trgao10/PuenteAlignment) repository. Some modifications made by Julie Winchester (julia.winchester@duke.edu).\" The root Readme.md:1-5 supplies only a website link, and meshviewer/meshviewer.xml:8 has \"<license/>\". Distribution permission for these files needs clarification; upstream or separate grants were not accessible and are not ruled out."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "Checked repository file tree (`list_files`), `Auto3dgm/auto3dgm_nazar/LICENSE:1-21`, `Readme.md:1-8`, and `meshviewer/web_view_mesh/README.md:1-3`. Only `Auto3dgm/auto3dgm_nazar/LICENSE` exists (MIT for Julie Winchester et al.); there is no root license covering `Auto3dgm/Auto3dgm.py` or `meshviewer/` (which is a fork of Tingran Gao's PuenteAlignment webGL viewer with no license file). Under the rubric and AGENTS.md admission requirement 2, missing distribution terms for extension code and bundled third-party code is blocking."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Meshviewer exposes files to the network and permits path traversal",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "meshviewer/web_view_mesh/viewer.py",
+   "line": 20,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Network-exposed HTTP server with path traversal in `meshviewer` CLI module",
+     "file": "meshviewer/web_view_mesh/viewer.py",
+     "line_start": 20,
+     "line_end": 30,
+     "evidence": "  def translate_path(self, path):\n    if self.ext_prefix and self.path.startswith(self.ext_prefix):\n      return self.ext_dir_path + path[len(self.ext_prefix):]\n    else:\n      base_path = os.path.dirname(os.path.abspath(__file__))\n      return base_path + path\n\ndef serve_viewer(mesh_path, port = 8000):\n    httpd = WebViewMeshHTTPServer((\"\", port),  WebViewMeshRequestHandler, ext_dir_path = mesh_path, ext_prefix='/mesh')\n    httpd.serve_forever()",
+     "explanation": "The `meshviewer` CLI module starts an HTTP server bound to `\"\"` (all network interfaces, `0.0.0.0:8000`) and overrides `SimpleHTTPRequestHandler.translate_path` with raw string concatenation (`self.ext_dir_path + path[len(self.ext_prefix):]` and `base_path + path`) without normalizing or sanitizing `..` segments. If a user runs the `meshviewer` CLI module (or calls `Auto3dgmLogic.serveWebViewer`), any host on the local network can read arbitrary files from the user's filesystem via path traversal requests to port 8000.",
+     "suggestion": "Remove the unused `meshviewer` CLI module, or bind only to `127.0.0.1` and delegate path resolution to `SimpleHTTPRequestHandler.translate_path` (or verify `os.path.realpath` stays within the allowed directory).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "meshviewer/web_view_mesh/viewer.py",
+      "line": 20
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Meshviewer exposes files to the network and permits path traversal",
+     "file": "meshviewer/web_view_mesh/viewer.py",
+     "line_start": 20,
+     "line_end": 28,
+     "evidence": "    def translate_path(self, path):\n     if self.ext_prefix and self.path.startswith(self.ext_prefix):\n       return self.ext_dir_path + path[len(self.ext_prefix):]\n     else:\n       base_path = os.path.dirname(os.path.abspath(__file__))",
+     "explanation": "The separately installed meshviewer CLI calls serve_viewer, which listens on all interfaces without authentication. Its translate_path concatenates raw request paths without normalization or containment checks; a remote client able to reach port 8000 can use ../ components to read files accessible to the Slicer process, including files outside the selected mesh directory. The main visualization server button is commented out, but the CLI remains installed and separately invokable.",
+     "suggestion": "Remove the unused server or bind only to loopback, enforce resolved-path containment for both roots, and consider authentication and lifecycle management.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "meshviewer/web_view_mesh/viewer.py",
+      "line": 20
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "meshviewer/web_view_mesh/viewer.py:20-28 uses \"return self.ext_dir_path + path[len(self.ext_prefix):]\" or \"return base_path + path\" and binds with \"WebViewMeshHTTPServer((\\\"\\\", port),  WebViewMeshRequestHandler, ext_dir_path = mesh_path, ext_prefix='/mesh')\". Raw ../ request components escape both directories; a reachable network client can read files accessible to the process. meshviewer/meshviewer.py:9-14 calls serve_viewer, and meshviewer/CMakeLists.txt:26-32 installs it. The UI server button is commented out, so exposure is conditional on invoking the separate CLI or logic method."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "Checked `meshviewer/web_view_mesh/viewer.py:20-29` and `meshviewer/meshviewer.py:9-15`. `serve_viewer` binds to `(\"\", port)` (all interfaces, 0.0.0.0:8000) and `translate_path` directly concatenates `self.ext_dir_path + path[len(self.ext_prefix):]` or `base_path + path` without normalizing or stripping `..` segments or query strings, enabling arbitrary file read over the network if the installed `meshviewer` CLI or `Auto3dgmLogic.serveWebViewer` (`Auto3dgm/Auto3dgm.py:832-834`) is invoked."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Viewing results silently clears the user's existing Slicer scene",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "minor"
+   ],
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line": 845,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Visualization buttons clear the entire MRML scene without user confirmation",
+     "file": "Auto3dgm/Auto3dgm.py",
+     "line_start": 845,
+     "line_end": 846,
+     "evidence": "  def viewAlignedMeshWithinSlicer(viewMeshFolder, viewLmkFolder):\n      slicer.mrmlScene.Clear(0)",
+     "explanation": "Clicking \"View Phase 1 alignment\" or \"View Phase 2 alignment\" calls `slicer.mrmlScene.Clear(0)` without asking the user for confirmation, destroying any existing nodes or unsaved work in the current Slicer scene.",
+     "suggestion": "Confirm with the user before clearing the scene, or only remove nodes created by Auto3dgm.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/Auto3dgm.py",
+      "line": 845
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Viewing results silently clears the user's existing Slicer scene",
+     "file": "Auto3dgm/Auto3dgm.py",
+     "line_start": 845,
+     "line_end": 850,
+     "evidence": "  def viewAlignedMeshWithinSlicer(viewMeshFolder, viewLmkFolder):\n      slicer.mrmlScene.Clear(0)\n      modelDir = viewMeshFolder\n      modelFileExt = \"ply\"\n      numberOfColumns = 4\n      modelFiles = list(f for f in os.listdir(modelDir) if f.endswith('.' + modelFileExt))",
+     "explanation": "Both View Phase buttons call this function, which removes existing scene nodes without asking the user, even before checking whether the results folder exists. Unsaved images, segmentations, markups, and other scene work can be lost when a user merely requests visualization.",
+     "suggestion": "Do not clear the scene; use isolated view nodes or explicitly ask to save and confirm before replacing existing data.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/Auto3dgm.py",
+      "line": 845
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Both view handlers call the same function (Auto3dgm/Auto3dgm.py:386-401); Auto3dgm/Auto3dgm.py:845-850 starts with \"slicer.mrmlScene.Clear(0)\" before \"modelFiles = list(f for f in os.listdir(modelDir) if f.endswith('.' + modelFileExt))\". It clears existing non-singleton scene nodes without confirmation, including unsaved work, even if listing the results subsequently fails. That is a concrete data-loss path."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "Checked `Auto3dgm/Auto3dgm.py:386-402` and `Auto3dgm/Auto3dgm.py:845-850`. Both `visPhase1ButtonOnLoad` and `visPhase2ButtonOnLoad` call `Auto3dgmLogic.viewAlignedMeshWithinSlicer`, which immediately executes `slicer.mrmlScene.Clear(0)` on line 846 without confirmation, destroying all nodes and unsaved work in the active Slicer scene (even before checking if `viewMeshFolder` exists)."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Analysis controls for seed, iteration limit, and phase count are ignored",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line": 260,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Analysis controls for seed, iteration limit, and phase count are ignored",
+     "file": "Auto3dgm/Auto3dgm.py",
+     "line_start": 260,
+     "line_end": 266,
+     "evidence": "  def subStepButtonOnLoad(self):\n    print(\"Mocking a call to the Logic service AL002.1\")\n    # Store the keys\n    self.Auto3dgmData.phase1SampledPoints = self.phase1PointNumber.value\n    self.Auto3dgmData.phase2SampledPoints = self.phase2PointNumber.value\n    self.Auto3dgmData.fpsSeed=self.fpsSeed.value\n    Auto3dgmLogic.subsample(self.Auto3dgmData,list_of_pts = [self.phase1PointNumber.value,self.phase2PointNumber.value], meshes=self.Auto3dgmData.datasetCollection.datasets[0])",
+     "explanation": "The selected FPS seed is stored but subsample passes an empty seed dictionary and the sampler calls random.seed() without that value. The maximum iteration slider and phase choice are likewise not read by the analysis; Run all always computes both phases and the optimizer uses a hard-coded 1000 iterations. Users can believe results are reproducible or configured when they are not.",
+     "suggestion": "Pass each selected value through to the relevant algorithm, or remove unsupported controls; add tests showing the settings affect execution.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/Auto3dgm.py",
+      "line": 260
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Auto3dgm/Auto3dgm.py:149-169 exposes the controls; lines 260-266 store fpsSeed but lines 493-495 pass \"seed={}\" instead. Auto3dgm/auto3dgm_nazar/mesh/subsample.py:149-150 uses \"random.seed()\" then \"subidx = [random.randint(0, v.shape[0]-1)]\". Auto3dgm/Auto3dgm.py:281-285 and 475-480 run both phases regardless of phase choice; correspondence.py:340 passes \"max_iter=1000\". These ignored settings undermine reproducibility and the configured workflow."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "Checked `Auto3dgm/Auto3dgm.py:149-184`, `260-285`, `Auto3dgm/auto3dgm_nazar/mesh/subsample.py:38-66, 127-155`, and `Auto3dgm/auto3dgm_nazar/analysis/correspondence.py:289, 340`. `maxIterSliderWidget` and `phaseChoiceComboBox` are created in `setupSetupTab` (`Auto3dgm.py:149-171`) and never read anywhere else; `Correspondence.locgpd` uses hard-coded `max_iter=1000`. `self.Auto3dgmData.fpsSeed = self.fpsSeed.value` is stored on line 265, but `Subsample.far_point_subsample` (`subsample.py:149`) calls `random.seed()` with no argument when `seed` has no initial vertex array. (Note: `Auto3dgm/Auto3dgm.py:451-540` could not be read due to a tool error, so `Auto3dgmLogic.subsample` and `runAll` definitions were verified from call sites and `subsample.py`/`correspondence.py`.)"
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Export silently overwrites existing output files",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line": 641,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Export silently overwrites existing output files",
+     "file": "Auto3dgm/Auto3dgm.py",
+     "line_start": 635,
+     "line_end": 646,
+     "evidence": "    exportFolder = os.path.join(outputFolder, 'phase' + str(p))\n    subDirs = ['aligned_meshes', 'aligned_landmarks', 'rotation', 'scale_info', 'landmarks_OSS', 'original_meshes']\n\n    Auto3dgmLogic.prepareDirs(exportFolder, subDirs)\n    Auto3dgmLogic.alignOriginalMeshes(Auto3dgmData, p)\n    Auto3dgmLogic.saveAlignedMeshes(Auto3dgmData, os.path.join(exportFolder, subDirs[0]))",
+     "explanation": "Exports always use fixed phase subdirectories and input-derived filenames. Existing directories are reused, and writers such as numpy.savetxt and the PLY writer write to the same paths without a collision check. Re-running or choosing a folder with prior results can silently destroy earlier files.",
+     "suggestion": "Detect collisions and ask before overwriting, or create a fresh uniquely named run directory.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/Auto3dgm.py",
+      "line": 641
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, minor (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Auto3dgm/Auto3dgm.py:641-648 uses \"exportFolder = os.path.join(outputFolder, 'phase' + str(p))\" and writes multiple fixed subdirectories; lines 804-810 reuse existing ones. Line 589 has \"np.savetxt(filename+\\\".csv\\\",array,delimiter = \\\",\\\",fmt = \\\"%s\\\")\", which overwrites an existing CSV without confirmation; meshexport.py:17-19 likewise writes the input-derived PLY path. The phase and run-all buttons export automatically (lines 270-285). An existing user file or prior output can be irreversibly overwritten, a concrete data-loss path."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": "minor",
+     "reason": "Checked `Auto3dgm/Auto3dgm.py:588-600`, `626-652`, `745-779`. `exportData` writes into fixed subdirectories (`phase1/`, `phase2/` under user-chosen `outputFolder`) using filenames derived from input mesh names without prompting before overwriting existing exported files in that output directory. Writing deterministic output filenames into a user-selected output directory is standard behavior for export steps and is at most minor/info, not a major safety defect."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Exporting rotations mutates the stored analysis result",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line": 720,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Exporting rotations mutates the stored analysis result",
+     "file": "Auto3dgm/Auto3dgm.py",
+     "line_start": 720,
+     "line_end": 729,
+     "evidence": "    for idx in range(len(m)):\n      mesh = m[idx]\n      rot = r[idx]\n      # rot = np.linalg.inv(rot)\n      # pad rot into 4 x 4 transform matrix in slicer\n      rot[2][0] = -1 * rot[2][0]\n      rot[2][1] = -1 * rot[2][1]\n      rot[0][2] = -1 * rot[0][2]\n      rot[1][2] = -1 * rot[1][2]\n      rot = np.vstack((rot.T, [0, 0, 0]))  # add a 4-th column for center info",
+     "explanation": "rot aliases an array in corr.globalized_alignment['r']; changing elements in place alters the saved analysis state. A subsequent export or alignment based on that state can produce different or incorrect meshes and landmarks compared with the original result, particularly when rotations have nonzero z-axis cross terms.",
+     "suggestion": "Copy each rotation before coordinate conversion and add a repeated-export consistency test.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/Auto3dgm.py",
+      "line": 720
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Auto3dgm/Auto3dgm.py:717-728 assigns \"r = Auto3dgmData.datasetCollection.analysis_sets[label].globalized_alignment['r']\", then \"rot = r[idx]\" and changes four components in place. The matrices are retained in correspondence.py:166-184; later alignOriginalMeshes uses the same stored matrix at Auto3dgm/Auto3dgm.py:612-620. A later export can therefore use altered rotations and produce different aligned meshes or landmarks."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "Checked `Auto3dgm/Auto3dgm.py:645-651` and `707-733`. In `exportRotations`, `r = Auto3dgmData.datasetCollection.analysis_sets[label].globalized_alignment['r']` and `rot = r[idx]`, after which lines 725-728 negate four entries (`rot[2][0]`, `rot[2][1]`, `rot[0][2]`, `rot[1][2]`) in place on the NumPy array before `np.vstack` creates a new array on line 729. This mutates the stored rotation matrices in `analysis_sets[label]`, corrupting any subsequent alignment or export using that in-memory state."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Removed `scipy.square` import breaks correspondence analysis on modern SciPy/Slicer",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+   "line": 8,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Removed `scipy.square` import breaks correspondence analysis on modern SciPy/Slicer",
+     "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+     "line_start": 8,
+     "line_end": 10,
+     "evidence": "from scipy.sparse.linalg import norm\nfrom scipy import square\nimport numpy as np",
+     "explanation": "`from scipy import square` fails with `ImportError: cannot import name 'square' from 'scipy'` in SciPy >= 1.8 (bundled in current 3D Slicer versions), where deprecated NumPy ufunc re-exports were removed from the top-level `scipy` namespace. Calling `Auto3dgmLogic.correspondence()` (Phase 1, Phase 2, or Run all steps) immediately raises an ImportError when importing `auto3dgm_nazar.analysis.correspondence`.",
+     "suggestion": "Replace `from scipy import square` with `from numpy import square` (or `np.square`).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+      "line": 8
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Analysis package fails to import when SciPy lacks top-level square",
+     "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+     "line_start": 5,
+     "line_end": 10,
+     "evidence": "from scipy.sparse import csr_matrix, identity, find, lil_matrix, coo_matrix\nfrom scipy.sparse.csgraph import minimum_spanning_tree, shortest_path\nfrom scipy import sparse as sp\nfrom scipy.sparse.linalg import norm\nfrom scipy import square\nimport numpy as np",
+     "explanation": "On SciPy versions that no longer expose square at the package top level, this raises ImportError. Importing the dataset factory first executes auto3dgm_nazar/__init__.py, which imports app.py and then this module, so even Load Data fails before analysis can start.",
+     "suggestion": "Use numpy.square and test the full Load Data and analysis path against supported Slicer releases.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+      "line": 5
+     }
+    }
+   ],
+   "id": "D7",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py:8-10 contains \"from scipy import square\"; this fails on SciPy releases without that top-level export. Auto3dgm/auto3dgm_nazar/__init__.py:1 says \"from auto3dgm_nazar.app import *\", and app.py:5-7 imports Correspondence, so Auto3dgm.py:483-485 loading the dataset factory also triggers it, assuming earlier imports succeed. This can prevent analysis and data loading; the actual Slicer/SciPy runtime was not available to test."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "Checked `Auto3dgm/auto3dgm_nazar/analysis/correspondence.py:8-10, 302, 398` and `Auto3dgm/auto3dgm_nazar/__init__.py:1`. `correspondence.py` line 9 executes `from scipy import square`, which raises `ImportError` in SciPy >= 1.8.0 (used in modern 3D Slicer releases) where `scipy.square` was removed. Because `auto3dgm_nazar/__init__.py` imports `auto3dgm_nazar.app`, importing any `auto3dgm_nazar` submodule triggers this import chain and fails."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Missing top-level license for the extension repository",
+   "category": "license",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "Auto3dgm/auto3dgm_nazar/LICENSE",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Missing top-level license for the extension repository",
+     "file": "Auto3dgm/auto3dgm_nazar/LICENSE",
+     "line_start": 1,
+     "line_end": 3,
+     "evidence": "Auto3dgm/auto3dgm_nazar/LICENSE",
+     "explanation": "The repository has no top-level LICENSE file covering the Slicer extension wrapper (`Auto3dgm/Auto3dgm.py` and `meshviewer/`). Only the bundled `Auto3dgm/auto3dgm_nazar/LICENSE` (MIT License, Copyright 2018 Julie Winchester et al.) and third-party JavaScript library licenses under `meshviewer/web_view_mesh/js/` are present. Clear distribution permission is required for the entire extension repository.",
+     "suggestion": "Add a top-level LICENSE file in the repository root specifying the license under which the SlicerAuto3dgm extension and its modules are distributed.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Large test fixtures and obsolete Python 3.6 binaries are committed and installed into the package",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "Auto3dgm/CMakeLists.txt",
+   "line": 21,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Large test fixtures and obsolete Python 3.6 binaries are committed and installed into the package",
+     "file": "Auto3dgm/CMakeLists.txt",
+     "line_start": 21,
+     "line_end": 25,
+     "evidence": "install(DIRECTORY \"auto3dgm_nazar\"\n  DESTINATION \"${Slicer_INSTALL_QTSCRIPTEDMODULES_BIN_DIR}\"\n  COMPONENT Runtime\n  USE_SOURCE_PERMISSIONS\n  )",
+     "explanation": "`Auto3dgm/CMakeLists.txt` installs the entire `auto3dgm_nazar` directory into the runtime package, including a 16 MB test fixture (`Auto3dgm/auto3dgm_nazar/tests/fixtures/test.ply`) and a precompiled Python 3.6 Windows binary (`Auto3dgm/auto3dgm_nazar/lap_windows/_lapjv.cp36-win_amd64.pyd`). In addition, `meshviewer/CMakeLists.txt` installs the entire `web_view_mesh` directory including ~4 MB of unused textures and Python 3.6 `.pyc` files.",
+     "suggestion": "Exclude `tests`, `lap_windows`, and `__pycache__` from the CMake `install(DIRECTORY ...)` rules and remove unused binary fixtures from the repository.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/CMakeLists.txt",
+      "line": 21
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Installed analysis directory includes a prebuilt platform-specific binary and test data",
+     "file": "Auto3dgm/CMakeLists.txt",
+     "line_start": 21,
+     "line_end": 25,
+     "evidence": "install(DIRECTORY \"auto3dgm_nazar\"\n  DESTINATION \"${Slicer_INSTALL_QTSCRIPTEDMODULES_BIN_DIR}\"\n  COMPONENT Runtime\n  USE_SOURCE_PERMISSIONS\n  )",
+     "explanation": "This installs the entire source subtree, including the committed CPython 3.6 Windows _lapjv binary and large test fixtures, even though the active correspondence code uses SciPy and MOSEK rather than lap_windows. The binary's provenance and licensing were not independently verified and it is not suitable for other Python versions.",
+     "suggestion": "Exclude tests and unused binaries from runtime packages and remove or document the binary with provenance and applicable license.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/CMakeLists.txt",
+      "line": 21
+     }
+    }
+   ]
+  },
+  {
+   "title": "Phase 2 does not use Phase 1 alignment, and UI parameters (Max Iterations, FPS Seed) are ignored",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Auto3dgm/auto3dgm_nazar/app.py",
+   "line": 68,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Phase 2 does not use Phase 1 alignment, and UI parameters (Max Iterations, FPS Seed) are ignored",
+     "file": "Auto3dgm/Auto3dgm.py",
+     "line_start": 523,
+     "line_end": 532,
+     "evidence": "    ### INITIAL SUBSAMPLE POINTS ANALYSIS ###\n    ss_i_correspondence_res = Correspondence( # Correspondence should take an initial alignment object with d, p, and r arrays; also correspondence should handle bundling pairwise results into a single data structure\n      meshes=self.dataset[self.ss_label_i],\n      initial_alignment=None, \n      globalize=True,\n      mirror=self.allow_reflection)",
+     "explanation": "In `Auto3dgm/Auto3dgm.py` (lines 277 and 280), Phase 2 correspondence is called via `Auto3dgmLogic.correspondence(self.Auto3dgmData, self.reflectionCheckBox.checked, phase=2)`. However, `Auto3dgmLogic.correspondence` (lines 523-532) never passes Phase 1's `globalized_alignment` as `initial_alignment` to `Correspondence(...)`, nor does it pass the user's `maxIterSliderWidget` value or `fpsSeed` value (in `runAll`, `fpsSeed` is not even stored, and in `subsample`, `seed={}` is hardcoded on line 495). As a result, Phase 2 recomputes alignment from scratch without using Phase 1's alignment, and the UI controls for Maximum Iterations and FPS Seed have no effect.",
+     "suggestion": "Pass the Phase 1 `globalized_alignment` as `initial_alignment` when running Phase 2 in `Auto3dgmLogic.correspondence`, and wire `maxIterSliderWidget.value` and `fpsSeed.value` into `Correspondence` and `Subsample`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other file",
+      "file": "Auto3dgm/auto3dgm_nazar/app.py",
+      "line": 68
+     }
+    }
+   ]
+  },
+  {
+   "title": "`.off` file parser opens hardcoded `\"hammas.off\"` instead of `file_path`",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Auto3dgm/auto3dgm_nazar/mesh/meshfactory.py",
+   "line": 24,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "`.off` file parser opens hardcoded `\"hammas.off\"` instead of `file_path`",
+     "file": "Auto3dgm/auto3dgm_nazar/mesh/meshfactory.py",
+     "line_start": 85,
+     "line_end": 88,
+     "evidence": "  @staticmethod\n  def off_parser(file_path):\n      file=open(\"hammas.off\",\"r\")",
+     "explanation": "`MeshFactory.off_parser(file_path)` ignores its `file_path` parameter and attempts to open a hardcoded `\"hammas.off\"` in the current working directory, causing any `.off` mesh import to fail with `FileNotFoundError`.",
+     "suggestion": "Open `file_path` using a context manager (`with open(file_path, \"r\") as file:`).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "Auto3dgm/auto3dgm_nazar/mesh/meshfactory.py",
+      "line": 24
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Distribution terms do not cover the wrapper and forked web viewer",
+   "category": "license",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "meshviewer/web_view_mesh/README.md",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Distribution terms do not cover the wrapper and forked web viewer",
+     "file": "meshviewer/web_view_mesh/README.md",
+     "line_start": 1,
+     "line_end": 3,
+     "evidence": "# web_view_mesh\n\nFork of [Tingran Gao's](https://github.com/trgao10) (trgao10@math.duke.edu) webGL 3D mesh viewer implemented in [PuenteAligment](https://github.com/trgao10/PuenteAlignment) repository. Some modifications made by Julie Winchester (julia.winchester@duke.edu).",
+     "explanation": "The available repository has an MIT license only under Auto3dgm/auto3dgm_nazar, not at the extension root or in meshviewer. The installed viewer is identified as a fork, but its README provides attribution rather than distribution terms; the wrapper Auto3dgm/Auto3dgm.py likewise has no identified license. The bundled libraries' individual notices do not grant rights to these other files.",
+     "suggestion": "Provide an extension-wide license covering the wrapper and author contributions, and identify and include the upstream license and any required notices for the forked viewer.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "meshviewer/web_view_mesh/README.md",
+      "line": 1
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "The repository supplies no identified license for the wrapper or viewer: the only project LICENSE found is Auto3dgm/auto3dgm_nazar/LICENSE:1-8, which is inside that package; meshviewer/web_view_mesh/README.md:3 says \"Fork of [Tingran Gao's](https://github.com/trgao10) (trgao10@math.duke.edu) webGL 3D mesh viewer implemented in [PuenteAligment](https://github.com/trgao10/PuenteAlignment) repository. Some modifications made by Julie Winchester (julia.winchester@duke.edu).\" The root Readme.md:1-5 supplies only a website link, and meshviewer/meshviewer.xml:8 has \"<license/>\". Distribution permission for these files needs clarification; upstream or separate grants were not accessible and are not ruled out."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "Checked repository file tree (`list_files`), `Auto3dgm/auto3dgm_nazar/LICENSE:1-21`, `Readme.md:1-8`, and `meshviewer/web_view_mesh/README.md:1-3`. Only `Auto3dgm/auto3dgm_nazar/LICENSE` exists (MIT for Julie Winchester et al.); there is no root license covering `Auto3dgm/Auto3dgm.py` or `meshviewer/` (which is a fork of Tingran Gao's PuenteAlignment webGL viewer with no license file). Under the rubric and AGENTS.md admission requirement 2, missing distribution terms for extension code and bundled third-party code is blocking."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Meshviewer exposes files to the network and permits path traversal",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "meshviewer/web_view_mesh/viewer.py",
+   "line": 20,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Network-exposed HTTP server with path traversal in `meshviewer` CLI module",
+     "file": "meshviewer/web_view_mesh/viewer.py",
+     "line_start": 20,
+     "line_end": 30,
+     "evidence": "  def translate_path(self, path):\n    if self.ext_prefix and self.path.startswith(self.ext_prefix):\n      return self.ext_dir_path + path[len(self.ext_prefix):]\n    else:\n      base_path = os.path.dirname(os.path.abspath(__file__))\n      return base_path + path\n\ndef serve_viewer(mesh_path, port = 8000):\n    httpd = WebViewMeshHTTPServer((\"\", port),  WebViewMeshRequestHandler, ext_dir_path = mesh_path, ext_prefix='/mesh')\n    httpd.serve_forever()",
+     "explanation": "The `meshviewer` CLI module starts an HTTP server bound to `\"\"` (all network interfaces, `0.0.0.0:8000`) and overrides `SimpleHTTPRequestHandler.translate_path` with raw string concatenation (`self.ext_dir_path + path[len(self.ext_prefix):]` and `base_path + path`) without normalizing or sanitizing `..` segments. If a user runs the `meshviewer` CLI module (or calls `Auto3dgmLogic.serveWebViewer`), any host on the local network can read arbitrary files from the user's filesystem via path traversal requests to port 8000.",
+     "suggestion": "Remove the unused `meshviewer` CLI module, or bind only to `127.0.0.1` and delegate path resolution to `SimpleHTTPRequestHandler.translate_path` (or verify `os.path.realpath` stays within the allowed directory).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "meshviewer/web_view_mesh/viewer.py",
+      "line": 20
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Meshviewer exposes files to the network and permits path traversal",
+     "file": "meshviewer/web_view_mesh/viewer.py",
+     "line_start": 20,
+     "line_end": 28,
+     "evidence": "    def translate_path(self, path):\n     if self.ext_prefix and self.path.startswith(self.ext_prefix):\n       return self.ext_dir_path + path[len(self.ext_prefix):]\n     else:\n       base_path = os.path.dirname(os.path.abspath(__file__))",
+     "explanation": "The separately installed meshviewer CLI calls serve_viewer, which listens on all interfaces without authentication. Its translate_path concatenates raw request paths without normalization or containment checks; a remote client able to reach port 8000 can use ../ components to read files accessible to the Slicer process, including files outside the selected mesh directory. The main visualization server button is commented out, but the CLI remains installed and separately invokable.",
+     "suggestion": "Remove the unused server or bind only to loopback, enforce resolved-path containment for both roots, and consider authentication and lifecycle management.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "meshviewer/web_view_mesh/viewer.py",
+      "line": 20
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, blocking (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "meshviewer/web_view_mesh/viewer.py:20-28 uses \"return self.ext_dir_path + path[len(self.ext_prefix):]\" or \"return base_path + path\" and binds with \"WebViewMeshHTTPServer((\\\"\\\", port),  WebViewMeshRequestHandler, ext_dir_path = mesh_path, ext_prefix='/mesh')\". Raw ../ request components escape both directories; a reachable network client can read files accessible to the process. meshviewer/meshviewer.py:9-14 calls serve_viewer, and meshviewer/CMakeLists.txt:26-32 installs it. The UI server button is commented out, so exposure is conditional on invoking the separate CLI or logic method."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": "blocking",
+     "reason": "Checked `meshviewer/web_view_mesh/viewer.py:20-29` and `meshviewer/meshviewer.py:9-15`. `serve_viewer` binds to `(\"\", port)` (all interfaces, 0.0.0.0:8000) and `translate_path` directly concatenates `self.ext_dir_path + path[len(self.ext_prefix):]` or `base_path + path` without normalizing or stripping `..` segments or query strings, enabling arbitrary file read over the network if the installed `meshviewer` CLI or `Auto3dgmLogic.serveWebViewer` (`Auto3dgm/Auto3dgm.py:832-834`) is invoked."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Viewing results silently clears the user's existing Slicer scene",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "blocking",
+    "minor"
+   ],
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line": 845,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Visualization buttons clear the entire MRML scene without user confirmation",
+     "file": "Auto3dgm/Auto3dgm.py",
+     "line_start": 845,
+     "line_end": 846,
+     "evidence": "  def viewAlignedMeshWithinSlicer(viewMeshFolder, viewLmkFolder):\n      slicer.mrmlScene.Clear(0)",
+     "explanation": "Clicking \"View Phase 1 alignment\" or \"View Phase 2 alignment\" calls `slicer.mrmlScene.Clear(0)` without asking the user for confirmation, destroying any existing nodes or unsaved work in the current Slicer scene.",
+     "suggestion": "Confirm with the user before clearing the scene, or only remove nodes created by Auto3dgm.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/Auto3dgm.py",
+      "line": 845
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Viewing results silently clears the user's existing Slicer scene",
+     "file": "Auto3dgm/Auto3dgm.py",
+     "line_start": 845,
+     "line_end": 850,
+     "evidence": "  def viewAlignedMeshWithinSlicer(viewMeshFolder, viewLmkFolder):\n      slicer.mrmlScene.Clear(0)\n      modelDir = viewMeshFolder\n      modelFileExt = \"ply\"\n      numberOfColumns = 4\n      modelFiles = list(f for f in os.listdir(modelDir) if f.endswith('.' + modelFileExt))",
+     "explanation": "Both View Phase buttons call this function, which removes existing scene nodes without asking the user, even before checking whether the results folder exists. Unsaved images, segmentations, markups, and other scene work can be lost when a user merely requests visualization.",
+     "suggestion": "Do not clear the scene; use isolated view nodes or explicitly ask to save and confirm before replacing existing data.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/Auto3dgm.py",
+      "line": 845
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Both view handlers call the same function (Auto3dgm/Auto3dgm.py:386-401); Auto3dgm/Auto3dgm.py:845-850 starts with \"slicer.mrmlScene.Clear(0)\" before \"modelFiles = list(f for f in os.listdir(modelDir) if f.endswith('.' + modelFileExt))\". It clears existing non-singleton scene nodes without confirmation, including unsaved work, even if listing the results subsequently fails. That is a concrete data-loss path."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "Checked `Auto3dgm/Auto3dgm.py:386-402` and `Auto3dgm/Auto3dgm.py:845-850`. Both `visPhase1ButtonOnLoad` and `visPhase2ButtonOnLoad` call `Auto3dgmLogic.viewAlignedMeshWithinSlicer`, which immediately executes `slicer.mrmlScene.Clear(0)` on line 846 without confirmation, destroying all nodes and unsaved work in the active Slicer scene (even before checking if `viewMeshFolder` exists)."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Analysis controls for seed, iteration limit, and phase count are ignored",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line": 260,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Analysis controls for seed, iteration limit, and phase count are ignored",
+     "file": "Auto3dgm/Auto3dgm.py",
+     "line_start": 260,
+     "line_end": 266,
+     "evidence": "  def subStepButtonOnLoad(self):\n    print(\"Mocking a call to the Logic service AL002.1\")\n    # Store the keys\n    self.Auto3dgmData.phase1SampledPoints = self.phase1PointNumber.value\n    self.Auto3dgmData.phase2SampledPoints = self.phase2PointNumber.value\n    self.Auto3dgmData.fpsSeed=self.fpsSeed.value\n    Auto3dgmLogic.subsample(self.Auto3dgmData,list_of_pts = [self.phase1PointNumber.value,self.phase2PointNumber.value], meshes=self.Auto3dgmData.datasetCollection.datasets[0])",
+     "explanation": "The selected FPS seed is stored but subsample passes an empty seed dictionary and the sampler calls random.seed() without that value. The maximum iteration slider and phase choice are likewise not read by the analysis; Run all always computes both phases and the optimizer uses a hard-coded 1000 iterations. Users can believe results are reproducible or configured when they are not.",
+     "suggestion": "Pass each selected value through to the relevant algorithm, or remove unsupported controls; add tests showing the settings affect execution.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/Auto3dgm.py",
+      "line": 260
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Auto3dgm/Auto3dgm.py:149-169 exposes the controls; lines 260-266 store fpsSeed but lines 493-495 pass \"seed={}\" instead. Auto3dgm/auto3dgm_nazar/mesh/subsample.py:149-150 uses \"random.seed()\" then \"subidx = [random.randint(0, v.shape[0]-1)]\". Auto3dgm/Auto3dgm.py:281-285 and 475-480 run both phases regardless of phase choice; correspondence.py:340 passes \"max_iter=1000\". These ignored settings undermine reproducibility and the configured workflow."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "Checked `Auto3dgm/Auto3dgm.py:149-184`, `260-285`, `Auto3dgm/auto3dgm_nazar/mesh/subsample.py:38-66, 127-155`, and `Auto3dgm/auto3dgm_nazar/analysis/correspondence.py:289, 340`. `maxIterSliderWidget` and `phaseChoiceComboBox` are created in `setupSetupTab` (`Auto3dgm.py:149-171`) and never read anywhere else; `Correspondence.locgpd` uses hard-coded `max_iter=1000`. `self.Auto3dgmData.fpsSeed = self.fpsSeed.value` is stored on line 265, but `Subsample.far_point_subsample` (`subsample.py:149`) calls `random.seed()` with no argument when `seed` has no initial vertex array. (Note: `Auto3dgm/Auto3dgm.py:451-540` could not be read due to a tool error, so `Auto3dgmLogic.subsample` and `runAll` definitions were verified from call sites and `subsample.py`/`correspondence.py`.)"
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Export silently overwrites existing output files",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line": 641,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Export silently overwrites existing output files",
+     "file": "Auto3dgm/Auto3dgm.py",
+     "line_start": 635,
+     "line_end": 646,
+     "evidence": "    exportFolder = os.path.join(outputFolder, 'phase' + str(p))\n    subDirs = ['aligned_meshes', 'aligned_landmarks', 'rotation', 'scale_info', 'landmarks_OSS', 'original_meshes']\n\n    Auto3dgmLogic.prepareDirs(exportFolder, subDirs)\n    Auto3dgmLogic.alignOriginalMeshes(Auto3dgmData, p)\n    Auto3dgmLogic.saveAlignedMeshes(Auto3dgmData, os.path.join(exportFolder, subDirs[0]))",
+     "explanation": "Exports always use fixed phase subdirectories and input-derived filenames. Existing directories are reused, and writers such as numpy.savetxt and the PLY writer write to the same paths without a collision check. Re-running or choosing a folder with prior results can silently destroy earlier files.",
+     "suggestion": "Detect collisions and ask before overwriting, or create a fresh uniquely named run directory.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/Auto3dgm.py",
+      "line": 641
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, minor (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "Auto3dgm/Auto3dgm.py:641-648 uses \"exportFolder = os.path.join(outputFolder, 'phase' + str(p))\" and writes multiple fixed subdirectories; lines 804-810 reuse existing ones. Line 589 has \"np.savetxt(filename+\\\".csv\\\",array,delimiter = \\\",\\\",fmt = \\\"%s\\\")\", which overwrites an existing CSV without confirmation; meshexport.py:17-19 likewise writes the input-derived PLY path. The phase and run-all buttons export automatically (lines 270-285). An existing user file or prior output can be irreversibly overwritten, a concrete data-loss path."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": "minor",
+     "reason": "Checked `Auto3dgm/Auto3dgm.py:588-600`, `626-652`, `745-779`. `exportData` writes into fixed subdirectories (`phase1/`, `phase2/` under user-chosen `outputFolder`) using filenames derived from input mesh names without prompting before overwriting existing exported files in that output directory. Writing deterministic output filenames into a user-selected output directory is standard behavior for export steps and is at most minor/info, not a major safety defect."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Exporting rotations mutates the stored analysis result",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line": 720,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Exporting rotations mutates the stored analysis result",
+     "file": "Auto3dgm/Auto3dgm.py",
+     "line_start": 720,
+     "line_end": 729,
+     "evidence": "    for idx in range(len(m)):\n      mesh = m[idx]\n      rot = r[idx]\n      # rot = np.linalg.inv(rot)\n      # pad rot into 4 x 4 transform matrix in slicer\n      rot[2][0] = -1 * rot[2][0]\n      rot[2][1] = -1 * rot[2][1]\n      rot[0][2] = -1 * rot[0][2]\n      rot[1][2] = -1 * rot[1][2]\n      rot = np.vstack((rot.T, [0, 0, 0]))  # add a 4-th column for center info",
+     "explanation": "rot aliases an array in corr.globalized_alignment['r']; changing elements in place alters the saved analysis state. A subsequent export or alignment based on that state can produce different or incorrect meshes and landmarks compared with the original result, particularly when rotations have nonzero z-axis cross terms.",
+     "suggestion": "Copy each rotation before coordinate conversion and add a repeated-export consistency test.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/Auto3dgm.py",
+      "line": 720
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Auto3dgm/Auto3dgm.py:717-728 assigns \"r = Auto3dgmData.datasetCollection.analysis_sets[label].globalized_alignment['r']\", then \"rot = r[idx]\" and changes four components in place. The matrices are retained in correspondence.py:166-184; later alignOriginalMeshes uses the same stored matrix at Auto3dgm/Auto3dgm.py:612-620. A later export can therefore use altered rotations and produce different aligned meshes or landmarks."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "Checked `Auto3dgm/Auto3dgm.py:645-651` and `707-733`. In `exportRotations`, `r = Auto3dgmData.datasetCollection.analysis_sets[label].globalized_alignment['r']` and `rot = r[idx]`, after which lines 725-728 negate four entries (`rot[2][0]`, `rot[2][1]`, `rot[0][2]`, `rot[1][2]`) in place on the NumPy array before `np.vstack` creates a new array on line 729. This mutates the stored rotation matrices in `analysis_sets[label]`, corrupting any subsequent alignment or export using that in-memory state."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Removed `scipy.square` import breaks correspondence analysis on modern SciPy/Slicer",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+   "line": 8,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Removed `scipy.square` import breaks correspondence analysis on modern SciPy/Slicer",
+     "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+     "line_start": 8,
+     "line_end": 10,
+     "evidence": "from scipy.sparse.linalg import norm\nfrom scipy import square\nimport numpy as np",
+     "explanation": "`from scipy import square` fails with `ImportError: cannot import name 'square' from 'scipy'` in SciPy >= 1.8 (bundled in current 3D Slicer versions), where deprecated NumPy ufunc re-exports were removed from the top-level `scipy` namespace. Calling `Auto3dgmLogic.correspondence()` (Phase 1, Phase 2, or Run all steps) immediately raises an ImportError when importing `auto3dgm_nazar.analysis.correspondence`.",
+     "suggestion": "Replace `from scipy import square` with `from numpy import square` (or `np.square`).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+      "line": 8
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Analysis package fails to import when SciPy lacks top-level square",
+     "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+     "line_start": 5,
+     "line_end": 10,
+     "evidence": "from scipy.sparse import csr_matrix, identity, find, lil_matrix, coo_matrix\nfrom scipy.sparse.csgraph import minimum_spanning_tree, shortest_path\nfrom scipy import sparse as sp\nfrom scipy.sparse.linalg import norm\nfrom scipy import square\nimport numpy as np",
+     "explanation": "On SciPy versions that no longer expose square at the package top level, this raises ImportError. Importing the dataset factory first executes auto3dgm_nazar/__init__.py, which imports app.py and then this module, so even Load Data fails before analysis can start.",
+     "suggestion": "Use numpy.square and test the full Load Data and analysis path against supported Slicer releases.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+      "line": 5
+     }
+    }
+   ],
+   "id": "D7",
+   "outcome": "real, major (2 of 2)",
+   "positions": {
+    "gpt": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py:8-10 contains \"from scipy import square\"; this fails on SciPy releases without that top-level export. Auto3dgm/auto3dgm_nazar/__init__.py:1 says \"from auto3dgm_nazar.app import *\", and app.py:5-7 imports Correspondence, so Auto3dgm.py:483-485 loading the dataset factory also triggers it, assuming earlier imports succeed. This can prevent analysis and data loading; the actual Slicer/SciPy runtime was not available to test."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": "concern",
+     "reason": "Checked `Auto3dgm/auto3dgm_nazar/analysis/correspondence.py:8-10, 302, 398` and `Auto3dgm/auto3dgm_nazar/__init__.py:1`. `correspondence.py` line 9 executes `from scipy import square`, which raises `ImportError` in SciPy >= 1.8.0 (used in modern 3D Slicer releases) where `scipy.square` was removed. Because `auto3dgm_nazar/__init__.py` imports `auto3dgm_nazar.app`, importing any `auto3dgm_nazar` submodule triggers this import chain and fails."
+    }
+   },
+   "settled_severity": "major"
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "concern",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "minor"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "minor"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "blocking",
+   "gpt": "blocking"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "concern",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "needs fixes",
+  "gemini": "needs fixes",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 7,
+  "single": 7,
+  "unverified": 1,
+  "total": 11,
+  "open_disputes": 0
+ }
+}

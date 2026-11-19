@@ -1,0 +1,133 @@
+{
+ "purpose": "Chest Imaging Platform (SlicerCIP) is a set of scripted and C++ Slicer modules for quantitative chest CT biomarkers (airway, parenchyma, lesion, AV/PA ratios, calcium scoring) from the Applied Chest Imaging Laboratory at Brigham and Women's Hospital. It is for researchers who use 3D Slicer on lung CT, and it builds a superbuild that fetches the CIP library from GitHub.",
+ "summary": "I reviewed the catalog entry, top-level CMake and superbuild, the module CMake files, and targeted searches of the Python sources at commit 47c90af. I found no malicious code, no package installs at import, and no data exfiltration. The main issues are the unpinned external CIP dependency (GIT_TAG develop), a Python 3 bytes/str bug in Colors.readColorMapFile, an unfilled license template placeholder, plaintext HTTP sample downloads, and a committed GPL WinSCP binary in the attic. I did not run anything, and I did not read the full module logic, so coverage is partial.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Searched Scripted/ for subprocess, eval, pickle, urlretrieve, and pip use. Found no install-at-import or data upload. Sample downloads use plain http:// (SlicerUtil.py:892-897, CIP_LesionModel.py:2563-2570). The shell=True and WinSCP code is only in attic/CIP_GetImage, which is not built."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "No pip installs or torch/PyPI dependencies were found in the searches. Scripted/CMakeLists.txt builds only the listed modules, and the CIP library is built as a separate superbuild component, not into Slicer's Python environment. The searches were not exhaustive over every file."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMake lists scripts and resources for modules such as Scripted/CIP_/CMakeLists.txt. The CIP_ module lists only StructuresColorMap.ctbl, but Colors.py reads chest_region_colors.ctbl and chest_type_colors.ctbl from CIP_RESOURCES_DIR, and those files are not in the list. I did not verify whether they are installed by another path. Separately, SuperBuild/External_CIP.cmake fetches an unpinned develop branch."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "LICENSE is BSD-style and permits redistribution, but line 14 still contains the template placeholder 'Neither the name of the {organization}'. The repo also commits a 10 MB WinSCP.exe (GPL) under Scripted/attic/CIP_GetImage with no notice I could find. The CIP library's license was not inspected."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Colors.py opens resource files in binary mode and splits with a str delimiter, which fails under Python 3. Several calls use removed APIs (np.int, ex.message). Util.create_directory chmods new folders to 0o777. Tests and the CIP library's own tests are largely disabled."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README gives build steps and test paths but no user documentation or clinical-use disclaimer. Several modules are commented out in Scripted/CMakeLists.txt as incompatible with Slicer 5. Tier 3 and Alpha status are declared. Tests exist for some modules, but the CMake comments show many are not registered."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Colors color-map reader is broken on Python 3 (bytes split with str)",
+   "file": "Scripted/CIP_/CIP/logic/Colors.py",
+   "line_start": 31,
+   "line_end": 35,
+   "evidence": "for line in open(f, \"r+b\"):\n    ll = line.split(\" \")",
+   "explanation": "The file is opened in binary mode ('r+b'), so each line is bytes. line.split(\" \") with a str delimiter then raises TypeError. Any caller of Colors.ChestRegions() or Colors.ChestTypes() will fail. Opening with r+b also requires write permission on the installed read-only resource files. This is inferred from the code, not run.",
+   "suggestion": "Open with mode 'r' (text, or 'rb' with a bytes delimiter), and drop '+' since the file is only read.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "CIP library fetched from an unpinned develop branch of a different repository",
+   "file": "SuperBuild/External_CIP.cmake",
+   "line_start": 33,
+   "line_end": 34,
+   "evidence": "GIT_REPOSITORY \"https://github.com/Slicer/ChestImagingPlatform.git\"\n      GIT_TAG develop",
+   "explanation": "The superbuild clones Slicer/ChestImagingPlatform at the moving branch 'develop' and the catalog also tracks 'develop'. Builds are not reproducible, and the CIP code that users run is not the code reviewed at commit 47c90af. The catalog's scm_url points to acil-bwh/SlicerCIP, but the CIP source repository is separate.",
+   "suggestion": "Pin GIT_TAG to a specific commit hash and record the reviewed CIP revision. Consider noting the CIP repository in the catalog description.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "BSD license still contains the unfilled {organization} template placeholder",
+   "file": "LICENSE",
+   "line_start": 14,
+   "line_end": 14,
+   "evidence": "Neither the name of the {organization} nor the names of its",
+   "explanation": "The redistribution permissions are present and usable, but the license text names an unfilled placeholder. This is a minor hygiene issue that could confuse downstream redistributors about the copyright holder.",
+   "suggestion": "Replace {organization} with the actual copyright holder, for example 'Brigham and Women's Hospital' or 'acil-bwh'.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "Committed GPL WinSCP.exe binary in the repository",
+   "file": "Scripted/attic/CIP_GetImage/CMakeLists.txt",
+   "line_start": 9,
+   "line_end": 13,
+   "evidence": "set(MODULE_PYTHON_RESOURCES\n    CIP_GetImage_Resources/WinSCP.com\n    CIP_GetImage_Resources/WinSCP.exe",
+   "explanation": "A 10 MB Windows executable is committed under the attic folder. Its GPL terms are not stated alongside it, and binaries in the repo are a distribution and maintenance concern. The attic module is not in Scripted/CMakeLists.txt, so it is not packaged. Its CMake file still lists the binary.",
+   "suggestion": "Remove the binary from the repository or document its license. Keep binary tools out of the source tree and download them on demand instead.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Sample-data download over plain HTTP without integrity check",
+   "file": "Scripted/CIP_/CIP/logic/SlicerUtil.py",
+   "line_start": 892,
+   "line_end": 897,
+   "evidence": "url = \"http://www.slicer.org/slicerWiki/images/3/31/CT-chest.nrrd\"\n            ...\n            urllib.request.urlretrieve(url, localFilePath)",
+   "explanation": "The test and helper code fetches volumes over http:// with urlretrieve and no checksum. A network attacker could substitute a malicious or corrupted NRRD, which Slicer would then load. The risk is limited because the code runs only on explicit user action or in tests, but the transport is unauthenticated.",
+   "suggestion": "Use https:// and verify a checksum where possible.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Directories created with world-writable permissions",
+   "file": "Scripted/CIP_/CIP/logic/Util.py",
+   "line_start": 99,
+   "line_end": 101,
+   "evidence": "os.makedirs(path)\n        # Make sure that everybody has write permissions (sometimes there are problems because of umask)\n        os.chmod(path, 0o777)",
+   "explanation": "create_directory chmods new directories to 0o777 to work around umask. Directories holding case data or outputs therefore become writable by any local user, which is a data-integrity and privacy concern for patient-derived files.",
+   "suggestion": "Use the default permissions (or 0o755) and rely on the user's umask. Remove the chmod.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Removed NumPy and Python 2 APIs remain in active code",
+   "file": "Scripted/CIP_/CIP/logic/Util.py",
+   "line_start": 396,
+   "line_end": 396,
+   "evidence": "return np.asarray(np.round(mean, 0), np.int)",
+   "explanation": "np.int was removed in NumPy 1.24, so centroid() raises AttributeError on current Slicer NumPy. ex.message does not exist on Python 3 exceptions, so the error-logging path itself raises. Both are ordinary bugs, not safety issues.",
+   "suggestion": "Use int or np.int64. Replace ex.message with str(ex).",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Full module logic for the large scripted modules (CIP_LesionModel.py, CIP_BodyComposition.py, CIP_ParenchymaAnalysis.py, and others) was not read. Only targeted searches were run.",
+  "The C++ loadable module sources (Loadable/*) were not read.",
+  "The CIP library upstream at Slicer/ChestImagingPlatform was not inspected, and its license and the revision built by develop are unknown.",
+  "The CIP_ module's resource files (chest_region_colors.ctbl, chest_type_colors.ctbl) were not found in the file list, so I could not confirm they are installed.",
+  "The eval() calls in CaseReportsWidget.py and the feature-extraction modules were not traced to see whether any input is user-controlled.",
+  "No CI or build logs were available, and nothing was built or executed.",
+  "Model or weight downloads were not checked, since no such code was found in the searches."
+ ],
+ "questions_for_author": [
+  "Can you pin the CIP superbuild (SuperBuild/External_CIP.cmake GIT_TAG) and the catalog scm_revision to a specific commit?",
+  "Does Colors.ChestRegions() work under Slicer's Python 3? If the color maps load, which file is being read?",
+  "Where are chest_region_colors.ctbl and chest_type_colors.ctbl installed from, given the CIP_ CMake resource list?",
+  "Can the WinSCP.exe binary be removed from the repository, and under what license is it included?",
+  "Please replace the {organization} placeholder in LICENSE with the actual copyright holder."
+ ]
+}

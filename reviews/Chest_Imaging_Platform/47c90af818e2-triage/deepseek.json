@@ -1,0 +1,154 @@
+{
+ "purpose": "Chest Imaging Platform (SlicerCIP): a suite of chest CT analysis modules (lung/parenchyma analysis, airway inspection, AV/PAA/RVLV ratios, calcium scoring, lesion model, MIP viewer, calibration) for researchers doing quantitative lung imaging, built on the external CIP C++ library fetched at build time.",
+ "summary": "Catalog entry is mechanically sound (build_subdirectory \"inner-build\" matches CMakeLists.txt:30, EXTENSION_DEPENDS \"NA\" matches empty build_dependencies, source repo reachable in principle, BSD-3 terms permit redistribution). No telemetry, no pip installs, no data exfiltration, no sys.path/environment mutation at import. Concerns are non-blocking: dead AutoUpdateWidget would git-clone develop HEAD and overwrite the installed extension if ever re-enabled; obsolete WinSCP binaries and a GPL WinSCP tool sit in the repo (not installed by CMake); np.int/np.float usage breaks on current numpy; CIP_LesionModel's CMake lists \"__init__\" without \".py\". Recommendation: 🟢 Recommend merge, with the listed fixes suggested.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Searched for pip/network/subprocess/SSH usage: no telemetry or upload of patient data; downloads are only public sample CT volumes (SlicerUtil.py:892, CIP_LesionModel.py:2563). Latent risk in Scripted/CIP_/CIP/ui/AutoUpdateWidget.py (git clone + dir_util.copy_tree over the installed extension) and world-writable dirs via os.chmod(..., 0o777)."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "No pip_install, no bundled Qt/VTK, no PyTorch; sys.path manipulation in CIP_Blank.py is commented out and no warnings/logging are globally silenced. AutoUpdateWidget imports GitPython (not bundled) and would mutate the installed extension tree, but it is commented out in ui/__init__.py:9 and CIP_BodyComposition.py:258, so it never runs."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt:30 build_subdirectory inner-build matches the entry; EXTENSION_DEPENDS \"NA\" matches empty build_dependencies; Scripted/CMakeLists.txt only builds modules whose directories exist. Two defects: Scripted/CIP_LesionModel/CMakeLists.txt lists package inits as \"FeatureExtractionLib/__init__\" (no .py) and 10 MB WinSCP binaries are committed although not installed."
+  },
+  "license": {
+   "rating": "minor",
+   "rationale": "LICENSE is a BSD-3-clause text granting redistribution, but the disclaimer still contains the unsubstituted placeholder \"{organization}\" (line 14). Bundled/committed WinSCP binaries are GPL tools whose license text is not included, though CMake does not install them."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Uses removed numpy aliases (np.int, np.float) that raise AttributeError on the numpy shipped with current Slicer; CIP_.py is not a ScriptedLoadableModule subclass; several modules run long CLI computations synchronously from the widget. Observers/settings handling is otherwise conventional."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Provides many chest-CT analysis modules with linked tutorials in helpText (e.g. CIP_AVRatio.py:30, CIP_PAARatio.py:27), unit tests registered for several modules, and an active develop branch. Overlap with core Slicer is limited; no explicit clinical-use disclaimer found."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Auto-update widget would clone develop HEAD from GitHub and overwrite the installed extension",
+   "file": "Scripted/CIP_/CIP/ui/AutoUpdateWidget.py",
+   "line_start": 75,
+   "line_end": 100,
+   "evidence": "repo = Repo.clone_from(SlicerUtil.CIP_GIT_REMOTE_URL, self.updateFolder)",
+   "explanation": "If re-enabled, this code removes a folder (shutil.rmtree), clones https://github.com/acil-bwh/SlicerCIP.git at whatever develop points to, and copies the downloaded tree over the user's installed extension directory (dir_util.copy_tree with a path derived from Util.CIP_MODULE_ROOT_DIR/..), i.e. remote code fetch and execution on next Slicer start with no review or opt-in. Today it cannot execute: the import is commented out in Scripted/CIP_/CIP/ui/__init__.py:9 and Scripted/CIP_BodyComposition/CIP_BodyComposition.py:258, and it references a nonexistent constant (SlicerUtil.CIP_DEFAULT_GIT_REPO_FOLDER vs SlicerUtil.GIT_REPO_FOLDER, SlicerUtil.py:36), so it would raise AttributeError if enabled. Latent and not blocking, but the file is packaged and shipped.",
+   "suggestion": "Delete AutoUpdateWidget.py and its CMakeLists entry, or make any update an explicit, user-confirmed action that never overwrites the installed extension.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "World-writable directories created for settings and update folders",
+   "file": "Scripted/CIP_/CIP/logic/Util.py",
+   "line_start": 92,
+   "line_end": 102,
+   "evidence": "os.chmod(path, 0o777)",
+   "explanation": "create_directory gives 0777 to every directory it makes (e.g. the Slicer settings/CIP data folder via SlicerUtil.getSettingsDataFolder), and AutoUpdateWidget.py:85 does the same for its clone target under the temp path. On multi-user machines this lets other local users place or replace files that CIP later reads or (in the auto-update path) copies into the extension.",
+   "suggestion": "Create directories with default 0700/0755 permissions instead of chmod 0777.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "10 MB WinSCP executables and an SSH config template committed in the repo",
+   "file": "Scripted/CIP_/CIP/ui/Resources/SSH/WinSCP.ini",
+   "line_start": 1,
+   "line_end": 4,
+   "evidence": "COPY YOUR SSH KEY HERE",
+   "explanation": "Scripted/CIP_/CIP/ui/Resources/SSH/ contains WinSCP.com (293 KB) and Scripted/attic/CIP_GetImage/CIP_GetImage_Resources/WinSCP.exe (~10 MB), third-party binaries of unknown version/provenance, plus an SSH config template inviting users to paste a private key. They are not listed in any built CMakeLists (Scripted/CMakeLists.txt does not add attic modules and Scripted/CIP_/CMakeLists.txt's resource list has no SSH entry), so they are not installed with the extension, but they bloat the source and normalise transferring credentials/patient data to remote SSH servers.",
+   "suggestion": "Remove the committed binaries and the SSH template from the repository; if remote transfer is ever needed, depend on a documented tool and keep keys in the user's own store.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Package __init__ files listed without .py for CIP_LesionModel",
+   "file": "Scripted/CIP_LesionModel/CMakeLists.txt",
+   "line_start": 5,
+   "line_end": 19,
+   "evidence": "FeatureExtractionLib/__init__",
+   "explanation": "MODULE_PYTHON_SCRIPTS lists 'FeatureExtractionLib/__init__' and 'FeatureWidgetHelperLib/__init__' while the files on disk are __init__.py; ctkMacroCompilePythonScript will not find those paths, so the package inits may be omitted from the install tree and 'from FeatureWidgetHelperLib import *' fails at module load. This does not affect the catalog entry itself but can make one shipped module unusable.",
+   "suggestion": "Use 'FeatureExtractionLib/__init__.py' and 'FeatureWidgetHelperLib/__init__.py' in MODULE_PYTHON_SCRIPTS.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Removed numpy aliases (np.int, np.float) break modules on current Slicer",
+   "file": "Scripted/CIP_/CIP/logic/Util.py",
+   "line_start": 389,
+   "line_end": 396,
+   "evidence": "np.asarray(np.round(mean, 0), np.int)",
+   "explanation": "np.int and np.float were removed in numpy 1.24, which current Slicer ships; Util.centroid() and GeometryTopologyData's lps_to_ijk_transformation_matrix_array ('dtype=np.float)', geometry_topology_data.py:57) therefore raise AttributeError at runtime, breaking centroid-based labelling and any structure reading/writing path in the shared CIP library used by several modules.",
+   "suggestion": "Replace np.int with int, np.float with float, and the other deprecated aliases throughout the CIP library.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Hidden CIP_ container is not a ScriptedLoadableModule and prints on setup",
+   "file": "Scripted/CIP_/CIP_.py",
+   "line_start": 1,
+   "line_end": 23,
+   "evidence": "self.parent.hidden = True   # Hide the module. It just works as a container for the CIP python library",
+   "explanation": "CIP_ does not inherit ScriptedLoadableModule/ScriptedLoadableModuleWidget, so it does not follow Slicer conventions and its hidden status depends on how the loader interprets a non-standard class; the widget also prints \"ok\" on setup. Every other CIP module depends on 'CIP' importable as a top-level package, which relies on Slicer putting the CIP_ module folder on sys.path rather than on anything this file does.",
+   "suggestion": "Make CIP_ a normal ScriptedLoadableModule with parent.hidden = True, or move the CIP package to a location added explicitly and document the dependency.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "License text retains an unsubstituted {organization} placeholder",
+   "file": "LICENSE",
+   "line_start": 1,
+   "line_end": 16,
+   "evidence": "Neither the name of the {organization} nor the names of its",
+   "explanation": "The BSD-3 text does grant redistribution, so distribution permission exists; however the clause is left as a template placeholder, which weakens the no-endorsement clause and looks unfinished to downstream redistributors. Separately, the committed WinSCP binaries are GPL-licensed third-party tools whose license/notice is not included in the repo.",
+   "suggestion": "Replace {organization} with 'Brigham and Women's Hospital' (or the copyright holder) and remove the GPL binaries or add their notices.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "Username and machine name written into exported structure files",
+   "file": "Scripted/CIP_/CIP/logic/geometry_topology_data.py",
+   "line_start": 90,
+   "line_end": 107,
+   "evidence": "structure.machine_name = platform.node()",
+   "explanation": "fill_auto_fields stores the OS login name and hostname into every point/bounding-box XML record by default. Nothing is transmitted, but users who share these annotation files with collaborators will disclose local identifiers without an obvious warning.",
+   "suggestion": "Default these fields to empty or document the privacy implication in the module help.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "info",
+   "title": "Sample data downloaded over plain HTTP",
+   "file": "Scripted/CIP_/CIP/logic/SlicerUtil.py",
+   "line_start": 886,
+   "line_end": 898,
+   "evidence": "url = \"http://www.slicer.org/slicerWiki/images/3/31/CT-chest.nrrd\"",
+   "explanation": "Test/sample data (also http://midas.chestimagingplatform.org/... in CIP_LesionModel.py:2563) is fetched over unencrypted HTTP, so a network attacker could substitute the image that the module then loads. No user data leaves the machine.",
+   "suggestion": "Use https URLs for sample data.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not verify at commit 47c90af818e2ef4bdd4420d9a7b2fec7307afe23 that the develop branch of https://github.com/Slicer/ChestImagingPlatform.git (SuperBuild/External_CIP.cmake:33) configures against current Slicer/ITK/VTK, or that the extension actually builds on any platform.",
+  "Did not read the large module bodies (CIP_AVRatio.py, CIP_BodyComposition.py, CIP_LesionModel.py, CIP_PAARatio.py, CIP_ParenchymaAnalysis.py, CIP_RVLVRatio.py, CIP_TracheaStentPlanning*.py, VolumeProbe.py) line by line beyond imports and network calls; long-running work on the GUI thread and observe",
+  "Did not read the Loadable C++ sources (AirwayInspector, AirwayModule, ParticlesDisplay, RegionTypeDisplay) or the Scripted/attic/PicasaSnap gdata/atom/tlslite code; attic modules are not built by Scripted/CMakeLists.txt but their presence and bundled Apache-2.0/GPL material were not audited in detai",
+  "Could not inspect the committed WinSCP binaries' contents or provenance (opaque 10 MB executable).",
+  "Did not verify whether the Extensions Index requires 'Chest Imaging Platform' to be a registered category in the catalog schema, nor whether scm_revision 'develop' currently resolves.",
+  "Did not check the Scripted/CIP_/CIP/Testing tests or whether any existing test actually passes with current Slicer."
+ ],
+ "questions_for_author": [
+  "Is Scripted/CIP_/CIP/ui/AutoUpdateWidget.py intentionally kept as dead code? If not, will you delete it and the bundled WinSCP binaries/SSH template?",
+  "Do the CIP modules work with the numpy shipped in current Slicer given np.int/np.float usage in Scripted/CIP_/CIP/logic/Util.py and geometry_topology_data.py?",
+  "Was 'FeatureExtractionLib/__init__' (no .py) in Scripted/CIP_LesionModel/CMakeLists.txt intended?"
+ ]
+}

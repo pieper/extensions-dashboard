@@ -1,0 +1,136 @@
+{
+ "purpose": "BigImage is a 3D Slicer extension for pathologists and researchers to view multi-gigabyte whole-slide microscopy images (WSI) at multiple resolutions and perform histopathology image analysis. It provides whole-slide patch viewing via TiffSlide, stain color deconvolution (e.g., H&E separation), nucleus segmentation via level-set and mean-shift clustering, and experimental Zarr volume I/O.",
+ "summary": "BigImage provides whole-slide microscopy viewing (`BigImageViewer`), histopathology stain deconvolution (`ColorDecomposition`), H&E nucleus segmentation (`NucleusSegmentation`), and experimental Zarr image I/O (`NgffImageIO`). It is licensed under the 3D Slicer license and has no safety or malicious-code concerns. However, `BigImageViewer/BigImageViewer.py` calls `slicer.util.pip_install(\"tiffslide\")` at module import time (lines 17-21), which executes during Slicer startup for all users without confirmation. This is a blocking environment issue under the Slicer Extensions Index review policy. Several non-blocking soundness bugs in `NgffImageIO.py` and `BigImageViewer.py` should also be addressed.\n\n🔴 Do not merge yet: `BigImageViewer/BigImageViewer.py` installs `tiffslide` via `pip_install` at module import / Slicer startup.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all CMake, Python, XML, UI, and C++ header/implementation files across all four modules. Found no malicious or concealed behavior, no unauthorized network transmission or telemetry, no command injection, no unsafe deserialization, and no prompt-injection instructions."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "Inspected `BigImageViewer/BigImageViewer.py` and `NgffImageIO/NgffImageIO.py`. `BigImageViewer.py` lines 17-21 call `slicer.util.pip_install(\"tiffslide\")` unconditionally at module import time (which runs during Slicer startup for all users), violating the Slicer Extensions Index policy against package installation at import/startup. Additionally, `installPreRequisites()` sets `os.environ[\"CUDA_VISIBLE_DEVICES\"] = \"0\"` globally."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected the catalog entry (`BigImage.json` equivalent), root `CMakeLists.txt`, and all four module `CMakeLists.txt` files (`BigImageViewer`, `ColorDecomposition`, `NgffImageIO`, `NucleusSegmentation`). All module subdirectories, Python scripts, UI/icon resources, and C++ sources exist and are properly configured with `EXTENSION_DEPENDS \"NA\"` matching `build_dependencies: []`. A 12 MB screenshot (`Screenshots/1.png`) is committed in the repo, noted as `info`."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `License.txt`, which provides the standard 3D Slicer Contribution and Software License Agreement (BSD-style open source license permitting distribution). Third-party algorithm adaptations (such as Ruifrok & Johnston color deconvolution in `ColorDecomposition`) are documented in source comments and carry no restrictive terms."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected `BigImageViewer.py`, `NgffImageIO.py`, `ColorDecomposition.cxx`, and `NucleusSegmentation` C++ files. Found several bugs: `NgffImageIOFileReader.load()` forgets to call `installRequiredPythonPackages()` before importing `xarray`/`zarr`; `NgffImageIOLogic.xarrayFromVolume()` references an undefined variable `key` when copying volume attributes; `BigImageViewerWidget` attaches mouse/wheel observers to the Red slice view interactor in `__init__` and never removes them; and C++ CLI helpers call `abort()`/`raise(SIGABRT)` on error."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md`, module XML descriptions, and module logic. The extension provides useful whole-slide viewing, stain deconvolution (15 stain presets), and H&E nucleus segmentation, backed by a published paper and clear usage documentation in `README.md` with links to public OpenSlide sample data."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Unconditional pip_install(\"tiffslide\") at module import / Slicer startup",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 17,
+   "line_end": 21,
+   "evidence": "try:\n    from tiffslide import TiffSlide\nexcept ImportError:\n    slicer.util.pip_install(\"tiffslide\")\n    from tiffslide import TiffSlide",
+   "explanation": "`BigImageViewer.py` calls `slicer.util.pip_install(\"tiffslide\")` at module import time. Slicer imports all scripted loadable modules during application startup to discover and register them, so installing this extension causes `pip install tiffslide` (and its dependency tree, including `tifffile`, `imagecodecs`, and `zarr`) to run unconditionally on Slicer startup without user confirmation, even for users who never open the BigImageViewer module. This also contradicts `README.md` line 29, which states packages are installed on first use.",
+   "suggestion": "Move the `tiffslide` import and `pip_install(\"tiffslide\")` out of the module top level and into `BigImageViewerLogic.installPreRequisites()` (or a lazy helper called when the user actually loads a slide), with user confirmation or a status message before installing.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Process-wide CUDA_VISIBLE_DEVICES environment variable modified in installPreRequisites",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 1214,
+   "line_end": 1214,
+   "evidence": "    os.environ[\"CUDA_VISIBLE_DEVICES\"] = \"0\"",
+   "explanation": "Calling `installPreRequisites()` (which happens whenever a WSI is loaded) mutates the process-wide environment variable `CUDA_VISIBLE_DEVICES` to `\"0\"`, affecting any other Slicer modules or extensions running in the same Slicer process. Moreover, `BigImageViewer` does not actually use CUDA in its active code.",
+   "suggestion": "Remove `os.environ[\"CUDA_VISIBLE_DEVICES\"] = \"0\"` from `installPreRequisites()`.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "12 MB screenshot committed to repository",
+   "file": "CMakeLists.txt",
+   "line_start": 12,
+   "line_end": 12,
+   "evidence": "- [info] Large files not available to read: Screenshots/1.png (12 MB)",
+   "explanation": "The repository commits a 12 MB screenshot (`Screenshots/1.png`) directly in the git tree, which bloats repository clones.",
+   "suggestion": "Compress the screenshot or host large screenshots outside the main source tree (e.g. in a separate documentation branch or release asset).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "NgffImageIOFileReader.load() does not install required packages before importing xarray and zarr",
+   "file": "NgffImageIO/NgffImageIO.py",
+   "line_start": 209,
+   "line_end": 212,
+   "evidence": "      # Read zarr image file\n      import xarray as xr\n      import zarr\n      ds = xr.open_zarr(zarr.ZipStore(filePath))",
+   "explanation": "`NgffImageIOFileReader.load()` imports `xarray` and `zarr` directly without calling `NgffImageIOLogic.installRequiredPythonPackages()` first (whereas `NgffImageIOFileWriter.write()` calls `xarrayFromVolume()`, which calls `installRequiredPythonPackages()`). If a user loads a `.zarr` file via Slicer's standard Add Data dialog before ever exporting one, `import xarray` or `import zarr` will raise `ModuleNotFoundError` and the file load will fail.",
+   "suggestion": "Call `NgffImageIOLogic.installRequiredPythonPackages()` at the beginning of `NgffImageIOFileReader.load()` before importing `xarray` and `zarr`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Undefined variable `key` in NgffImageIOLogic.xarrayFromVolume raises NameError when volume has attributes",
+   "file": "NgffImageIO/NgffImageIO.py",
+   "line_start": 115,
+   "line_end": 118,
+   "evidence": "        attrs = {\"xyzToPhysicalTransform\": np.flip(xyzToLpsMatrix)}\n        for attributeName in volumeNode.GetAttributeNames():\n            attrs[key] = volumeNode.GetAttribute(attributeName)\n        data_array = xr.DataArray(array_view, dims=dims, coords=coords, attrs=attrs)",
+   "explanation": "In `NgffImageIOLogic.xarrayFromVolume()`, the loop variable is `attributeName`, but the dictionary assignment uses an undefined variable `key` (`attrs[key] = ...`). Whenever a `volumeNode` has any MRML attributes (`volumeNode.GetAttributeNames()` is non-empty), `xarrayFromVolume` (and thus `NgffImageIOFileWriter.write`) will fail with `NameError: name 'key' is not defined`.",
+   "suggestion": "Replace `attrs[key] = volumeNode.GetAttribute(attributeName)` with `attrs[attributeName] = volumeNode.GetAttribute(attributeName)`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Red slice view interactor observers are never removed and remain active across all Slicer modules",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 165,
+   "line_end": 173,
+   "evidence": "    interactor = redView.interactorStyle().GetInteractor()\n    interactor.AddObserver(vtk.vtkCommand.RightButtonPressEvent, self.onRightButtonPressed)\n\n    interactor.AddObserver(vtk.vtkCommand.LeftButtonPressEvent, self.onLeftButtonPressed)\n    interactor.AddObserver(vtk.vtkCommand.LeftButtonReleaseEvent, self.onLeftButtonReleased)\n\n    interactor.AddObserver(vtk.vtkCommand.MouseWheelForwardEvent, self.onMouseWheelForwardEvent, 1.0)\n    interactor.AddObserver(vtk.vtkCommand.MouseWheelBackwardEvent, self.onMouseWheelBackwardEvent, 1.0)",
+   "explanation": "In `BigImageViewerWidget.__init__`, five VTK observers are added directly to the Red slice view interactor via `interactor.AddObserver(...)` instead of `self.addObserver(...)`, and their observer tags are never stored or removed on `exit()` or `cleanup()`. Additionally, `__init__` immediately forces `lm.setLayout(6)` (Red slice only). Once the user opens `BigImageViewer` once, scrolling the mouse wheel or left-clicking and releasing in the Red slice view continues to trigger `BigImageViewer` callbacks (`onLeftButtonReleased`, `onMouseWheelForwardEvent`, etc.) even after switching to other Slicer modules.",
+   "suggestion": "Use `self.addObserver(...)` (from `VTKObservationMixin`) or store and remove the observer tags when leaving the module (`exit()`) and in `cleanup()`, and only change layout or attach Red view interactor observers when the module is active (`enter()`).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "CLI modules call abort() / raise(SIGABRT) on error, which can crash Slicer if run as shared libraries",
+   "file": "NucleusSegmentation/include/utilitiesIO.hxx",
+   "line_start": 34,
+   "line_end": 39,
+   "evidence": "      catch ( itk::ExceptionObject &err)\n        {\n          std::cerr<< \"ExceptionObject caught !\" << std::endl;\n          std::cerr<< err << std::endl;\n          raise(SIGABRT);\n        }",
+   "explanation": "`NucleusSegmentation` is built via `SEMMacroBuildCLI` (which builds both a shared-library CLI module and an executable). Throughout `NucleusSegmentation` (`utilitiesIO.hxx`, `SFLSSegmentor2D.hxx`, `BinaryMaskAnalysisFilter.cxx`, `HAndEImageAnalysisFilter.cxx`, `HematoxylinImageSegmentationFilter.cxx`) and `ColorDecomposition.cxx` (line 69), error handling calls `raise(SIGABRT)` or `abort()`. If the CLI is executed in-process as a shared library (or if an invalid/corrupt image or parameter is encountered), calling `abort()` / `raise(SIGABRT)` terminates the entire Slicer application instead of returning `EXIT_FAILURE`.",
+   "suggestion": "Throw an exception (`itkGenericExceptionMacro` or `std::runtime_error`) and catch it in `main()` (the CLI entry point) to return `EXIT_FAILURE` cleanly instead of calling `abort()` or `raise(SIGABRT)`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Self-tests in BigImageViewer, ColorDecomposition, and NucleusSegmentation are left over from template and fail",
+   "file": "BigImageViewer/BigImageViewer.py",
+   "line_start": 1474,
+   "line_end": 1476,
+   "evidence": "    import SampleData\n    #registerSampleData()\n    inputVolume = SampleData.downloadSample('BigImageViewer1')",
+   "explanation": "In `BigImageViewerTest.test_BigImageViewer1`, `registerSampleData()` is commented out, so `'BigImageViewer1'` is never registered with `SampleData`. Running the self-test will fail when trying to download `'BigImageViewer1'`, and `BigImageViewerLogic.process()` only runs the template `thresholdscalarvolume` CLI rather than testing any `BigImageViewer` functionality. Furthermore, the C++ tests in `ColorDecomposition/Testing/Cxx/CMakeLists.txt` and `NucleusSegmentation/Testing/Cxx/CMakeLists.txt` pass `--sigma 2.5` (from the template CLI) which neither CLI accepts.",
+   "suggestion": "Update the Python and C++ tests to pass valid arguments and sample data for the actual modules.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Binary test data files under ColorDecomposition/Data and NucleusSegmentation/Data",
+  "Screenshots/1.png (12 MB binary image not available in text viewer)"
+ ],
+ "questions_for_author": [
+  "Can `slicer.util.pip_install(\"tiffslide\")` in `BigImageViewer/BigImageViewer.py` be moved from the top-level module import into `BigImageViewerLogic.installPreRequisites()` so packages are not installed during Slicer startup?"
+ ]
+}

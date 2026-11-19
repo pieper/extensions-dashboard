@@ -1,0 +1,139 @@
+{
+ "purpose": "Auto3dgm automatically samples and aligns collections of 3D biological surface meshes for geometric morphometric analysis. It is intended for researchers comparing shapes and exporting aligned meshes, landmarks, and transformations.",
+ "summary": "The separately exposed meshviewer can serve files to the network with path traversal, and visualization clears the current Slicer scene without warning. Distribution permission is also not established for the extension wrapper and forked viewer: the MIT license is scoped to the nested analysis package. Analysis imports can fail with newer SciPy, and several controls do not affect computation. The supplied source revision and catalog accessibility were not independently verified. 🔴 Do not merge yet: fix the data-exposure and scene-loss paths and establish distribution permission; review of the exact revision and catalog remains incomplete.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected visualization callbacks, output writing, the meshviewer CLI and its HTTP request handler. The viewer binds to all interfaces and permits traversal, while scene visualization clears existing scene data."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Inspected widget initialization and analysis imports: MOSEK is installed only after confirmation, but importing the analysis package sets a process-wide license environment variable if absent."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Inspected both CMakeLists files, the catalog metadata provided in the prompt, and the installed directory listings. The helper packages are installed, but a platform-specific binary and test fixtures are packaged; source revision and an actual build were not verified."
+  },
+  "license": {
+   "rating": "blocking",
+   "rationale": "The analysis subdirectory has an MIT license and several bundled libraries have notices, but no repository-wide license is present in the available tree; the wrapper and forked viewer have no clear distribution grant. External upstream license terms were not accessible."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected the GUI-to-analysis import chain, analysis options, export functions, and the empty Slicer module test. The code depends on a removed SciPy top-level symbol on affected versions, and advertised controls are not wired to the analysis."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "Inspected extension description, local readmes, UI help and tests. Local documentation is minimal and the registered Slicer test has no assertions, although there are separate analysis tests and a link to external documentation."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Meshviewer exposes files to the network and permits path traversal",
+   "file": "meshviewer/web_view_mesh/viewer.py",
+   "line_start": 20,
+   "line_end": 28,
+   "evidence": "    def translate_path(self, path):\n     if self.ext_prefix and self.path.startswith(self.ext_prefix):\n       return self.ext_dir_path + path[len(self.ext_prefix):]\n     else:\n       base_path = os.path.dirname(os.path.abspath(__file__))",
+   "explanation": "The separately installed meshviewer CLI calls serve_viewer, which listens on all interfaces without authentication. Its translate_path concatenates raw request paths without normalization or containment checks; a remote client able to reach port 8000 can use ../ components to read files accessible to the Slicer process, including files outside the selected mesh directory. The main visualization server button is commented out, but the CLI remains installed and separately invokable.",
+   "suggestion": "Remove the unused server or bind only to loopback, enforce resolved-path containment for both roots, and consider authentication and lifecycle management.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Viewing results silently clears the user's existing Slicer scene",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 845,
+   "line_end": 850,
+   "evidence": "  def viewAlignedMeshWithinSlicer(viewMeshFolder, viewLmkFolder):\n      slicer.mrmlScene.Clear(0)\n      modelDir = viewMeshFolder\n      modelFileExt = \"ply\"\n      numberOfColumns = 4\n      modelFiles = list(f for f in os.listdir(modelDir) if f.endswith('.' + modelFileExt))",
+   "explanation": "Both View Phase buttons call this function, which removes existing scene nodes without asking the user, even before checking whether the results folder exists. Unsaved images, segmentations, markups, and other scene work can be lost when a user merely requests visualization.",
+   "suggestion": "Do not clear the scene; use isolated view nodes or explicitly ask to save and confirm before replacing existing data.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "blocking",
+   "title": "Distribution terms do not cover the wrapper and forked web viewer",
+   "file": "meshviewer/web_view_mesh/README.md",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "# web_view_mesh\n\nFork of [Tingran Gao's](https://github.com/trgao10) (trgao10@math.duke.edu) webGL 3D mesh viewer implemented in [PuenteAligment](https://github.com/trgao10/PuenteAlignment) repository. Some modifications made by Julie Winchester (julia.winchester@duke.edu).",
+   "explanation": "The available repository has an MIT license only under Auto3dgm/auto3dgm_nazar, not at the extension root or in meshviewer. The installed viewer is identified as a fork, but its README provides attribution rather than distribution terms; the wrapper Auto3dgm/Auto3dgm.py likewise has no identified license. The bundled libraries' individual notices do not grant rights to these other files.",
+   "suggestion": "Provide an extension-wide license covering the wrapper and author contributions, and identify and include the upstream license and any required notices for the forked viewer.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Export silently overwrites existing output files",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 635,
+   "line_end": 646,
+   "evidence": "    exportFolder = os.path.join(outputFolder, 'phase' + str(p))\n    subDirs = ['aligned_meshes', 'aligned_landmarks', 'rotation', 'scale_info', 'landmarks_OSS', 'original_meshes']\n\n    Auto3dgmLogic.prepareDirs(exportFolder, subDirs)\n    Auto3dgmLogic.alignOriginalMeshes(Auto3dgmData, p)\n    Auto3dgmLogic.saveAlignedMeshes(Auto3dgmData, os.path.join(exportFolder, subDirs[0]))",
+   "explanation": "Exports always use fixed phase subdirectories and input-derived filenames. Existing directories are reused, and writers such as numpy.savetxt and the PLY writer write to the same paths without a collision check. Re-running or choosing a folder with prior results can silently destroy earlier files.",
+   "suggestion": "Detect collisions and ask before overwriting, or create a fresh uniquely named run directory.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Analysis package fails to import when SciPy lacks top-level square",
+   "file": "Auto3dgm/auto3dgm_nazar/analysis/correspondence.py",
+   "line_start": 5,
+   "line_end": 10,
+   "evidence": "from scipy.sparse import csr_matrix, identity, find, lil_matrix, coo_matrix\nfrom scipy.sparse.csgraph import minimum_spanning_tree, shortest_path\nfrom scipy import sparse as sp\nfrom scipy.sparse.linalg import norm\nfrom scipy import square\nimport numpy as np",
+   "explanation": "On SciPy versions that no longer expose square at the package top level, this raises ImportError. Importing the dataset factory first executes auto3dgm_nazar/__init__.py, which imports app.py and then this module, so even Load Data fails before analysis can start.",
+   "suggestion": "Use numpy.square and test the full Load Data and analysis path against supported Slicer releases.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Analysis controls for seed, iteration limit, and phase count are ignored",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 260,
+   "line_end": 266,
+   "evidence": "  def subStepButtonOnLoad(self):\n    print(\"Mocking a call to the Logic service AL002.1\")\n    # Store the keys\n    self.Auto3dgmData.phase1SampledPoints = self.phase1PointNumber.value\n    self.Auto3dgmData.phase2SampledPoints = self.phase2PointNumber.value\n    self.Auto3dgmData.fpsSeed=self.fpsSeed.value\n    Auto3dgmLogic.subsample(self.Auto3dgmData,list_of_pts = [self.phase1PointNumber.value,self.phase2PointNumber.value], meshes=self.Auto3dgmData.datasetCollection.datasets[0])",
+   "explanation": "The selected FPS seed is stored but subsample passes an empty seed dictionary and the sampler calls random.seed() without that value. The maximum iteration slider and phase choice are likewise not read by the analysis; Run all always computes both phases and the optimizer uses a hard-coded 1000 iterations. Users can believe results are reproducible or configured when they are not.",
+   "suggestion": "Pass each selected value through to the relevant algorithm, or remove unsupported controls; add tests showing the settings affect execution.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Exporting rotations mutates the stored analysis result",
+   "file": "Auto3dgm/Auto3dgm.py",
+   "line_start": 720,
+   "line_end": 729,
+   "evidence": "    for idx in range(len(m)):\n      mesh = m[idx]\n      rot = r[idx]\n      # rot = np.linalg.inv(rot)\n      # pad rot into 4 x 4 transform matrix in slicer\n      rot[2][0] = -1 * rot[2][0]\n      rot[2][1] = -1 * rot[2][1]\n      rot[0][2] = -1 * rot[0][2]\n      rot[1][2] = -1 * rot[1][2]\n      rot = np.vstack((rot.T, [0, 0, 0]))  # add a 4-th column for center info",
+   "explanation": "rot aliases an array in corr.globalized_alignment['r']; changing elements in place alters the saved analysis state. A subsequent export or alignment based on that state can produce different or incorrect meshes and landmarks compared with the original result, particularly when rotations have nonzero z-axis cross terms.",
+   "suggestion": "Copy each rotation before coordinate conversion and add a repeated-export consistency test.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Installed analysis directory includes a prebuilt platform-specific binary and test data",
+   "file": "Auto3dgm/CMakeLists.txt",
+   "line_start": 21,
+   "line_end": 25,
+   "evidence": "install(DIRECTORY \"auto3dgm_nazar\"\n  DESTINATION \"${Slicer_INSTALL_QTSCRIPTEDMODULES_BIN_DIR}\"\n  COMPONENT Runtime\n  USE_SOURCE_PERMISSIONS\n  )",
+   "explanation": "This installs the entire source subtree, including the committed CPython 3.6 Windows _lapjv binary and large test fixtures, even though the active correspondence code uses SciPy and MOSEK rather than lap_windows. The binary's provenance and licensing were not independently verified and it is not suitable for other Python versions.",
+   "suggestion": "Exclude tests and unused binaries from runtime packages and remove or document the binary with provenance and applicable license.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Cannot run Slicer, build, execute tests, or validate the current Slicer/SciPy versions.",
+  "The supplied commit and master branch resolution, repository accessibility, catalog schema validation, previous revision, and CI results were not independently verified.",
+  "External website, upstream fork licensing, MOSEK distribution terms and behavior, and third-party JavaScript and native binary provenance were not fully inspected.",
+  "Large binary fixtures, image assets, and compiled binaries could not be inspected as source."
+ ],
+ "questions_for_author": [
+  "What license applies to the extension wrapper and viewer fork, including upstream contributions and the bundled LAP binary?",
+  "Is the meshviewer CLI still needed, and should it be distributed at all?"
+ ]
+}
