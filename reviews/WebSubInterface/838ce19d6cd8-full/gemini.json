@@ -1,0 +1,50 @@
+{
+ "purpose": "WebSubInterface connects 3D Slicer as an Image Display client to a WebSub/FHIRcast-style messaging hub (either a local FastAPI/WebSocket hub launched by the module or a remote cloud hub) so users can open studies from browser worklists, synchronize scenes and annotations, and participate in multi-user conferences. It is intended for imaging informatics researchers, educators, and clinicians exploring interoperable worklists, reporting, and collaborative viewing workflows.",
+ "summary": "WebSubInterface is a well-structured 3D Slicer extension providing a WebSub/FHIRcast-style hub and Image Display client for worklist integration, scene synchronization, and multi-user conferencing. It meets all three Slicer Extensions Index admission requirements: it is licensed under the MIT License, its CMake configuration and catalog entry properly package all required module and library files, and its security posture is well-designed (explicit user confirmation before installing pip packages or sharing local DICOM data, localhost binding with random per-session secrets for the local hub, CSRF state validation on OIDC loopback login, and safe zip extraction). 🟢 Recommend merge.",
+ "overall": "no concerns",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected all module scripts, hub server routes, OIDC loopback authentication (`oidc_browser.py`), zip extraction (`safe_zip.py`), and file download/export handlers (`image_display_client_load.py`, `local_dicom_export.py`). The embedded hub binds to `127.0.0.1` with randomly generated per-run JWT and admin secrets, connecting to a hub displays an explicit PHI/DICOM sharing confirmation dialog, zip extraction guards against path traversal and zip bombs, and proxy downloads are restricted to an allowlist of GitHub hosts."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected `WebSubInterface/WebSubInterface.py`, `WebSubInterface/Lib/python_deps.py`, `WebSubInterface/Lib/repo_paths.py`, and `WebSubInterface/Resources/requirements.txt`. Heavy imports and `sys.path` additions are deferred until the user opens the module widget, and Python dependencies (`fastapi`, `uvicorn[standard]`, `python-multipart`, `aiohttp`, `psutil`, `PyJWT[crypto]`) are only installed at action time (Start or Connect) after explicit user confirmation via `slicer.packaging.pip_ensure` or `confirmYesNoDisplay`."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "Inspected `CMakeLists.txt`, `WebSubInterface/CMakeLists.txt`, and the catalog entry. All Python scripts in `Lib/` are listed in `MODULE_PYTHON_SCRIPTS`, and the bundled `hub/`, `python_client/`, and `image_display/lib` trees are installed via CMake `install(DIRECTORY ...)` rules into the module directory where `repo_paths.py` resolves them."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE.txt` and `WebSubInterface/WebSubInterface.py`. The repository is distributed under a standard MIT License with clear permissions and appropriate third-party acknowledgements and trademark disclaimers."
+  },
+  "soundness": {
+   "rating": "ok",
+   "rationale": "Inspected `WebSubInterface.py`, `Lib/HubServer.py`, `Lib/ImageDisplayClient.py`, and `image_display/lib/`. The module cleanly separates background asyncio/WebSocket networking onto a daemon thread while marshaling MRML/Qt operations onto the main thread via a `QTimer` queue, manages the local hub child process lifecycle with `QProcess`, and cleans up temporary directories and connections on disconnect/cleanup."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md`, `WebSubInterface.py`, `WebSubInterface/docs/`, and `WebSubInterface/Testing/`. The extension provides thorough documentation, architecture diagrams, quick-start instructions for both cloud OIDC and local hub setups, and a suite of unit and smoke tests."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Hardcoded developer checkout paths in LiveScene export helper",
+   "file": "WebSubInterface/image_display/lib/live_scene_export.py",
+   "line_start": 42,
+   "line_end": 46,
+   "evidence": "        candidates.extend(\n            [\n                os.path.normpath(\n                    os.path.join(here, \"..\", \"..\", \"..\", \"..\", \"..\", \"pw46\", \"SlicerLive\", \"LiveStory\")\n                ),",
+   "explanation": "When exporting a live scene, `_try_import_serialize_mrson()` searches hardcoded developer-specific sibling directory paths (`pw46/SlicerLive/LiveStory`, `~/src/pw46/SlicerLive/LiveStory`) and prepends them to `sys.path` if they exist. While harmless on systems where those folders do not exist, relying on hardcoded developer workspace paths is brittle and could import unexpected local code if such a path exists.",
+   "suggestion": "Rely on standard Slicer module discovery (where Slicer adds installed or additional module paths to `sys.path`) or an explicit user setting/environment variable rather than hardcoded developer checkout paths.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Runtime execution of the FastAPI hub server and Slicer UI inside a live 3D Slicer session.",
+  "External cloud hub services (bellehumeur-engineering.com and oidc.bellehumeur-engineering.com) and external spa-clients.zip release assets."
+ ],
+ "questions_for_author": []
+}

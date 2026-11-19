@@ -1,0 +1,88 @@
+{
+ "purpose": "WebSubInterface connects 3D Slicer to WebSub hubs for collaborative imaging, worklists, and conferences. It also lets users start a local hub and share or receive imaging data with connected clients.",
+ "summary": "The local hub requires attention to conference routing and sensitive information in logs. The OIDC admin portal also appears unusable with an ordinary OIDC session. The supplied source was inspected, but the catalog branch and exact revision could not be independently resolved or built. 🔴 Do not merge yet: fix the sensitive-data exposure paths and verify the selected revision.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected conference publish routing, DICOM worklist responses, hub logging, and admin WebSocket authentication. Conference fan-out bypasses destination filters, and diagnostic output can include patient data or administrative credentials."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected python_deps.py, Resources/requirements.txt, and module initialization. Installation is deferred to user actions with confirmation; the listed direct requirements do not pin Slicer-bundled packages or install Qt, VTK, or PyTorch."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "Inspected both CMake files and source imports: helper scripts are listed or installed by directory rules, and EXTENSION_DEPENDS is consistent with the supplied empty dependency list. The catalog branch and its current revision, build, and installed layout could not be independently verified."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected LICENSE.txt, which grants MIT redistribution rights for the repository. Optional separately downloaded SPA release assets were not available for license verification."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected the client, server, and admin page. The OIDC admin UI uses a session JWT although privileged endpoints require the separate admin token, resulting in repeated login rather than an operational dashboard."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected the module's quick-start instructions, hub README, and testing README. They describe local and cloud workflows, PHI precautions, and offline/live smoke tests, although tests were not run."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Conference fan-out bypasses event and destination filters",
+   "file": "WebSubInterface/hub/Lib/publish.py",
+   "line_start": 231,
+   "line_end": 234,
+   "evidence": "            for participant_topic in all_participants:\n                # Find subscriptions for participant\n                for sub in hub.subscriptions:\n                    if sub.get(\"topic\") == participant_topic and sub.get(\"channel\") == \"websocket\":",
+   "explanation": "Unlike the preceding ordinary delivery loop, this conference loop ignores subscribed event types and target actor, product, and subscriber filters. During a conference, a targeted message, including a DICOM transfer with downloadable payload IDs, is delivered to every connected subscriber on every participant topic rather than only the intended recipient.",
+   "suggestion": "Apply event and all destination filters to conference delivery as well, with tests covering targeted binary messages and unrelated subscribers.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Administrative token is placed in the WebSocket URL",
+   "file": "WebSubInterface/hub/Resources/admin.html",
+   "line_start": 2702,
+   "line_end": 2706,
+   "evidence": "            let wsUrl = `${protocol}//${window.location.host}/ws/admin`;\n            const token = getStoredAdminToken();\n            if (token) {\n                // access_token = hub session JWT (oidc); admin_token = HUB_ADMIN_TOKEN.\n                wsUrl += `?access_token=${encodeURIComponent(token)}&admin_token=${encodeURIComponent(token)}`;",
+   "explanation": "The privileged hub admin token is duplicated in the WebSocket query string. WebSocket handshake and reverse-proxy logs can retain that URL; anyone with access to such logs can reuse the token to obtain the admin snapshot, including audit data, or reset the hub. The local hub forwards subprocess output to Slicer's console.",
+   "suggestion": "Authenticate the WebSocket without a reusable credential in the URL, for example using a short-lived single-use ticket or a securely authenticated post-connect exchange; ensure handshake logs cannot contain secrets.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Request response previews can write patient identifiers to hub logs",
+   "file": "WebSubInterface/hub/Lib/hub_request.py",
+   "line_start": 390,
+   "line_end": 395,
+   "evidence": "                    response_preview = \"\"\n                    try:\n                        response_preview = json.dumps(responses_collected)[:600]\n                    except Exception:\n                        response_preview = str(responses_collected)[:600]\n                    hub.log(",
+   "explanation": "Hub request responses include local DICOM worklist data, including patient names and IDs (local_dicom_worklist.py lines 116–139). The hub logs the first 200 characters of the serialized response at INFO level, potentially exposing those identifiers in Slicer console output or server logs without a separate warning about this logging.",
+   "suggestion": "Log only counts, event types and correlation IDs; do not log serialized response payloads or patient-derived values by default.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "OIDC admin dashboard retries login with a token the server rejects",
+   "file": "WebSubInterface/hub/Resources/admin.html",
+   "line_start": 1391,
+   "line_end": 1395,
+   "evidence": "            if (response.status === 401) {\n                if (getStoredAuthMode() === 'oidc') {\n                    setStoredAdminToken('');\n                    redirectToOidcLogin('/oauth/login');\n                    return response;",
+   "explanation": "The page stores the ordinary OIDC session token, but oauth_tokens.py lines 389–395 require HUB_ADMIN_TOKEN for privileged routes and explicitly reject ordinary client JWTs. In OIDC mode a rejected request clears the token and redirects to the same login rather than allowing entry of the separate admin token, so the dashboard cannot normally authenticate.",
+   "suggestion": "Provide a safe way to supply or acquire the required admin authorization in OIDC mode and test the complete dashboard login flow.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The supplied source snapshot could not be independently tied to commit 838ce19d6cd87e23072d5f22a23ece40ed5867cf or to the current tip of the catalog's main branch; repository and revision accessibility were not verified.",
+  "No code, builds, automated tests, or Slicer runtime checks were executed; installed paths and actual WebSocket/proxy logging behavior were not observed.",
+  "Optional SPA release assets, container images, third-party dependency transitive requirements and their distribution licenses were not fetched or exhaustively inspected.",
+  "The previous catalog entry, PR checklist and CI results were not available."
+ ],
+ "questions_for_author": []
+}

@@ -1,0 +1,593 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Administrative token is placed in the WebSocket URL",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/hub/Resources/admin.html",
+   "line": 2702,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Administrative token is placed in the WebSocket URL",
+     "file": "WebSubInterface/hub/Resources/admin.html",
+     "line_start": 2702,
+     "line_end": 2706,
+     "evidence": "            let wsUrl = `${protocol}//${window.location.host}/ws/admin`;\n            const token = getStoredAdminToken();\n            if (token) {\n                // access_token = hub session JWT (oidc); admin_token = HUB_ADMIN_TOKEN.\n                wsUrl += `?access_token=${encodeURIComponent(token)}&admin_token=${encodeURIComponent(token)}`;",
+     "explanation": "The privileged hub admin token is duplicated in the WebSocket query string. WebSocket handshake and reverse-proxy logs can retain that URL; anyone with access to such logs can reuse the token to obtain the admin snapshot, including audit data, or reset the hub. The local hub forwards subprocess output to Slicer's console.",
+     "suggestion": "Authenticate the WebSocket without a reusable credential in the URL, for example using a short-lived single-use ticket or a securely authenticated post-connect exchange; ensure handshake logs cannot contain secrets.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/Resources/admin.html",
+      "line": 2702
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "admin.html:2702-2706 does put the token in the /ws/admin query string. The hub is loopback-bound by default (hub.py/README: 127.0.0.1) and the token is a per-run random secret (HubServer.py:214). HubServer.py:312 already opens the admin page with ?admin_token=, and the docs describe that as the intended mechanism. Token-in-URL is poor practice, but there is no concrete path to harm, so it is not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "WebSubInterface/hub/Resources/admin.html:2702-2710 explicitly builds and opens a URL containing the stored token twice: `wsUrl += `?access_token=${encodeURIComponent(token)}&admin_token=${encodeURIComponent(token)}`;`. WebSubInterface/hub/Lib/oauth_tokens.py:389-412 accepts that token for privileged access; routes/admin.py:78-86 and 133-148 expose the snapshot and reset. URL logging by a WebSocket server or reverse proxy can disclose a reusable credential; the exact logging configuration and an actual logged handshake were not checked. HubServer.py:219-231 and 315-321 show subprocess output is forwarded to the Slicer console, but do not by themselves prove that the handshake is logged there."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/hub/Resources/admin.html:2702-2706 and WebSubInterface/Lib/HubServer.py:309-313. The browser WebSocket API does not support custom HTTP headers, so passing credentials via query string on `/ws/admin` is standard practice for browser WebSocket handshakes. Moreover, the embedded Slicer hub binds only to `127.0.0.1` with a per-run random token (`HubServer.py:214,222`), and `logging_setup.py:33-45` filters paths without query parameters, while uvicorn's WS logs do not include query strings by default. Thus this is minor/hardening rather than a blocking issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Conference fan-out bypasses event and destination filters",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/hub/Lib/publish.py",
+   "line": 231,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Conference fan-out bypasses event and destination filters",
+     "file": "WebSubInterface/hub/Lib/publish.py",
+     "line_start": 231,
+     "line_end": 234,
+     "evidence": "            for participant_topic in all_participants:\n                # Find subscriptions for participant\n                for sub in hub.subscriptions:\n                    if sub.get(\"topic\") == participant_topic and sub.get(\"channel\") == \"websocket\":",
+     "explanation": "Unlike the preceding ordinary delivery loop, this conference loop ignores subscribed event types and target actor, product, and subscriber filters. During a conference, a targeted message, including a DICOM transfer with downloadable payload IDs, is delivered to every connected subscriber on every participant topic rather than only the intended recipient.",
+     "suggestion": "Apply event and all destination filters to conference delivery as well, with tests covering targeted binary messages and unrelated subscribers.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/Lib/publish.py",
+      "line": 231
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "publish.py:231-234 loops over conference participant topics and only checks topic and channel. The earlier loop at lines 112-121 applies the event, target actor, product and subscriber filters, and the conference loop does not. Targeted messages can therefore reach other conference participants' subscribers. Conferences are a deliberate broadcast among participants, and messages are only sent to subscribers of conference topics. This is a routing and privacy bug rather than a blocking safety issue."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "WebSubInterface/hub/Lib/publish.py:110-120 applies event and all three target filters for normal delivery, but lines 227-248 check only participant topic, channel, publisher echo and endpoint before `await websocket.send_text(ws_text)`. Consequently a targeted publish can reach nonmatching conference participants, not literally the publisher or endpoints already sent. binary_publish.py:162-166 and 190-201 show stored payload IDs; routes/payloads.py:16-20 requires bearer authentication but does not check recipient, so a participant with a valid bearer and leaked ID can retrieve the corresponding unexpired payload."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/hub/Lib/publish.py:111-121 vs 231-245. In the normal subscription delivery loop (lines 111-121), `_subscription_handles_event`, `_subscription_accepts_target_actor`, `_subscription_accepts_target_product`, and `_subscription_accepts_target_subscriber` are checked. In the conference fan-out loop (lines 231-245), every websocket subscription matching `participant_topic` receives `ws_text` without checking event subscription or target actor/product/subscriber filters. Note that in `_handle_hub_request` (WebSubInterface/hub/Lib/hub_request.py:147-168), conference expansion DOES preserve event, actor, and product filters. Bypassing them in `publish.py` is a real bug that can send targeted messages or events to unintended subscribers in a conference, though conferences are explicit opt-in collaborations with a PHI warning dialog (`ConferenceDialog.py:32`, `ImageDisplayClient.py:560-571`)."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Request response previews can write patient identifiers to hub logs",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/hub/Lib/hub_request.py",
+   "line": 390,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Request response previews can write patient identifiers to hub logs",
+     "file": "WebSubInterface/hub/Lib/hub_request.py",
+     "line_start": 390,
+     "line_end": 395,
+     "evidence": "                    response_preview = \"\"\n                    try:\n                        response_preview = json.dumps(responses_collected)[:600]\n                    except Exception:\n                        response_preview = str(responses_collected)[:600]\n                    hub.log(",
+     "explanation": "Hub request responses include local DICOM worklist data, including patient names and IDs (local_dicom_worklist.py lines 116–139). The hub logs the first 200 characters of the serialized response at INFO level, potentially exposing those identifiers in Slicer console output or server logs without a separate warning about this logging.",
+     "suggestion": "Log only counts, event types and correlation IDs; do not log serialized response payloads or patient-derived values by default.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/Lib/hub_request.py",
+      "line": 390
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "hub_request.py:390-403 logs the first 200 characters of the collated responses with hub.log. The log goes to the local hub's console. The data could include worklist identifiers, but nothing is transmitted off the machine. This is a logging-hygiene issue, not blocking."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "WebSubInterface/hub/Lib/hub_request.py:390-402 logs `f\"responses={response_preview[:200]}\"`; state.py:57-59 uses INFO by default. routes/bind_ws.py:149-159 includes response data in that list. image_display/lib/image_display_client_requests.py:195-201,219-224 sends local worklist data and local_dicom_worklist.py:116-117,129-137 includes patient name and ID, with patient name also embedded in the earlier `name` field. Depending on response metadata lengths, identifying content can fall within the first 200 characters and enter server logs or the local Slicer console (Lib/HubServer.py:315-321). No particular real patient record or deployed log was inspected."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/hub/Lib/hub_request.py:390-403 and WebSubInterface/image_display/lib/local_dicom_worklist.py:116-143. `_handle_hub_request` logs `responses={response_preview[:200]}` via `hub.log` (which emits at INFO level to stdout/Slicer console). When a `slicerworklist-request` or `studyinfo-request` is answered from the local DICOM database, the serialized response includes `patientName`, `patientID`, and `studyInstanceUID`. Users are shown an explicit PHI sharing confirmation dialog before connecting (`ImageDisplayClient.py:560-570`), and local hub logs stay in the local Slicer console, but truncating/omitting response bodies from INFO logs on shared hubs would avoid unintended PHI retention in server logs."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "OIDC admin dashboard retries login with a token the server rejects",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "WebSubInterface/hub/Resources/admin.html",
+   "line": 1391,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "OIDC admin dashboard retries login with a token the server rejects",
+     "file": "WebSubInterface/hub/Resources/admin.html",
+     "line_start": 1391,
+     "line_end": 1395,
+     "evidence": "            if (response.status === 401) {\n                if (getStoredAuthMode() === 'oidc') {\n                    setStoredAdminToken('');\n                    redirectToOidcLogin('/oauth/login');\n                    return response;",
+     "explanation": "The page stores the ordinary OIDC session token, but oauth_tokens.py lines 389–395 require HUB_ADMIN_TOKEN for privileged routes and explicitly reject ordinary client JWTs. In OIDC mode a rejected request clears the token and redirects to the same login rather than allowing entry of the separate admin token, so the dashboard cannot normally authenticate.",
+     "suggestion": "Provide a safe way to supply or acquire the required admin authorization in OIDC mode and test the complete dashboard login flow.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/Resources/admin.html",
+      "line": 1391
+     }
+    }
+   ]
+  },
+  {
+   "title": "Hardcoded developer checkout paths in LiveScene export helper",
+   "category": "soundness",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "WebSubInterface/image_display/lib/live_scene_export.py",
+   "line": 42,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Hardcoded developer checkout paths in LiveScene export helper",
+     "file": "WebSubInterface/image_display/lib/live_scene_export.py",
+     "line_start": 42,
+     "line_end": 46,
+     "evidence": "        candidates.extend(\n            [\n                os.path.normpath(\n                    os.path.join(here, \"..\", \"..\", \"..\", \"..\", \"..\", \"pw46\", \"SlicerLive\", \"LiveStory\")\n                ),",
+     "explanation": "When exporting a live scene, `_try_import_serialize_mrson()` searches hardcoded developer-specific sibling directory paths (`pw46/SlicerLive/LiveStory`, `~/src/pw46/SlicerLive/LiveStory`) and prepends them to `sys.path` if they exist. While harmless on systems where those folders do not exist, relying on hardcoded developer workspace paths is brittle and could import unexpected local code if such a path exists.",
+     "suggestion": "Rely on standard Slicer module discovery (where Slicer adds installed or additional module paths to `sys.path`) or an explicit user setting/environment variable rather than hardcoded developer checkout paths.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/image_display/lib/live_scene_export.py",
+      "line": 42
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Administrative token is placed in the WebSocket URL",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/hub/Resources/admin.html",
+   "line": 2702,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Administrative token is placed in the WebSocket URL",
+     "file": "WebSubInterface/hub/Resources/admin.html",
+     "line_start": 2702,
+     "line_end": 2706,
+     "evidence": "            let wsUrl = `${protocol}//${window.location.host}/ws/admin`;\n            const token = getStoredAdminToken();\n            if (token) {\n                // access_token = hub session JWT (oidc); admin_token = HUB_ADMIN_TOKEN.\n                wsUrl += `?access_token=${encodeURIComponent(token)}&admin_token=${encodeURIComponent(token)}`;",
+     "explanation": "The privileged hub admin token is duplicated in the WebSocket query string. WebSocket handshake and reverse-proxy logs can retain that URL; anyone with access to such logs can reuse the token to obtain the admin snapshot, including audit data, or reset the hub. The local hub forwards subprocess output to Slicer's console.",
+     "suggestion": "Authenticate the WebSocket without a reusable credential in the URL, for example using a short-lived single-use ticket or a securely authenticated post-connect exchange; ensure handshake logs cannot contain secrets.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/Resources/admin.html",
+      "line": 2702
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "admin.html:2702-2706 does put the token in the /ws/admin query string. The hub is loopback-bound by default (hub.py/README: 127.0.0.1) and the token is a per-run random secret (HubServer.py:214). HubServer.py:312 already opens the admin page with ?admin_token=, and the docs describe that as the intended mechanism. Token-in-URL is poor practice, but there is no concrete path to harm, so it is not blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "WebSubInterface/hub/Resources/admin.html:2702-2710 explicitly builds and opens a URL containing the stored token twice: `wsUrl += `?access_token=${encodeURIComponent(token)}&admin_token=${encodeURIComponent(token)}`;`. WebSubInterface/hub/Lib/oauth_tokens.py:389-412 accepts that token for privileged access; routes/admin.py:78-86 and 133-148 expose the snapshot and reset. URL logging by a WebSocket server or reverse proxy can disclose a reusable credential; the exact logging configuration and an actual logged handshake were not checked. HubServer.py:219-231 and 315-321 show subprocess output is forwarded to the Slicer console, but do not by themselves prove that the handshake is logged there."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/hub/Resources/admin.html:2702-2706 and WebSubInterface/Lib/HubServer.py:309-313. The browser WebSocket API does not support custom HTTP headers, so passing credentials via query string on `/ws/admin` is standard practice for browser WebSocket handshakes. Moreover, the embedded Slicer hub binds only to `127.0.0.1` with a per-run random token (`HubServer.py:214,222`), and `logging_setup.py:33-45` filters paths without query parameters, while uvicorn's WS logs do not include query strings by default. Thus this is minor/hardening rather than a blocking issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Conference fan-out bypasses event and destination filters",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/hub/Lib/publish.py",
+   "line": 231,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Conference fan-out bypasses event and destination filters",
+     "file": "WebSubInterface/hub/Lib/publish.py",
+     "line_start": 231,
+     "line_end": 234,
+     "evidence": "            for participant_topic in all_participants:\n                # Find subscriptions for participant\n                for sub in hub.subscriptions:\n                    if sub.get(\"topic\") == participant_topic and sub.get(\"channel\") == \"websocket\":",
+     "explanation": "Unlike the preceding ordinary delivery loop, this conference loop ignores subscribed event types and target actor, product, and subscriber filters. During a conference, a targeted message, including a DICOM transfer with downloadable payload IDs, is delivered to every connected subscriber on every participant topic rather than only the intended recipient.",
+     "suggestion": "Apply event and all destination filters to conference delivery as well, with tests covering targeted binary messages and unrelated subscribers.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/Lib/publish.py",
+      "line": 231
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "publish.py:231-234 loops over conference participant topics and only checks topic and channel. The earlier loop at lines 112-121 applies the event, target actor, product and subscriber filters, and the conference loop does not. Targeted messages can therefore reach other conference participants' subscribers. Conferences are a deliberate broadcast among participants, and messages are only sent to subscribers of conference topics. This is a routing and privacy bug rather than a blocking safety issue."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "WebSubInterface/hub/Lib/publish.py:110-120 applies event and all three target filters for normal delivery, but lines 227-248 check only participant topic, channel, publisher echo and endpoint before `await websocket.send_text(ws_text)`. Consequently a targeted publish can reach nonmatching conference participants, not literally the publisher or endpoints already sent. binary_publish.py:162-166 and 190-201 show stored payload IDs; routes/payloads.py:16-20 requires bearer authentication but does not check recipient, so a participant with a valid bearer and leaked ID can retrieve the corresponding unexpired payload."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/hub/Lib/publish.py:111-121 vs 231-245. In the normal subscription delivery loop (lines 111-121), `_subscription_handles_event`, `_subscription_accepts_target_actor`, `_subscription_accepts_target_product`, and `_subscription_accepts_target_subscriber` are checked. In the conference fan-out loop (lines 231-245), every websocket subscription matching `participant_topic` receives `ws_text` without checking event subscription or target actor/product/subscriber filters. Note that in `_handle_hub_request` (WebSubInterface/hub/Lib/hub_request.py:147-168), conference expansion DOES preserve event, actor, and product filters. Bypassing them in `publish.py` is a real bug that can send targeted messages or events to unintended subscribers in a conference, though conferences are explicit opt-in collaborations with a PHI warning dialog (`ConferenceDialog.py:32`, `ImageDisplayClient.py:560-571`)."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Request response previews can write patient identifiers to hub logs",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "WebSubInterface/hub/Lib/hub_request.py",
+   "line": 390,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Request response previews can write patient identifiers to hub logs",
+     "file": "WebSubInterface/hub/Lib/hub_request.py",
+     "line_start": 390,
+     "line_end": 395,
+     "evidence": "                    response_preview = \"\"\n                    try:\n                        response_preview = json.dumps(responses_collected)[:600]\n                    except Exception:\n                        response_preview = str(responses_collected)[:600]\n                    hub.log(",
+     "explanation": "Hub request responses include local DICOM worklist data, including patient names and IDs (local_dicom_worklist.py lines 116–139). The hub logs the first 200 characters of the serialized response at INFO level, potentially exposing those identifiers in Slicer console output or server logs without a separate warning about this logging.",
+     "suggestion": "Log only counts, event types and correlation IDs; do not log serialized response payloads or patient-derived values by default.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "WebSubInterface/hub/Lib/hub_request.py",
+      "line": 390
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "hub_request.py:390-403 logs the first 200 characters of the collated responses with hub.log. The log goes to the local hub's console. The data could include worklist identifiers, but nothing is transmitted off the machine. This is a logging-hygiene issue, not blocking."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "WebSubInterface/hub/Lib/hub_request.py:390-402 logs `f\"responses={response_preview[:200]}\"`; state.py:57-59 uses INFO by default. routes/bind_ws.py:149-159 includes response data in that list. image_display/lib/image_display_client_requests.py:195-201,219-224 sends local worklist data and local_dicom_worklist.py:116-117,129-137 includes patient name and ID, with patient name also embedded in the earlier `name` field. Depending on response metadata lengths, identifying content can fall within the first 200 characters and enter server logs or the local Slicer console (Lib/HubServer.py:315-321). No particular real patient record or deployed log was inspected."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Verified in WebSubInterface/hub/Lib/hub_request.py:390-403 and WebSubInterface/image_display/lib/local_dicom_worklist.py:116-143. `_handle_hub_request` logs `responses={response_preview[:200]}` via `hub.log` (which emits at INFO level to stdout/Slicer console). When a `slicerworklist-request` or `studyinfo-request` is answered from the local DICOM database, the serialized response includes `patientName`, `patientID`, and `studyInstanceUID`. Users are shown an explicit PHI sharing confirmation dialog before connecting (`ImageDisplayClient.py:560-570`), and local hub logs stay in the local Slicer console, but truncating/omitting response bodies from INFO logs on shared hubs would avoid unintended PHI retention in server logs."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (blocking, minor)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "I found no concealed behavior, no data exfiltration and no download-and-execute. Dependency installs go through python_deps.py, which uses packaging.pip_ensure or a confirmation dialog (lines 31-84). The hub binds to loopback by default. The issues above (token in the WebSocket URL, conference filter bypass, response preview in logs) are minor hygiene problems, so I rate safety minor."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": null,
+     "rating": "blocking",
+     "reason": "Safety is blocking based on concrete confidentiality failures in WebSubInterface/hub/Lib/publish.py:227-248 and hub_request.py:390-402, and reusable admin credentials in Resources/admin.html:2700-2710. I also inspected payload retrieval, admin authorization, and hub logging. Not checked: execution, actual server/proxy logs, full repository audit, external dependencies and whether checkout corresponds exactly to commit 838ce19d6cd8."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": null,
+     "rating": "minor",
+     "reason": "Checked WebSubInterface/WebSubInterface.py, Lib/HubServer.py, Lib/ImageDisplayClient.py, Lib/python_deps.py, hub/hub.py, hub/Lib/publish.py, hub/Lib/hub_request.py, and hub/Lib/routes/admin.py. The extension asks for user confirmation before installing pip packages (`Lib/python_deps.py:31-78`) and before connecting/sharing local DICOM (`Lib/ImageDisplayClient.py:560-571`), binds the local hub to `127.0.0.1` (`Lib/HubServer.py:222`), and gates admin endpoints with a random token (`Lib/HubServer.py:214,227`). The issues raised (conference fan-out missing target/event filters in `publish.py:231-234`, response preview logging in `hub_request.py:390-403`, and query-string WS admin token in `admin.html:2702-2706`) are non-malicious design/filtering issues rather than blocking admission vulnerabilities."
+    }
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "concern"
+   },
+   "outcome": "settled: minor (concern, minor)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "The conference fan-out in publish.py:231-234 skips the target filters. Responses are logged verbatim (hub_request.py:390-403). hub.py:18 only mentions pip_install in a docstring. I did not inspect the whole code base, so I rate soundness minor."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": null,
+     "rating": "concern",
+     "reason": "WebSubInterface/hub/Lib/publish.py:110-120 applies event and destination filters, while 227-248 sends conference messages without those checks, making routing incorrect as well as unsafe. WebSubInterface/WebSubInterface.py:118-129,154-156 and Lib/ImageDisplayClient.py:393-409 show deferred imports and cleanup; CMakeLists.txt:29-33 notes hub tests run outside Slicer CTest. I did not execute Slicer or the tests, and did not independently assess every workflow."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": null,
+     "rating": "minor",
+     "reason": "Checked WebSubInterface/WebSubInterface.py, Lib/HubServer.py, Lib/ImageDisplayClient.py, Lib/ConferenceDialog.py, and hub/Lib/publish.py. The Slicer module follows ScriptedLoadableModule conventions well, defers imports until module widget creation (`WebSubInterface.py:121-129`), manages child QProcess lifecycle and cleanup cleanly (`Lib/HubServer.py:72-89, 266-291`), and polls worker results safely from the main thread via QTimer (`Lib/ImageDisplayClient.py:148-150`, `Lib/ConferenceDialog.py:64-67`). The missing subscription/target filter checks in the conference loop of `publish.py:231-234` (inconsistent with `hub_request.py:151-168`) is a real correctness bug warranting a minor/concern soundness note."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  }
+ },
+ "overall": {
+  "claude": "needs fixes",
+  "gemini": "no concerns",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 5,
+  "single": 5,
+  "unverified": 0,
+  "total": 5,
+  "open_disputes": 1
+ }
+}
