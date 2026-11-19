@@ -1,0 +1,125 @@
+{
+ "purpose": "Slicer module that segments breast ultrasound nodules and classifies them as benign or malignant with a bundled ConvFormer multi-task network. The model weights and sample data are downloaded on demand. It is aimed at physicians and researchers.",
+ "summary": "The extension declares PyTorch as a dependency, but the Python module ignores it. At import it runs an unconditional `slicer.util.pip_install('torch torchvision torchaudio')` outside PyTorchUtils, so it changes the shared environment with no confirmation. It also downloads the model weights from a Zoho WorkDrive link with TLS verification disabled. There is no checksum, and the file is loaded with `torch.load`, which unpickles it. That is an unsafe download-and-load chain. The weights are written into the installed module directory, and their license and provenance are not documented. Smaller issues: the catalog entry uses the moving `master` branch, the tests are empty, and the README tells users PyTorch is installed automatically at first restart. The Apache-2.0 license for the code is fine.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "unknown",
+   "rationale": ""
+  },
+  "environment": {
+   "rating": "unknown",
+   "rationale": ""
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": ""
+  },
+  "license": {
+   "rating": "unknown",
+   "rationale": ""
+  },
+  "soundness": {
+   "rating": "unknown",
+   "rationale": ""
+  },
+  "utility": {
+   "rating": "unknown",
+   "rationale": ""
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "pip install of torch/torchvision/torchaudio at module import, bypassing PyTorchUtils",
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line_start": 19,
+   "line_end": 45,
+   "evidence": "    slicer.util.pip_install('torch torchvision torchaudio')\n    from PIL import Image\n    import torch",
+   "explanation": "When `import torch` fails, the module tries PyTorchUtils, but then always calls `slicer.util.pip_install('torch torchvision torchaudio')`, even if PyTorchUtils already succeeded. This runs at Slicer startup for every user, with no confirmation, and downloads a large package set. torchaudio is not needed. Errors from the PyTorchUtils install are swallowed. Installing torch outside the PyTorch extension can break Slicer's torch setup.",
+   "suggestion": "Import torch lazily inside the logic or widget. Install only via `PyTorchUtils.PyTorchUtilsLogic().installTorch(askConfirmation=True)` when the user asks. Never call pip_install for torch. Drop torchaudio. Declare Pillow and torchvision as separate confirmed installs.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Model weights downloaded with TLS verification disabled, no checksum, then loaded via torch.load",
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line_start": 738,
+   "line_end": 738,
+   "evidence": "response = requests.get(url, stream=True, verify=False, headers=headers)",
+   "explanation": "The weights come from a public Zoho WorkDrive URL via `requests.get(..., verify=False)`. There is no hash or signature check. The file is then passed to `torch.load` without `weights_only=True`, which unpickles it. A man-in-the-middle, or a change to the shared file, could run arbitrary code in Slicer. The same download function fetches the sample data.",
+   "suggestion": "Remove `verify=False`. Host the weights at a stable release URL, for example a GitHub release. Verify a SHA256 checksum before loading. Use `torch.load(..., weights_only=True)`, or safetensors. Consider Slicer's SampleData or `slicer.util.downloadFile` with checksums.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "torch.load on a downloaded file without weights_only",
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line_start": 772,
+   "line_end": 772,
+   "evidence": "self.model_seg.load_state_dict(torch.load(self.weight_path_seg, map_location=torch.device(self.device)))",
+   "explanation": "The weights file is unpickled with the default settings. Together with the unverified download, this is an unsafe deserialization path.",
+   "suggestion": "Use `weights_only=True`.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Weights saved into the module install directory; broad exception handling; GUI-thread work",
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line_start": 759,
+   "line_end": 782,
+   "evidence": "path = os.path.join(os.path.dirname(__file__), 'Resources')",
+   "explanation": "The weights are downloaded into `os.path.dirname(__file__)/Resources`, which may be read-only or may be wiped on extension update. Download failures raise `Exception`s that are swallowed by a bare `except`, and the code reports a generic error. Inference and downloads run on the GUI thread. If the weight download fails, a NameError can still occur because torch is imported at module level.",
+   "suggestion": "Store the weights in a user cache directory, for example under slicer.app.slicerUserSettingsDirectory or the Slicer home. Report specific errors.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Catalog entry tracks moving branch master",
+   "file": "",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "",
+   "explanation": "`scm_revision` is `master` rather than a commit hash. Reviewed content may differ from what is later built. I could not resolve the branch to the commit named in the header.",
+   "suggestion": "Pin to a commit hash or tag when updating the entry.",
+   "confidence": "medium"
+  },
+  {
+   "category": "license",
+   "severity": "minor",
+   "title": "No license or provenance information for model weights, sample data and derived architecture code",
+   "file": "README.md",
+   "line_start": 47,
+   "line_end": 59,
+   "evidence": "- [NetWeight (Google Drive)](https://drive.google.com/file/d/1lfYU8dPFIRQ4uWio_YlbG-31i35uttwA/view?usp=sharing)",
+   "explanation": "The weights and sample data are hosted externally and the repo gives no terms. The sample data is presumably patient ultrasound imagery, with no consent or de-identification statement. The Conformer-derived code has no attribution.",
+   "suggestion": "State the weights' license, the training data and the sample data's origin and consent. Credit the original Conformer authors.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Saved diagnosis report includes patient identifiers; tests are empty",
+   "file": "BUS_Diagnosis/BUS_Diagnosis.py",
+   "line_start": 549,
+   "line_end": 553,
+   "evidence": "f.write(f\"Patient Name       :  {patientName}\\n\")\nf.write(f\"Patient ID         :  {shNode.GetItemAttribute(patientItem, 'DICOM.PatientID')}\\n\")",
+   "explanation": "The save function writes the patient name, ID and birth date to a user-chosen folder. This is local and user-initiated, but it is not warned about. The test is a `pass` stub, and the README does not state a clinical-use disclaimer beyond one line.",
+   "suggestion": "Warn about or optionally anonymize identifiers. Add a basic test and a research-use disclaimer.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Whether the Zoho URLs resolve and what the weight file actually contains",
+  "Whether branch master resolves to commit 8ef5c700 or another commit",
+  "Resources/UI/BUS_Diagnosis.ui and the icon files (not read)",
+  "Runtime behavior in Slicer (not run)",
+  "Model accuracy and validation (only a paper is cited)"
+ ],
+ "questions_for_author": []
+}
