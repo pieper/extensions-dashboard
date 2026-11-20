@@ -1,0 +1,88 @@
+{
+ "purpose": "CarreraSlice is an interactive 3D image segmentation extension for 3D Slicer that combines Fast GrowCut seed initialization with active contour (Chan-Vese and local Chan-Vese level-set) evolution and curvature flow smoothing. It is intended for users performing interactive volumetric segmentation in the legacy Slicer 4 Editor module.",
+ "summary": "CarreraSlice is a legacy (2013-2014) interactive 3D segmentation extension combining Fast GrowCut and level-set evolution for the Slicer 4 Editor module. No security or safety risks were found in the code. However, the repository has no LICENSE file or distribution terms for its main source code, which is a blocking admission issue. Furthermore, the Python scripts use Python 2 syntax (`print` statements, `xrange`) and depend on Slicer 4's removed `EditorLib` module, and CMake uses removed VTK variables (`VTK_USE_FILE`), so the extension cannot build or load on Slicer 5.\n\n🔴 Do not merge yet: Missing license / distribution permission in the source repository.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Inspected CMakeLists.txt, Python modules, C++ logic, and shell scripts. Found no network communication, telemetry, unsafe code execution, or malicious behavior in the built modules."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected CMakeLists.txt files and Python scripts (CarreraSliceEffect.py, KUtil.py). The extension does not install Python packages, alter sys.path at startup, or modify Slicer's shared environment on import."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "Inspected CMakeLists.txt, src/CMakeLists.txt, and module CMakeLists.txt files. While the catalog entry matches EXTENSION_DEPENDS (\"NA\" / []), the build scripts rely on legacy VTK/Qt CMake variables (`VTK_USE_FILE`, `QT_include_DIR`) and commit ~7.7 MB of binary `.mha` data in `data/`."
+  },
+  "license": {
+   "rating": "blocking",
+   "rationale": "Inspected README and searched all files for license/copyright headers. The repository has no LICENSE file and the primary source files lack license terms granting permission to distribute the extension."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected CarreraSliceEffect.py, KUtil.py, vtkKSlice.cpp, and vtkFastGrowCut.cxx. The extension was written in 2013 for Slicer 4 using Python 2 syntax (`print` statements, `xrange`) and the removed `EditorLib` module, so it cannot load or run in Slicer 5."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "Inspected README, CarreraSliceEffect.py, and Documentation/. The extension provides Fast GrowCut and level-set refinement, but has not been updated since 2013-2014 and its core FastGrowCut functionality has been superseded by Segment Editor's built-in effects."
+  }
+ },
+ "findings": [
+  {
+   "category": "license",
+   "severity": "blocking",
+   "title": "Missing repository license and distribution permission",
+   "file": "README",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "Grow cut, level set integration for interactive segmentation. Ivan Kolesov, LiangJia Zhu, Yi Gao, Peter Karasev. \n\nDecember 2013",
+   "explanation": "The repository contains no top-level LICENSE or COPYING file, and the main algorithm implementations (KSegmentor, sfm_local_chanvese, FastGrowCutSegmenter, CarreraSliceEffect.py) have no license headers or distribution terms. Only a few Slicer boilerplate files (vtkSlicerKSliceLogic, vtkSlicerFastGrowCutSegmenterLogic) and third-party files (fibheap, getopt_pp) carry license notices. Without explicit licensing terms granting permission to distribute the extension, the clear distribution permission requirement is not met.",
+   "suggestion": "Add a LICENSE file at the root of the repository specifying the license under which CarreraSlice is distributed, and clarify the license of bundled third-party components (such as Song Ho Ahn's convolution code).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Python 2 syntax and legacy Slicer 4 EditorLib imports fail in Slicer 5",
+   "file": "src/carreraslice_wrap/CarreraSliceEffect.py",
+   "line_start": 1,
+   "line_end": 7,
+   "evidence": "import os\nfrom __main__ import vtk, qt, ctk, slicer\nimport EditorLib\nfrom EditorLib.EditOptions import HelpButton\nfrom EditorLib import EditUtil\nfrom EditorLib import LabelEffect\nfrom EditorLib import Effect",
+   "explanation": "CarreraSliceEffect.py and KUtil.py are written for Python 2 and Slicer 4's legacy Editor module (`EditorLib`, `print \"...\"`, `xrange`, `from __main__ import vtk, qt, ctk, slicer`). In modern Slicer 5 (Python 3, Segment Editor), importing `CarreraSliceEffect.py` fails immediately with a `SyntaxError` on Python 2 `print` statements (e.g. line 260) and `ModuleNotFoundError` for `EditorLib`.",
+   "suggestion": "Port the Python code to Python 3 and migrate the effect from the removed Slicer 4 `EditorLib` framework to Slicer 5's `SegmentEditorEffects` framework (or archive the extension if it is unmaintained).",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Legacy VTK/Qt CMake configuration incompatible with Slicer 5",
+   "file": "src/CMakeLists.txt",
+   "line_start": 28,
+   "line_end": 29,
+   "evidence": "find_package(VTK REQUIRED)\ninclude(${VTK_USE_FILE})",
+   "explanation": "`src/CMakeLists.txt` uses legacy CMake/VTK variables (`include(${VTK_USE_FILE})`, `${QT_include_DIR}`, `${QT_LIBRARIES}`) and sets `CMAKE_INSTALL_PREFIX` to `${Slicer_DIR}` (line 92), which are incompatible with modern Slicer 5 / VTK 9 / Qt 5 builds.",
+   "suggestion": "Update the CMake configuration for modern Slicer/VTK/ITK targets and remove manual overrides of `CMAKE_INSTALL_PREFIX`, `EXECUTABLE_OUTPUT_PATH`, and `LIBRARY_OUTPUT_PATH`.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Binary image volumes committed directly in the source repository",
+   "file": "src/KSegmentor/tests/CMakeLists.txt",
+   "line_start": 49,
+   "line_end": 50,
+   "evidence": "- [info] Large files not available to read: data/DS004.mha (7 MB)",
+   "explanation": "The repository commits binary medical image test volumes directly into `data/` (including `data/DS004.mha` at ~7 MB and other `.mha` files), inflating the source repository instead of downloading test/sample data on demand.",
+   "suggestion": "Store sample and test volumes as external testing data (e.g. via Slicer SampleData or CMake ExternalData) rather than committing binary volumes in the git repository.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Binary image content of data/DS004.mha (7 MB) and other .mha files in data/"
+ ],
+ "questions_for_author": [
+  "Under what license do the authors permit distribution of CarreraSlice?",
+  "Is this legacy Slicer 4 extension still maintained, or should it be moved to ARCHIVE in the Extensions Index (note that FastGrowCut was later integrated into Slicer's Segment Editor 'Grow from seeds' effect)?"
+ ]
+}

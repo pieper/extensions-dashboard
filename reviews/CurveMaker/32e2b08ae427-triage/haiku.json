@@ -1,0 +1,161 @@
+{
+ "purpose": "CurveMaker is a scripted 3D Slicer module that builds a tube-shaped 3D curve model through the fiducials of a Markups node, with optional cardinal-spline interpolation, ring mode, curvature coloring, and point-to-curve distance readouts. It is intended for Slicer users who need to visualize or measure fiducial-based curves, such as needle or catheter paths.",
+ "summary": "The module is small, local-only, and does no network access, package installation, or unsafe deserialization, so I found no safety concern. The main problems are on the admission side: no LICENSE file appears in the reviewed snapshot, so distribution permission is unverified. There are also soundness bugs: distanceToPoint returns a bare value where callers unpack a tuple, and the minimum-curvature computation is wrong. The entry pins to branch \"master\", has no tests, and has minimal documentation. Overall: needs fixes.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read CurveMaker/CurveMaker.py in full and the CMake files. The code does no network I/O, no subprocess or eval/exec, no pip installs, and no file writes; it only modifies MRML nodes in the open scene. No telemetry or data egress was found."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Module-level imports are only os, unittest, math, numpy, and the Slicer-provided __main__ names. No sys.path changes, global warning suppression, or package installation at import (CurveMaker.py lines 1-5). numpy is bundled with Slicer."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt and CurveMaker/CMakeLists.txt use slicerMacroBuildScriptedModule with SCRIPTS=CurveMaker.py. MODULE_PYTHON_RESOURCES is empty (CurveMaker/CMakeLists.txt lines 9-10), so the icon under Resources/Icons is not installed. build_dependencies is empty, which matches the module's imports. The CMake minimum is 2.8.9, which is outdated."
+  },
+  "license": {
+   "rating": "concern",
+   "rationale": "The reviewed snapshot contains no LICENSE or COPYING file, and a search for 'license|copyright' across the files returned no matches. The source header and parent.contributors give no terms. Distribution permission cannot be verified from what was provided."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "distanceToPoint returns a bare numpy.Inf when CurvePoly is None (lines 1034-1035), but updateTargetFiducialsTable unpacks two values (line 613), so this raises TypeError. computeCurvatures uses elif for the max update and initializes minKappa to 0.0, so min curvature is never positive. cleanup() is a no-op (lines 386-387), so observers are never removed."
+  },
+  "utility": {
+   "rating": "concern",
+   "rationale": "There are no tests: the Python test file is entirely commented out (Testing/Python/CMakeLists.txt) and the test in CurveMaker.py is unused. The README is three lines and there is no tutorial or sample data. The module overlaps with Markups/Model tooling. Tier 1 is declared."
+  }
+ },
+ "findings": [
+  {
+   "category": "license",
+   "severity": "major",
+   "title": "No license file in the reviewed source snapshot",
+   "file": "README.md",
+   "line_start": 1,
+   "line_end": 4,
+   "evidence": "CurveMaker\n==========\n\n3D Slicer scripted module to generage a curve from a list of fiducials.",
+   "explanation": "Nothing in the provided tree grants terms for redistributing CurveMaker. The file list contains CMakeLists.txt, README.md, CurveMaker.py, and an icon, but no LICENSE. Without explicit terms, the Index cannot confirm that distribution is permitted. The author should add a license file, or the reviewer should confirm one exists at the pinned revision.",
+   "suggestion": "Add a LICENSE file (for example BSD or MIT) at the repository root and reference it in the README and the module metadata.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "distanceToPoint returns a scalar where callers expect a tuple, causing TypeError",
+   "file": "CurveMaker/CurveMaker.py",
+   "line_start": 1034,
+   "line_end": 1035,
+   "evidence": "      if self.CurvePoly == None:\n        return numpy.Inf",
+   "explanation": "When no curve has been generated, distanceToPoint returns numpy.Inf. updateTargetFiducialsTable unpacks the result into (err, evec), so it raises TypeError. This happens when the user selects a target fiducial list while the source curve is absent, for example after the Source selector is set to None. The GUI callback fails with an unhandled exception.",
+   "suggestion": "Return a tuple, for example `return (numpy.Inf, numpy.array([0.0, 0.0, 0.0]))`, and fix the caller's unpacking accordingly.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Minimum curvature is always reported as 0 or below",
+   "file": "CurveMaker/CurveMaker.py",
+   "line_start": 891,
+   "line_end": 917,
+   "evidence": "        if kappa < minKappa:\n          minKappa = kappa\n        elif kappa > maxKappa:\n          maxKappa = kappa",
+   "explanation": "minKappa is initialized to 0.0 and kappa is a norm, so it is never negative. Its update is therefore never triggered, so the 'Minimum' readout in the GUI always shows 0. The max branch is also an elif, so a value that lowers the minimum cannot also raise the maximum. Users relying on the min/max readouts get wrong values.",
+   "suggestion": "Initialize minKappa and maxKappa from the first kappa value (or to +/-inf), and use two independent `if` statements.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Division by zero for coincident control points in curvature and spline code",
+   "file": "CurveMaker/CurveMaker.py",
+   "line_start": 905,
+   "line_end": 909,
+   "evidence": "      for i in range(1,n-1):\n        p = numpy.array(points.GetPoint(pts.GetId(i+1)))\n        ds = numpy.linalg.norm(p-pp)\n        T  = (p-pp) / ds",
+   "explanation": "computeCurvatures divides by ds, the distance between consecutive points, without checking for zero. Two identical adjacent fiducials give a NaN or ZeroDivisionError during curvature updates. This is an ordinary robustness bug.",
+   "suggestion": "Skip or merge duplicate points before computing tangents, and guard the division.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Observers are not removed on cleanup; stale state is kept on source deselection",
+   "file": "CurveMaker/CurveMaker.py",
+   "line_start": 386,
+   "line_end": 398,
+   "evidence": "    def cleanup(self):\n      pass\n\n    def onEnableAutoUpdate(self, state):",
+   "explanation": "cleanup() is an empty pass, so PointModifiedEvent and ModifiedEvent observers registered on the Markups/Model nodes persist when the module is closed or reloaded. Separately, onSourceSelected does not reset tagSourceNode or self.logic.SourceNode when the selector is cleared, so a later callback can act on a removed node. This can cause duplicate or stale updates.",
+   "suggestion": "Implement cleanup() to call RemoveObserver for all stored tags, and reset the tags and node references when the selection is cleared.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Tag used before assignment in target-fiducials handler",
+   "file": "CurveMaker/CurveMaker.py",
+   "line_start": 571,
+   "line_end": 573,
+   "evidence": "      if self.targetFiducialsNode and self.tag:\n        self.targetFiducialsNode.RemoveObserver(self.tag)",
+   "explanation": "onTargetFiducialsSelected reads self.tag, which is only assigned in setup when a target node is chosen. This works only because targetFiducialsNode is None initially. It is fragile: self.tag is never initialized in setup, so any change to that guard can raise AttributeError.",
+   "suggestion": "Initialize self.tag = None in setup() alongside targetFiducialsNode.",
+   "confidence": "low"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Icon file present but not installed through CMake resources",
+   "file": "CurveMaker/CMakeLists.txt",
+   "line_start": 9,
+   "line_end": 10,
+   "evidence": "set(MODULE_PYTHON_RESOURCES\n  )",
+   "explanation": "CurveMaker/Resources/Icons/CurveMaker.png exists, but MODULE_PYTHON_RESOURCES is empty, so the icon is not installed with the module. The module's icon depends on the external URL in the root CMakeLists instead.",
+   "suggestion": "Add Resources/Icons/CurveMaker.png to RESOURCES, or delete the unused file.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No functional tests; test module commented out",
+   "file": "CurveMaker/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The only test wiring is a commented-out line in Testing/Python/CMakeLists.txt, and the in-script unittest is not exercised by CMake. Regressions such as the distanceToPoint and curvature bugs above would not be caught by CI.",
+   "suggestion": "Add a unit test that exercises the logic class (nodeToPoly, distanceToPoint, computeCurvatures) without the GUI, and register it with slicer_add_python_unittest.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Pinned to branch 'master' and documentation is minimal",
+   "file": "CMakeLists.txt",
+   "line_start": 6,
+   "line_end": 6,
+   "evidence": "set(EXTENSION_HOMEPAGE \"https://www.slicer.org/slicerWiki/index.php/Documentation/Nightly/Extensions/CurveMaker\")",
+   "explanation": "scm_revision is 'master', a moving branch, so the reviewed code can change without a catalog update. The README is three lines, with no usage instructions, sample data, or tutorial, and it points to an outdated wiki URL in CMakeLists.txt. This limits how well users can adopt the module.",
+   "suggestion": "Pin scm_revision to a tagged commit, and add usage documentation and a link to a working homepage.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Legacy Slicer 4 APIs and unused imports",
+   "file": "CurveMaker/CurveMaker.py",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "import os\nimport unittest\nfrom __main__ import vtk, qt, ctk, slicer",
+   "explanation": "The module uses `from __main__ import vtk, qt, ctk, slicer` and the PythonQt-style connect() calls, along with unused imports os and unittest. Compatibility with the current Slicer release was not verified. These are non-blocking, but they should be modernized.",
+   "suggestion": "Verify the module loads and runs on the current Slicer release, then replace the __main__ imports with explicit imports.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "The source repository at tokjun/CurveMaker was not fetched. The 'master' ref was not resolved, and the commit 32e2b08 is unverified against the snapshot provided.",
+  "Whether a LICENSE file exists at the upstream repository root (the snapshot may be incomplete).",
+  "The icon binary (CurveMaker.png) and its contents were not inspected.",
+  "The module was not loaded or run in Slicer; GUI behavior and the reported bugs are from static reading only.",
+  "No CI or build logs were available."
+ ],
+ "questions_for_author": []
+}

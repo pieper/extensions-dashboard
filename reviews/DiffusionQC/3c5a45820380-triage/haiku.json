@@ -1,0 +1,150 @@
+{
+ "purpose": "DiffusionQC provides a quality-control algorithm for diffusion-weighted MRI (per-gradient KL-divergence screening, optional mask creation via SlicerDMRI) plus a GradQC scripted module for manual keep/discard review. It is aimed at diffusion MRI researchers using Slicer.",
+ "summary": "No malicious, network, or data-exfiltration behavior found in the inspected files; the only subprocess use is an explicit mask tool call and a test-time git-lfs pull. The main problems are soundness: the core CLI/GUI handoff saves a ragged Python list with np.save and loads it with default np.load (fails on modern numpy), the GUI calls exit(0) inside a table-selection handler (can close Slicer and lose review work), and the test never fails. The SuperBuild pip-installs unpinned, --upgrade packages into a PYTHONPATH prefix, and the catalog tracks the moving \"master\" branch. License is BSD-style research-only, which permits distribution. Overall: needs fixes.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "No network, telemetry, or credential access found. Concerns are GUI exit(0) in a selection handler that can terminate Slicer and lose unsaved review decisions, and overwriting of *_modified.nrrd/_QC.csv in the output directory. Inspected diffusionqclib and SlicerDiffusionQC sources in full."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "SuperBuild/External_python-diffusionqclib.cmake line 18-19 runs pip install plumbum nibabel pynrrd --upgrade into the extension's python-packages prefix, which is added to Slicer's PYTHONPATH launcher, so it can shadow Slicer-bundled packages for other extensions. Versions are unpinned. No torch or Qt/VTK bundling found."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "EXTENSION_DEPENDS 'SlicerDMRI' in CMakeLists.txt line 13 matches build_dependencies in the catalog entry. Python modules are installed via slicerMacroBuildScriptedModule and install() rules. The catalog pins scm_revision to the moving 'master' branch, which is noted but not a defect."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is a BSD-style Brigham and Women's Hospital license permitting redistribution with attribution (Part B). Part B paragraph 4 says research-only and not clinically recommended, which should be communicated to users. Test/Baseline license.txt cites Apache 2.0 for the test data."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "diffusionqclib/diffusionqclib/gradient_process.py line 131-234 saves a ragged list and loads it with default np.load, which fails on current numpy. GradQC/slicerUserInteraction.py line 252-254 calls exit(0) on an exception. Test/run_test.py uses a one-sided check and never sets a failing exit code. load_mask uses removed nibabel get_data()."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README documents CLI and GUI usage and the test data. The README targets Python 2.7 and Slicer 4.9/4.10, and gradient_process.py uses distutils.spawn, which is removed in Python 3.12. The test is a single case that cannot fail. The CLI description is 'TBD'. Tier 3 is declared."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Core processing hand-off uses np.save of a ragged list and default np.load, which breaks on modern numpy",
+   "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+   "line_start": 131,
+   "line_end": 131,
+   "evidence": "mri, M, grad_axis, slice_axis, totalGradients, visualMode= np.load(dqc_temp_file)",
+   "explanation": "process() saves a Python list of arrays with different shapes (mri is 4-D, M is 3-D) via np.save. Modern numpy raises on ragged input, and loading the object array needs allow_pickle=True. grad_process() and the GUI depend on this temp file, so both CLI and visual modes can fail before any QC is computed.",
+   "suggestion": "Save the arrays separately with np.savez (or pickle explicitly with allow_pickle=True on both sides), and avoid storing the data in a temp file in HOME. Test on the numpy version bundled with the target Slicer.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "GUI calls exit(0) from a table-selection handler, which can terminate Slicer and lose review work",
+   "file": "SlicerDiffusionQC/gradqclib/slicerUserInteraction.py",
+   "line_start": 250,
+   "line_end": 254,
+   "evidence": "try:\n          index = self.tableHandle.selectedIndexes()[0]\n        except:\n          exit(0)",
+   "explanation": "gradientUpdate() is connected to the table's selectionChanged signal. When the selection is empty, selectedIndexes()[0] raises and the except branch calls exit(0), which terminates the whole Slicer process. Unsaved Keep/Discard/Sure decisions are lost, and the comment only says the hack is for closing the scene.",
+   "suggestion": "Return from the handler when there is no selection. Do not call exit() inside Slicer; disconnect observers on scene close instead.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Test script cannot fail and only compares one direction",
+   "file": "Test/run_test.py",
+   "line_start": 57,
+   "line_end": 65,
+   "evidence": "if (eval(attr) - eval(attr+'_test')).sum()>eps:\n                  failed+=1",
+   "explanation": "run_test.py prints pass/fail but never sets a non-zero exit code, so the CTest entry passes regardless. The difference check is one-sided (a-b).sum() > eps, and the gradient loop uses len(np.where(...)), which is always 1. The test therefore gives no regression protection.",
+   "suggestion": "Use sys.exit(1) on failure, compare absolute differences with np.allclose, and fix the len(np.where(csv==1)) expression.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Unpinned --upgrade pip installs into a PYTHONPATH prefix that can shadow Slicer-bundled packages",
+   "file": "SuperBuild/External_python-diffusionqclib.cmake",
+   "line_start": 15,
+   "line_end": 20,
+   "evidence": "${PYTHON_EXECUTABLE} -m pip install plumbum nibabel pynrrd\n                                  --prefix \"${python_packages_DIR_NATIVE_DIR}\" --upgrade",
+   "explanation": "The SuperBuild installs plumbum, nibabel, and pynrrd with --upgrade into python_packages_DIR, which is prepended to Slicer's PYTHONPATH by the launcher. This can replace versions Slicer or other extensions rely on for all users, and the versions are not pinned or tested against Slicer's bundled packages.",
+   "suggestion": "Avoid --upgrade; pin version ranges compatible with the Slicer release; check that nibabel/pynrrd are not already provided by Slicer, and document any shadowing.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "nibabel get_data() is removed in nibabel 5 and the unpinned upgrade can pull it in",
+   "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+   "line_start": 58,
+   "line_end": 60,
+   "evidence": "img = nib.load(str(mask))  # MRI loaded as a 256 x 256 x 176 volume\n        return img.get_data()",
+   "explanation": "load_mask calls img.get_data() on NIfTI masks. This method was removed in nibabel 5.0, so mask loading fails for NIfTI masks when the upgraded nibabel is installed.",
+   "suggestion": "Use np.asanyarray(img.dataobj) or img.get_fdata().",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "stdout is redirected without restore on error in nhdr_write",
+   "file": "diffusionqclib/diffusionqclib/nhdr_write.py",
+   "line_start": 72,
+   "line_end": 74,
+   "evidence": "f = open(nhdr, 'w')\n    console = sys.stdout\n    sys.stdout = f",
+   "explanation": "nhdr_write sets sys.stdout to the file and only restores it on success. Any exception raised while writing the header leaves sys.stdout pointing at a closed file for the rest of the Slicer session.",
+   "suggestion": "Write with an explicit file handle or wrap in try/finally to restore sys.stdout and close the file.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Output files with fixed names are overwritten without confirmation",
+   "file": "diffusionqclib/diffusionqclib/saveResults.py",
+   "line_start": 73,
+   "line_end": 73,
+   "evidence": "nrrd.write(outPrefix+'_modified.nrrd', mri_out, header=hdr_out, compression_level = 1)",
+   "explanation": "saveDWI and saveTemporary write *_modified.nrrd, *_QC.csv, and *_QC.npy into the input or chosen output directory, replacing any existing files with the same prefix. The README states this, but the GUI gives no confirmation, so a previous review can be lost.",
+   "suggestion": "Warn or ask before overwriting, or write to a timestamped name.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Catalog pins a moving branch rather than a reviewed commit",
+   "file": "DiffusionQC.json",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "\"scm_revision\": \"master\",",
+   "explanation": "scm_revision is 'master', so the built code can change without a catalog update. The reviewed commit 3c5a458 is not what the index will build.",
+   "suggestion": "Pin scm_revision to a reviewed commit hash or tag for reproducible builds.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Documentation targets Python 2.7 and old Slicer, and distutils is used",
+   "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+   "line_start": 35,
+   "line_end": 41,
+   "evidence": "import distutils.spawn",
+   "explanation": "README says the CLI requires Python 2.7 and describes Slicer 4.9/4.10. gradient_process.py imports distutils.spawn, which is removed in Python 3.12, so the code is not validated against current Slicer Python 3.",
+   "suggestion": "Use shutil.which and update the README for the supported Slicer versions.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Did not execute code, install packages, or run the test; the numpy and nibabel behaviors are from knowledge, not verified in this environment.",
+  "Did not inspect the external DiffusionWeightedVolumeMasking executable from SlicerDMRI or the SlicerDMRI dependency.",
+  "Did not fetch the remote source at scm_revision master; reviewed only the file contents supplied in the submission.",
+  "Did not verify the CTest and CI build results or the Slicer version matrix.",
+  "Did not inspect the LFS-tracked binaries beyond the file listing; several Baseline files are committed directly rather than through LFS.",
+  "Did not inspect the diffusionQC/CMakeLists.txt install paths against the ExtensionsIndex build beyond reading them."
+ ],
+ "questions_for_author": []
+}

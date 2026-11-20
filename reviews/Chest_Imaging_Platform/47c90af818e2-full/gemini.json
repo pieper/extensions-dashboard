@@ -1,0 +1,114 @@
+{
+ "purpose": "Chest Imaging Platform (SlicerCIP) provides 3D Slicer loadable, scripted, and CLI modules for quantitative CT imaging biomarker analysis of lung diseases, including parenchyma analysis, interactive lobe segmentation, airway inspection, cardiovascular ratios (AV, PAA, RV/LV), calibration, calcium scoring, and lung lesion analysis. It is intended for chest imaging researchers and clinicians analyzing pulmonary CT scans.",
+ "summary": "Chest_Imaging_Platform (SlicerCIP) is a comprehensive suite of loadable, scripted, and SuperBuild CLI modules for quantitative chest CT analysis. It is licensed under BSD 3-Clause (`LICENSE`), does not alter Slicer's Python environment, and has a valid catalog entry matching its `CMakeLists.txt` configuration (`inner-build`). No blocking safety, licensing, or catalog issues were found. Non-blocking issues include legacy Python 2 / old NumPy constructs (`open(..., \"w+b\")` with `str` in `geometry_topology_data.py`, `np.int`/`np.float`), `0o777` directory permissions, an unused `AutoUpdateWidget.py`, and uncommitted cleanup of `Scripted/attic` and `WinSCP` binaries.\n\n🟢 Recommend merge",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Inspected Python and C++ modules, CMake build scripts, and searched all files for network, subprocess, and deserialization calls. No malicious behavior or unauthorized data exfiltration exists in active modules; minor hygiene issues exist with `0o777` directory permissions, an unused `AutoUpdateWidget.py`, and unbuilt `attic` code containing `WinSCP` binaries and an internal SSH host key."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected CMake files and Python modules across `Scripted/`. No `pip_install` calls, package downgrades, or global startup modifications to Slicer's Python environment were found."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Inspected `CMakeLists.txt`, `SuperBuild.cmake`, `SuperBuild/External_CIP.cmake`, `Loadable/CMakeLists.txt`, and `Scripted/CMakeLists.txt`. The catalog entry matches `CMakeLists.txt` (`inner-build`, `EXTENSION_DEPENDS \"NA\"`), and active modules are properly configured, though the repo contains unused 10 MB `WinSCP` executables and misses a couple of `.ctbl` resource files in `Scripted/CIP_/CMakeLists.txt`."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE`, which provides a standard BSD 3-Clause license permitting redistribution and use in source and binary forms."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected scripted and loadable modules (`CIP_AVRatio`, `CIP_ParenchymaAnalysis`, `CIP_InteractiveLobeSegmentation`, `CIP_Calibration`, `CIP_LesionModel`, `CIP_PAARatio`, `CIP_RVLVRatio`, `CIP_PointsLabelling`, `AirwayInspector`, `ParticlesDisplay`, `RegionTypeDisplay`). Several legacy Python 2 / older NumPy patterns remain (such as writing `str` to `\"w+b\"` files in `GeometryTopologyData.to_xml_file` and using `np.float`/`np.int`), which will raise runtime errors in Slicer 5."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md` and the suite of chest CT analysis modules. The extension provides a comprehensive set of quantitative chest CT tools (parenchyma phenotype analysis, lobe segmentation, airway/vessel ratios, lesion radiomics, and particle/region-type visualization) backed by the Chest Imaging Platform C++ library."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Bundled WinSCP executables and internal SSH host key in repository",
+   "file": "Scripted/attic/CIP_GetImage/CIP_GetImage_Resources/WinSCP.ini",
+   "line_start": 3,
+   "line_end": 4,
+   "evidence": "[SshHostKeys]\nrsa2@22:mad-replicated1.research.partners.org=0x23,0xab1187c46f2ac72d9f08f5a2df6947e0dac0107215ae2c92129aa7f8b7b7ec27a34c8469ef76a20758c265cc4358a6d144e7de39b45ce00d7cd22abd1f050bbc0c988e45297e5e789fdb9008ae314c13b8aa18ae11b2d732827935589242161b385c88306a9f20231839f5f93234672f257279388e0e4f10fcbadb9d700b768e99a5a81529e42265443dab9e121fe6b1b456137f98fecc68b647672d9c9713dcfaf6ae67667960ec60b802ba733b640ab8dfb7b07bfc5565a0ca3be88ed15eeebc9738a7ac98d4b5dfff53ec160026ae6f2c414755c8144c2a2d7e6a25e130665b090a4e27b5540db44175876560d6e65452c8b250bf12a99de089a0c6f7bb6f",
+   "explanation": "The repository commits two ~10 MB Windows executables (`WinSCP.exe` and `WinSCP.com`) in both `Scripted/CIP_/CIP/ui/Resources/SSH/` and `Scripted/attic/CIP_GetImage/CIP_GetImage_Resources/`, along with an internal institutional SSH host key in `WinSCP.ini`. While neither `CIP_GetImage` nor the `SSH` resources are installed by the active CMake configuration, committing third-party Windows executables and internal server host keys into the source repository bloats the checkout and bundles unverified binaries.",
+   "suggestion": "Remove the unused `WinSCP.exe`/`WinSCP.com`/`WinSCP.ini` files and the `Scripted/attic` folder from the repository.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Unused self-updating widget (`AutoUpdateWidget.py`) installed with `CIP_`",
+   "file": "Scripted/CIP_/CIP/ui/AutoUpdateWidget.py",
+   "line_start": 87,
+   "line_end": 94,
+   "evidence": "        repo = Repo.clone_from(SlicerUtil.CIP_GIT_REMOTE_URL, self.updateFolder)\n        currentCommit = repo.head.commit.hexsha\n        if self.lastCommit != currentCommit or self.forceUpdate:\n          for folder in (d for d in os.listdir(self.updateFolder) if not d.startswith('.')):\n            src = os.path.join(self.updateFolder,folder)\n            dst = os.path.realpath(os.path.join(Util.CIP_MODULE_ROOT_DIR, '..', folder))\n            #print(\"Copy %s in %s\" % (src,dst))\n            dir_util.copy_tree(src, dst)",
+   "explanation": "`AutoUpdateWidget.py` is installed as part of `CIP_` (`Scripted/CIP_/CMakeLists.txt` line 18). Although currently commented out in `__init__.py` and modules, if instantiated it clones a remote Git repository (`SlicerUtil.CIP_GIT_REMOTE_URL`, which is also a broken attribute name as `SlicerUtil` defines `GIT_REMOTE_URL`) into a world-writable (`0o777`) temporary directory and overwrites the installed extension scripts. Extensions should be updated through Slicer's Extensions Manager rather than self-modifying code.",
+   "suggestion": "Remove `AutoUpdateWidget.py` from `Scripted/CIP_/CMakeLists.txt` and the repository.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Directories created with world-writable (0o777) permissions",
+   "file": "Scripted/CIP_/CIP/logic/Util.py",
+   "line_start": 97,
+   "line_end": 101,
+   "evidence": "        if os.path.exists(path):\n            return False\n        os.makedirs(path)\n        # Make sure that everybody has write permissions (sometimes there are problems because of umask)\n        os.chmod(path, 0o777)",
+   "explanation": "`Util.create_directory` and `CIP_PointsLabellingWidget.saveResultsCurrentNode` explicitly set `0o777` (world-writable) permissions on newly created directories. On multi-user systems, this allows other local users to modify or replace files in those directories.",
+   "suggestion": "Use default directory permissions (`os.makedirs(path, exist_ok=True)`) without `os.chmod(..., 0o777)`.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Missing color table resources in `Scripted/CIP_/CMakeLists.txt`",
+   "file": "Scripted/CIP_/CMakeLists.txt",
+   "line_start": 28,
+   "line_end": 59,
+   "evidence": "set(MODULE_PYTHON_RESOURCES\n  CIP/ui/Resources/Icons/ACIL.png\n  CIP/ui/Resources/Icons/ACIL_Blank.png",
+   "explanation": "`Scripted/CIP_/CIP/logic/Colors.py` reads `chest_region_colors.ctbl` and `chest_type_colors.ctbl` from `SlicerUtil.CIP_RESOURCES_DIR`, and `SlicerUtil.getIcon(\"upload.png\")` references `upload.png`, but `Scripted/CIP_/CMakeLists.txt` only installs `CIP/ui/Resources/StructuresColorMap.ctbl` and omits `chest_region_colors.ctbl`, `chest_type_colors.ctbl`, and `upload.png` from `MODULE_PYTHON_RESOURCES`. Calling `Colors.ChestRegions()` or `Colors.ChestTypes()` in an installed package will raise `FileNotFoundError` (and in Python 3 `Colors.__readColorMapFile__` opens the file in binary mode `\"r+b\"` and splits on `\" \"` str, which would also raise `TypeError`).",
+   "suggestion": "Add `chest_region_colors.ctbl`, `chest_type_colors.ctbl`, and `upload.png` to `MODULE_PYTHON_RESOURCES` in `Scripted/CIP_/CMakeLists.txt`, and open text files with `\"r\"` instead of `\"r+b\"`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Python 3 and NumPy 1.24+ incompatibilities in XML serialization and NumPy types",
+   "file": "Scripted/CIP_/CIP/logic/geometry_topology_data.py",
+   "line_start": 179,
+   "line_end": 181,
+   "evidence": "        s = self.to_xml()\n        with open(xml_file_path, \"w+b\") as f:\n            f.write(s)",
+   "explanation": "In `GeometryTopologyData.to_xml_file`, `self.to_xml()` returns a `str`, which is then written to a file opened in binary mode `\"w+b\"`. In Python 3 (Slicer 5), `f.write(s)` with a `str` on a binary file raises `TypeError: a bytes-like object is required, not 'str'`. This breaks saving fiducial/seed XML files in `CIP_LesionModel` and `CIP_PointsLabelling`. Similarly, `np.int`, `np.float`, and `np.bool` are used in `Util.py`, `geometry_topology_data.py`, and `FeatureExtractionLib`, which were removed in NumPy 1.24+.",
+   "suggestion": "Open the XML file in text mode (`open(xml_file_path, \"w\")` and `open(xml_file_path, \"r\")`) or encode the string to UTF-8 bytes, and replace deprecated `np.int`/`np.float`/`np.bool` aliases with `int`/`float`/`bool`.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Unfilled `{organization}` placeholder in BSD 3-Clause LICENSE file",
+   "file": "LICENSE",
+   "line_start": 14,
+   "line_end": 16,
+   "evidence": "  Neither the name of the {organization} nor the names of its\n  contributors may be used to endorse or promote products derived from\n  this software without specific prior written permission.",
+   "explanation": "The root `LICENSE` file is a standard 3-Clause BSD license granting permission to redistribute in source and binary forms, with an unreplaced `{organization}` template placeholder on line 14.",
+   "suggestion": "Replace `{organization}` in `LICENSE` with the organization name.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "External SuperBuild dependency repository https://github.com/Slicer/ChestImagingPlatform.git (branch develop) referenced in SuperBuild/External_CIP.cmake was not included in this checkout.",
+  "Contents of Scripted/CIP_CalciumScoring/CIP_CalciumScoring.py could not be read due to a tool error, though search results over that file showed no unsafe patterns.",
+  "Binary contents of WinSCP.exe and WinSCP.com in Scripted/CIP_/CIP/ui/Resources/SSH/ and Scripted/attic/CIP_GetImage/CIP_GetImage_Resources/ (not installed by CMake)."
+ ],
+ "questions_for_author": [
+  "Can the legacy `Scripted/attic/` directory and `WinSCP` binaries be removed from the repository?",
+  "Should `GeometryTopologyData.to_xml_file` and `np.float`/`np.int` usages be updated for Python 3 / NumPy 1.24+ compatibility in Slicer 5?"
+ ]
+}

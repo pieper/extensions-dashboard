@@ -1,0 +1,558 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Core processing hand-off uses np.save of a ragged list and default np.load, which breaks on modern numpy",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+   "line": 131,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Core processing hand-off uses np.save of a ragged list and default np.load, which breaks on modern numpy",
+     "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+     "line_start": 131,
+     "line_end": 131,
+     "evidence": "mri, M, grad_axis, slice_axis, totalGradients, visualMode= np.load(dqc_temp_file)",
+     "explanation": "process() saves a Python list of arrays with different shapes (mri is 4-D, M is 3-D) via np.save. Modern numpy raises on ragged input, and loading the object array needs allow_pickle=True. grad_process() and the GUI depend on this temp file, so both CLI and visual modes can fail before any QC is computed.",
+     "suggestion": "Save the arrays separately with np.savez (or pickle explicitly with allow_pickle=True on both sides), and avoid storing the data in a temp file in HOME. Test on the numpy version bundled with the target Slicer.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+      "line": 131
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "GUI calls exit(0) from a table-selection handler, which can terminate Slicer and lose review work",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SlicerDiffusionQC/gradqclib/slicerUserInteraction.py",
+   "line": 251,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "GUI calls exit(0) from a table-selection handler, which can terminate Slicer and lose review work",
+     "file": "SlicerDiffusionQC/gradqclib/slicerUserInteraction.py",
+     "line_start": 250,
+     "line_end": 254,
+     "evidence": "try:\n          index = self.tableHandle.selectedIndexes()[0]\n        except:\n          exit(0)",
+     "explanation": "gradientUpdate() is connected to the table's selectionChanged signal. When the selection is empty, selectedIndexes()[0] raises and the except branch calls exit(0), which terminates the whole Slicer process. Unsaved Keep/Discard/Sure decisions are lost, and the comment only says the hack is for closing the scene.",
+     "suggestion": "Return from the handler when there is no selection. Do not call exit() inside Slicer; disconnect observers on scene close instead.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerDiffusionQC/gradqclib/slicerUserInteraction.py",
+      "line": 251
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Unpinned --upgrade pip installs into a PYTHONPATH prefix that can shadow Slicer-bundled packages",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SuperBuild/External_python-diffusionqclib.cmake",
+   "line": 18,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Unpinned --upgrade pip installs into a PYTHONPATH prefix that can shadow Slicer-bundled packages",
+     "file": "SuperBuild/External_python-diffusionqclib.cmake",
+     "line_start": 15,
+     "line_end": 20,
+     "evidence": "${PYTHON_EXECUTABLE} -m pip install plumbum nibabel pynrrd\n                                  --prefix \"${python_packages_DIR_NATIVE_DIR}\" --upgrade",
+     "explanation": "The SuperBuild installs plumbum, nibabel, and pynrrd with --upgrade into python_packages_DIR, which is prepended to Slicer's PYTHONPATH by the launcher. This can replace versions Slicer or other extensions rely on for all users, and the versions are not pinned or tested against Slicer's bundled packages.",
+     "suggestion": "Avoid --upgrade; pin version ranges compatible with the Slicer release; check that nibabel/pynrrd are not already provided by Slicer, and document any shadowing.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SuperBuild/External_python-diffusionqclib.cmake",
+      "line": 18
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Catalog pins a moving branch rather than a reviewed commit",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DiffusionQC.json",
+   "line": 0,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Catalog pins a moving branch rather than a reviewed commit",
+     "file": "DiffusionQC.json",
+     "line_start": 0,
+     "line_end": 0,
+     "evidence": "\"scm_revision\": \"master\",",
+     "explanation": "scm_revision is 'master', so the built code can change without a catalog update. The reviewed commit 3c5a458 is not what the index will build.",
+     "suggestion": "Pin scm_revision to a reviewed commit hash or tag for reproducible builds.",
+     "confidence": "high",
+     "verification": {
+      "status": "file not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Documentation targets Python 2.7 and old Slicer, and distutils is used",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+   "line": 35,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Documentation targets Python 2.7 and old Slicer, and distutils is used",
+     "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+     "line_start": 35,
+     "line_end": 41,
+     "evidence": "import distutils.spawn",
+     "explanation": "README says the CLI requires Python 2.7 and describes Slicer 4.9/4.10. gradient_process.py imports distutils.spawn, which is removed in Python 3.12, so the code is not validated against current Slicer Python 3.",
+     "suggestion": "Use shutil.which and update the README for the supported Slicer versions.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+      "line": 35
+     }
+    }
+   ]
+  },
+  {
+   "title": "Output files with fixed names are overwritten without confirmation",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "diffusionqclib/diffusionqclib/saveResults.py",
+   "line": 73,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Output files with fixed names are overwritten without confirmation",
+     "file": "diffusionqclib/diffusionqclib/saveResults.py",
+     "line_start": 73,
+     "line_end": 73,
+     "evidence": "nrrd.write(outPrefix+'_modified.nrrd', mri_out, header=hdr_out, compression_level = 1)",
+     "explanation": "saveDWI and saveTemporary write *_modified.nrrd, *_QC.csv, and *_QC.npy into the input or chosen output directory, replacing any existing files with the same prefix. The README states this, but the GUI gives no confirmation, so a previous review can be lost.",
+     "suggestion": "Warn or ask before overwriting, or write to a timestamped name.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "diffusionqclib/diffusionqclib/saveResults.py",
+      "line": 73
+     }
+    }
+   ]
+  },
+  {
+   "title": "Test script cannot fail and only compares one direction",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Test/run_test.py",
+   "line": 57,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Test script cannot fail and only compares one direction",
+     "file": "Test/run_test.py",
+     "line_start": 57,
+     "line_end": 65,
+     "evidence": "if (eval(attr) - eval(attr+'_test')).sum()>eps:\n                  failed+=1",
+     "explanation": "run_test.py prints pass/fail but never sets a non-zero exit code, so the CTest entry passes regardless. The difference check is one-sided (a-b).sum() > eps, and the gradient loop uses len(np.where(...)), which is always 1. The test therefore gives no regression protection.",
+     "suggestion": "Use sys.exit(1) on failure, compare absolute differences with np.allclose, and fix the len(np.where(csv==1)) expression.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Test/run_test.py",
+      "line": 57
+     }
+    }
+   ]
+  },
+  {
+   "title": "nibabel get_data() is removed in nibabel 5 and the unpinned upgrade can pull it in",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+   "line": 59,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "nibabel get_data() is removed in nibabel 5 and the unpinned upgrade can pull it in",
+     "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+     "line_start": 58,
+     "line_end": 60,
+     "evidence": "img = nib.load(str(mask))  # MRI loaded as a 256 x 256 x 176 volume\n        return img.get_data()",
+     "explanation": "load_mask calls img.get_data() on NIfTI masks. This method was removed in nibabel 5.0, so mask loading fails for NIfTI masks when the upgraded nibabel is installed.",
+     "suggestion": "Use np.asanyarray(img.dataobj) or img.get_fdata().",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+      "line": 59
+     }
+    }
+   ]
+  },
+  {
+   "title": "stdout is redirected without restore on error in nhdr_write",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "diffusionqclib/diffusionqclib/nhdr_write.py",
+   "line": 72,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "stdout is redirected without restore on error in nhdr_write",
+     "file": "diffusionqclib/diffusionqclib/nhdr_write.py",
+     "line_start": 72,
+     "line_end": 74,
+     "evidence": "f = open(nhdr, 'w')\n    console = sys.stdout\n    sys.stdout = f",
+     "explanation": "nhdr_write sets sys.stdout to the file and only restores it on success. Any exception raised while writing the header leaves sys.stdout pointing at a closed file for the rest of the Slicer session.",
+     "suggestion": "Write with an explicit file handle or wrap in try/finally to restore sys.stdout and close the file.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "diffusionqclib/diffusionqclib/nhdr_write.py",
+      "line": 72
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Core processing hand-off uses np.save of a ragged list and default np.load, which breaks on modern numpy",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+   "line": 131,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Core processing hand-off uses np.save of a ragged list and default np.load, which breaks on modern numpy",
+     "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+     "line_start": 131,
+     "line_end": 131,
+     "evidence": "mri, M, grad_axis, slice_axis, totalGradients, visualMode= np.load(dqc_temp_file)",
+     "explanation": "process() saves a Python list of arrays with different shapes (mri is 4-D, M is 3-D) via np.save. Modern numpy raises on ragged input, and loading the object array needs allow_pickle=True. grad_process() and the GUI depend on this temp file, so both CLI and visual modes can fail before any QC is computed.",
+     "suggestion": "Save the arrays separately with np.savez (or pickle explicitly with allow_pickle=True on both sides), and avoid storing the data in a temp file in HOME. Test on the numpy version bundled with the target Slicer.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "diffusionqclib/diffusionqclib/gradient_process.py",
+      "line": 131
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "GUI calls exit(0) from a table-selection handler, which can terminate Slicer and lose review work",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SlicerDiffusionQC/gradqclib/slicerUserInteraction.py",
+   "line": 251,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "GUI calls exit(0) from a table-selection handler, which can terminate Slicer and lose review work",
+     "file": "SlicerDiffusionQC/gradqclib/slicerUserInteraction.py",
+     "line_start": 250,
+     "line_end": 254,
+     "evidence": "try:\n          index = self.tableHandle.selectedIndexes()[0]\n        except:\n          exit(0)",
+     "explanation": "gradientUpdate() is connected to the table's selectionChanged signal. When the selection is empty, selectedIndexes()[0] raises and the except branch calls exit(0), which terminates the whole Slicer process. Unsaved Keep/Discard/Sure decisions are lost, and the comment only says the hack is for closing the scene.",
+     "suggestion": "Return from the handler when there is no selection. Do not call exit() inside Slicer; disconnect observers on scene close instead.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "SlicerDiffusionQC/gradqclib/slicerUserInteraction.py",
+      "line": 251
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Unpinned --upgrade pip installs into a PYTHONPATH prefix that can shadow Slicer-bundled packages",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "SuperBuild/External_python-diffusionqclib.cmake",
+   "line": 18,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Unpinned --upgrade pip installs into a PYTHONPATH prefix that can shadow Slicer-bundled packages",
+     "file": "SuperBuild/External_python-diffusionqclib.cmake",
+     "line_start": 15,
+     "line_end": 20,
+     "evidence": "${PYTHON_EXECUTABLE} -m pip install plumbum nibabel pynrrd\n                                  --prefix \"${python_packages_DIR_NATIVE_DIR}\" --upgrade",
+     "explanation": "The SuperBuild installs plumbum, nibabel, and pynrrd with --upgrade into python_packages_DIR, which is prepended to Slicer's PYTHONPATH by the launcher. This can replace versions Slicer or other extensions rely on for all users, and the versions are not pinned or tested against Slicer's bundled packages.",
+     "suggestion": "Avoid --upgrade; pin version ranges compatible with the Slicer release; check that nibabel/pynrrd are not already provided by Slicer, and document any shadowing.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "SuperBuild/External_python-diffusionqclib.cmake",
+      "line": 18
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D4",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D6",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 6,
+  "single": 9,
+  "unverified": 1,
+  "total": 9
+ }
+}

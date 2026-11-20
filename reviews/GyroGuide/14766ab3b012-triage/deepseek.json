@@ -1,0 +1,167 @@
+{
+ "purpose": "GyroGuide is a Slicer scripted module for image-guided puncture (e.g. neurosurgical) planning: it takes five registration fiducial markers plus a target and an entry point, computes puncture depth and the angles between the trajectory and three reference planes, draws the planes/path in the 3D view, and optionally sends the resulting transform to an external device over OpenIGTLink. Its users are clinicians preparing a trajectory.",
+ "summary": "The entry is mechanically usable (CMake installs the single Python file, build_dependencies empty and consistent with a chained EXTENSION_DEPENDS, revision is a branch). No malicious code: no downloads, no eval/exec, no pip installs, and the only network use is a user-initiated OpenIGTLink client to a hostname the user types (default localhost:18944). The blocking problem is licensing: no LICENSE file or license header anywhere, so distribution permission is not established. Also major: clicking Calculate deletes any scene model whose name starts with Plane/Puncture/Project/Line (data loss), and the code is Slicer-4/Python-2 era (`xrange`, legacy fiducial APIs), so it will not run in current Slicer.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "No exfiltration, downloads, eval or installs; the OpenIGTLink send is explicit and targets a user-entered host (GyroGuide.py:427-433). However PlaneLineModel deletes scene nodes by name prefix (GyroGuide.py:715-719), a concrete path to unintended data loss in the user's scene."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Only `from __main__ import vtk, qt, ctk, slicer` and `import numpy, time` (GyroGuide.py:1-3); no pip installs, no sys.path/env/monkey-patching, no logging changes, CMake installs no extra packages."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "GyroGuide/CMakeLists.txt lists the only Python file and Testing subdirectory CMakeLists exist; but `slicer_add_python_unittest(SCRIPT ${MODULE_NAME}.py)` (line 25) registers a test on a script that contains no unittest class, the real test in Testing/Python/CMakeLists.txt is commented out, and Resources/Icons/GyroGuide.png is not listed in MODULE_PYTHON_RESOURCES."
+  },
+  "license": {
+   "rating": "blocking",
+   "rationale": "Searched the whole repository for license/copyright/GPL/BSD/MIT/Apache: no LICENSE file and no license header in CMakeLists.txt, README.md or GyroGuide.py; README.md is only a two-line description. Distribution permission is therefore not granted."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The module is written for Slicer 3/4 on Python 2: `xrange` (GyroGuide.py:549, 577, 601) raises NameError under Python 3, so Calculate cannot work in current Slicer, and it relies on legacy fiducial classes/APIs. It also blocks the GUI with `time.sleep(1)` twice, ignores the return value of connectorNode.Start(), and dereferences attributes that may be missing after the calculator's early `return`."
+  },
+  "utility": {
+   "rating": "concern",
+   "rationale": "A surgical trajectory tool with a one-sentence README, no tutorial/sample data, no tests, no validation or provenance, and no clinical-use/regulatory disclaimer, at tier 3 (community supported); combined with the Python 3 incompatibility, a user cannot currently use it as advertised."
+  }
+ },
+ "findings": [
+  {
+   "category": "license",
+   "severity": "blocking",
+   "title": "No license terms anywhere in the repository",
+   "file": "README.md",
+   "line_start": 1,
+   "line_end": 4,
+   "evidence": "An python extension of 3D Slicer which helps surgeons determine the puncture trajectory.",
+   "explanation": "A repository-wide search for license/copyright/GPL/BSD/MIT/Apache found no LICENSE/COPYING file and no license or copyright header in CMakeLists.txt, GyroGuide/CMakeLists.txt, GyroGuide.py or README.md. Without terms, the Extensions Index (and downstream packagers/mirrors) has no permission to redistribute the extension, and users have no statement of permitted use.",
+   "suggestion": "Add a LICENSE file (any OSI/permissive license the authors choose) and a matching header or README statement; confirm the authors own the code and the bundled icon.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Calculate deletes unrelated scene model nodes by name prefix",
+   "file": "GyroGuide/GyroGuide.py",
+   "line_start": 715,
+   "line_end": 719,
+   "evidence": "if modelName[i][0:5] == 'Plane' or modelName[i][0:8] == 'Puncture' or modelName[i][0:7] == 'Project' or modelName[i][0:4] == 'Line':\n\n\n\n                scene.RemoveNode(model[i])",
+   "explanation": "Every model node in the scene whose name starts with 'Plane', 'Puncture', 'Project' or 'Line' is removed when the user presses Calculate - not just nodes created by this module (all its lines are even just named 'Line'). A user's own imported/model-maker output (e.g. 'Plane-anatomy', 'Line-of-approach') is silently destroyed in the scene, and the loss is unrecoverable if the scene was not saved; the same pattern removes any transform named 'Result-Data' (line 451-453). Because this happens without confirmation and in a planning workflow, it is a concrete path to losing patient-derived data.",
+   "suggestion": "Track the node IDs the module creates and delete only those (or store them under a dedicated subject hierarchy folder), instead of matching name prefixes; prompt before removing nodes the module did not create.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Python 2 `xrange` and legacy fiducial APIs make the module non-functional in current Slicer",
+   "file": "GyroGuide/GyroGuide.py",
+   "line_start": 575,
+   "line_end": 577,
+   "evidence": "self.p = numpy.zeros((n,3))\n\n                for j in xrange(n):",
+   "explanation": "All three point-collection branches use `xrange` (lines 549, 577, 601), which does not exist in Python 3, so pressing Calculate on any fiducial node raises NameError and no result is produced in Slicer 5. The module also uses the pre-`ScriptedLoadableModule` template and Slicer 3/4 node classes (`vtkMRMLFiducialListNode`, `vtkMRMLAnnotationHierarchyNode`) and deprecated accessors, so it cannot deliver what the catalog description advertises.",
+   "suggestion": "Port to the current module template (`ScriptedLoadableModule`/`ScriptedLoadableModuleWidget`), replace `xrange` with `range`, and use vtkMRMLMarkupsNode APIs (GetNumberOfControlPoints/GetNthControlPointPosition); test in the targeted Slicer version.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "OpenIGTLink connection failure is silently ignored",
+   "file": "GyroGuide/GyroGuide.py",
+   "line_start": 427,
+   "line_end": 433,
+   "evidence": "hostname = self.hostnameLineEdit.text\n\n        port = int(self.portLineEdit.text)\n\n        connectorNode.SetTypeClient(hostname, port)\n\n        checker = connectorNode.Start()",
+   "explanation": "The result of Start() is never checked and no error is shown, so if the device is unreachable the transform is registered and then the connector is stopped without the user knowing nothing was delivered; a non-numeric port raises an uncaught ValueError from `int(...)` in the GUI click handler.",
+   "suggestion": "Validate the port, check the Start() return value and surface connection failures with slicer.util.errorDisplay / warning; disable Send until a connection succeeds.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Connector-node lookup creates duplicate connector nodes",
+   "file": "GyroGuide/GyroGuide.py",
+   "line_start": 401,
+   "line_end": 423,
+   "evidence": "if slicer.mrmlScene.GetNthNodeByClass(i, 'vtkMRMLIGTLConnectorNode').GetName() == 'Send-Data':\n\n                    connectorNode = slicer.mrmlScene.GetNthNodeByClass(i, 'vtkMRMLIGTLConnectorNode')\n\n                else:\n\n                    connectorNode = slicer.vtkMRMLIGTLConnectorNode()",
+   "explanation": "The else branch is inside the loop, so for every connector node not named 'Send-Data' a new node is created and added; with N existing connectors the scene accumulates extra 'Send-Data' nodes and only the last one is used. Also, `vtkMRMLIGTLConnectorNode` is used without checking that the OpenIGTLink extension is installed.",
+   "suggestion": "Look the node up once outside the loop (e.g. via GetFirstNodeByName) and create it only if absent; guard for a missing vtkMRMLIGTLConnectorNode class.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Calculator returns early but callers assume results exist; 5-marker assumption unchecked",
+   "file": "GyroGuide/GyroGuide.py",
+   "line_start": 611,
+   "line_end": 617,
+   "evidence": "vector1 = self.position[0][0] - self.position[0][1] #a vector in the plane red\n\n        vector2 = self.position[0][0] - self.position[0][2] #a vector in the plane red",
+   "explanation": "If any selected node has zero points the constructor `return`s (lines 545, 569, 595) leaving `self.position` short, so the following indexing raises IndexError/AttributeError; likewise markers nodes with fewer than five points make `self.position[0][3] - self.position[0][4]` (line 617) fail. The UI enables Calculate for any node with a valid type, so these exceptions reach the user as raw tracebacks.",
+   "suggestion": "Validate point counts (>=5 markers, >=1 target, >=1 entry, distinct points, non-zero-length vectors) and report a clear message via slicer.util.errorDisplay instead of continuing.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Send handler blocks the GUI thread with fixed sleeps",
+   "file": "GyroGuide/GyroGuide.py",
+   "line_start": 503,
+   "line_end": 509,
+   "evidence": "time.sleep(1)\n\n        matrix.DeepCopy((e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,0,0,0,1))\n\n        time.sleep(1)\n\n        connectorNode.Stop()",
+   "explanation": "The OpenIGTLink send runs in the button-click slot and freezes Slicer's event loop for two seconds per press, with no progress feedback; the fixed delays are also a fragile substitute for waiting for an actual message handshake.",
+   "suggestion": "Push the transform through the connector node without sleep, or run the send asynchronously (e.g. qt.QTimer / cli node) with progress and a status message.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "CMake registers a unittest on a script that contains no tests; real test target is commented out",
+   "file": "GyroGuide/CMakeLists.txt",
+   "line_start": 21,
+   "line_end": 28,
+   "evidence": "if(BUILD_TESTING)\n\n    # Register the unittest subclass in the main script as a ctest.\n\n    # Note that the test will also be available at runtime.\n\n    slicer_add_python_unittest(SCRIPT ${MODULE_NAME}.py)",
+   "explanation": "GyroGuide.py defines no unittest.TestCase subclass, so the registered ctest has nothing to run, and GyroGuide/Testing/Python/CMakeLists.txt only contains a commented-out line, leaving the extension without any automated test at tier 3.",
+   "suggestion": "Add a real ScriptedLoadableModuleTest (or the standard ModuleTest.py) and register it, so the extension has a passing smoke test.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Bundled icon is not installed and not used by the code",
+   "file": "GyroGuide/CMakeLists.txt",
+   "line_start": 9,
+   "line_end": 16,
+   "evidence": "set(MODULE_PYTHON_RESOURCES\n\n  )",
+   "explanation": "GyroGuide/Resources/Icons/GyroGuide.png is committed but MODULE_PYTHON_RESOURCES is empty and no code references the icon, so it is dead weight (a duplicate of the root GyroGuide.png); the catalog uses a wiki URL for the icon instead.",
+   "suggestion": "Either remove the unused Resources icon or install it via MODULE_PYTHON_RESOURCES and use it as the module icon.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "major",
+   "title": "Surgical trajectory tool ships without documentation, validation or clinical disclaimer",
+   "file": "README.md",
+   "line_start": 1,
+   "line_end": 4,
+   "evidence": "GyroGuide\n=========\n\nAn python extension of 3D Slicer which helps surgeons determine the puncture trajectory.",
+   "explanation": "The module computes puncture angle/depth for neurosurgical puncture and drives an external navigation probe, yet the repository provides only a one-sentence README, no tutorial or sample data, no accuracy/validation evidence, and no statement that it is not approved for clinical use. At tier 3 (community supported), users have no way to judge correctness or suitability for patient care.",
+   "suggestion": "Add usage documentation with sample data, describe how the angles are defined and validated, and include an explicit research/not-for-clinical-use disclaimer until validation is published.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not resolve https://github.com/lpfang/GyroGuide.git at the catalog revision or confirm that commit 14766ab3b012c28f5ef0657395256e15b9304073 exists (no network): only the branch name \"master\" is in the catalog entry, so the reviewed source is the snapshot shown, not a verified commit.",
+  "Did not inspect the binary files GyroGuide.png / GyroGuide/Resources/Icons/GyroGuide.png (image contents, embedded metadata, and whether they are identical).",
+  "Did not verify runtime behaviour in any Slicer version; the Python 3 / Slicer 5 incompatibility is inferred from `xrange`, the legacy module template and deprecated fiducial APIs, not from execution.",
+  "Did not check repository history, maintenance activity, issue tracker, or whether a wiki tutorial (linked EXTENSION_HOMEPAGE) exists and matches the code.",
+  "Did not verify the license/provenance of the icon images fetched from slicer.org or of the OpenIGTLink device protocol documentation.",
+  "Could not verify CMake configure/build success for any platform, nor whether dependabot/CI checks pass."
+ ],
+ "questions_for_author": [
+  "Which license applies to GyroGuide? Please add a LICENSE file and confirm you have the rights to redistribute the bundled icon images.",
+  "Why is the extension still on the Slicer 3/4 module template with Python 2 `xrange` and legacy fiducial classes? Is a port to Slicer 5 planned, and has the module been tested in the Slicer version the index builds?",
+  "Should Calculate really delete every scene model whose name begins with Plane/Puncture/Project/Line (and every transform named Result-Data)? Please restrict deletion to nodes the module created.",
+  "Has the angle/depth computation been validated (phantom, published study)? Is a research-use-only disclaimer acceptable, and how should the external probe's protocol matrix be documented?"
+ ]
+}

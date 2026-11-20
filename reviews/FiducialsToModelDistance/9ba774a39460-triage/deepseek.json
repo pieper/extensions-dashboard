@@ -1,0 +1,152 @@
+{
+ "purpose": "A 3D Slicer scripted module that computes distances between a set of fiducial (markup) points and either a surface model or a second fiducial set, writing per-point distances and summary error metrics (mean, RMS, max/min, Hausdorff) into table nodes. It targets researchers quantifying registration or model-fitting accuracy.",
+ "summary": "Small, self-contained scripted module with no network access, no downloads, no pip installs and no global side effects; it only uses Slicer's own VTK/numpy and writes results into user-selected table nodes. Packaging is conventional and complete (all imported Python files and resources are installed by CMake), and the catalog entry is consistent with the source. The main gap is licensing: no LICENSE file, no license headers, and no terms in the README, so distribution permission is not established. Remaining issues are ordinary correctness bugs (Hausdorff metric, stale metric columns, no progress/threading) and thin documentation.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read the whole of FiducialsToModelDistance.py, the .ui file and both CMakeLists.txt; there is no network, subprocess, eval/exec, pickle, file writing or download code, and the only external URLs are documentation/icon links in CMakeLists.txt lines 7-12 and the help text."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Module-level imports are limited to os/unittest/vtk/qt/ctk/slicer/logging/decimal/VTKObservationMixin (lines 1-7); numpy is imported lazily inside functions (lines 174, 215, 253) and nothing is pip-installed, pinned or monkey-patched."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "FiducialsToModelDistance/CMakeLists.txt lines 5-20 install the single .py plus the icon and .ui resources, both of which exist; EXTENSION_DEPENDS is 'NA' and the catalog entry has empty build_dependencies; the only committed binaries are a 98 KB icon and two screenshots."
+  },
+  "license": {
+   "rating": "blocking",
+   "rationale": "Searched the whole repository for 'licen[cs]e|copyright|BSD|Apache|MIT' with no matches: there is no LICENSE file, no header in FiducialsToModelDistance.py, and README.md (lines 1-15) states no terms, so permission to redistribute the extension is not established."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "The module follows ScriptedLoadableModule conventions with a parameter node and observer cleanup, but the Hausdorff metric (line 270) uses min() instead of max(), the metrics table is never cleared so stale columns persist (line 279), and the compute loop runs on the GUI thread with no progress reporting."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md (lines 1-15) explains the purpose with two screenshots and the module ships a self-checking unittest (lines 300-368), but there is no usage/tutorial documentation, no sample data, no clinical-use disclaimer, and the repository appears unmaintained."
+  }
+ },
+ "findings": [
+  {
+   "category": "license",
+   "severity": "blocking",
+   "title": "No license file, headers or terms anywhere in the repository",
+   "file": "README.md",
+   "line_start": 1,
+   "line_end": 15,
+   "evidence": "# Fiducials to model distance\n\nThis is an extension for 3D Slicer that computes distance between two point sets or a point set and a surface mesh.",
+   "explanation": "A repository-wide search for 'licen[cs]e|copyright|BSD|Apache|MIT' returned no matches: there is no LICENSE/COPYING file, no license header in FiducialsToModelDistance/FiducialsToModelDistance.py, and README.md states no terms. Without explicit permission, the Extensions Index cannot redistribute the extension in the binary package, so the 'clear distribution permission' admission requirement is unmet.",
+   "suggestion": "Add a LICENSE file (any OSI-approved license is acceptable, e.g. the Slicer BSD-3-Clause style) and reference it from README.md and the module's acknowledgementText.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Hausdorff distance is computed with min() instead of max()",
+   "file": "FiducialsToModelDistance/FiducialsToModelDistance.py",
+   "line_start": 266,
+   "line_end": 270,
+   "evidence": "          # Hausdorff Distance is the max of the minimum distances\n          inversePointDistances, inverseLabels = self.pointDistancesLabelsFromPoints(inputReference, inputPoints)\n          metricLabels.append(\"Hausdorff Distance\")\n          metricValues.append(max(abs(pointDistances).min(), abs(inversePointDistances).min()))",
+   "explanation": "The symmetric Hausdorff distance is the maximum over both directions of the per-point minimum distances, but the code takes the minimum of the two minima. For the module's own test data (moving points 1.25-2.3 mm from the fixed set) the reported value is 1.25 mm instead of 2.3 mm, and the test at line 362 asserts the wrong value, so the bug is locked in. Users comparing registration accuracy would systematically under-report the worst-case error.",
+   "suggestion": "Use max(abs(pointDistances).max(), abs(inversePointDistances).max()) and update the expected value in the test to 2.3.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Metrics table is not cleared, so stale columns persist between runs",
+   "file": "FiducialsToModelDistance/FiducialsToModelDistance.py",
+   "line_start": 252,
+   "line_end": 279,
+   "evidence": "      if outputMetricsTable:\n        import numpy as np\n        metricValues = []\n        metricLabels = []",
+   "explanation": "The distances table is cleared with RemoveAllColumns() (line 247) but the metrics table is only passed to slicer.util.updateTableFromArray, which adds/overwrites the named columns without removing others. If a user first computes fiducial-to-model metrics (Mean Absolute Distance, Maximum Absolute Distance, ...) and then fiducial-to-fiducial metrics into the same table, the absolute-distance columns remain and the table mixes results from two different runs.",
+   "suggestion": "Call outputMetricsTable.RemoveAllColumns() (or reset the table) before writing the new metrics.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Long computation runs on the GUI thread without progress or cancellation",
+   "file": "FiducialsToModelDistance/FiducialsToModelDistance.py",
+   "line_start": 135,
+   "line_end": 143,
+   "evidence": "    def onApplyButton(self):\n      logic = FiducialsToModelDistanceLogic()\n      try:\n        logic.compute(self._parameterNode.GetNodeReference(\"InputPoints\"), self._parameterNode.GetNodeReference(\"InputReference\"),",
+   "explanation": "compute() is called directly from the button slot; the nested loops in pointDistancesLabelsFromPoints (lines 177-191) are O(n*m) and the surface path builds a vtkImplicitPolyDataDistance over the full mesh. With large fiducial sets or dense models Slicer freezes with no progress bar and no way to cancel, which looks like a crash to the user.",
+   "suggestion": "Use slicer.util.ProgressDialog / a CLI-style progress callback, or run the computation in a worker thread with progress and cancellation.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Missing input validation for the input points node",
+   "file": "FiducialsToModelDistance/FiducialsToModelDistance.py",
+   "line_start": 228,
+   "line_end": 233,
+   "evidence": "    def compute(self, inputPoints, inputReference, outputMetricsTable, outputDistancesTable):\n\n      if inputReference.IsA(\"vtkMRMLMarkupsFiducialNode\"):",
+   "explanation": "compute() dereferences inputReference and inputPoints without None checks; the GUI selectors have noneEnabled=false so the normal path is safe, but the logic class is public API and the test calls it directly. A None input produces an AttributeError that is only caught by the generic handler in onApplyButton, giving a confusing message.",
+   "suggestion": "Validate that inputPoints and inputReference are not None and raise a clear ValueError.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Surface distance uses the raw polydata without checking for a non-closed mesh",
+   "file": "FiducialsToModelDistance/FiducialsToModelDistance.py",
+   "line_start": 200,
+   "line_end": 213,
+   "evidence": "      # Transform model polydata to world coordinate system\n      if inputModel.GetParentTransformNode():",
+   "explanation": "vtkImplicitPolyDataDistance returns signed distances whose sign depends on surface orientation, so for open or inconsistently oriented meshes the 'Mean Distance'/'Minimum Distance' values can be misleading while the absolute variants are fine. This is a documented-behaviour caveat rather than a crash, but the module presents signed values without any note.",
+   "suggestion": "Document that signed distances depend on mesh orientation and that absolute metrics should be used for open surfaces.",
+   "confidence": "low"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No usage documentation, sample data or clinical disclaimer",
+   "file": "README.md",
+   "line_start": 8,
+   "line_end": 15,
+   "evidence": "This module was primarily designed to compute distances from a low density point cloud of fiducial points to the surface of a model.",
+   "explanation": "README.md only describes the purpose and shows two screenshots; there is no step-by-step tutorial, no sample scene, and no statement about intended (research) use. Users must guess the workflow, and there is no warning that the metrics are not validated for clinical decision making.",
+   "suggestion": "Add a short usage section (select input points, reference, output tables, press Apply) and a research-use disclaimer.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Test registration is partly commented out",
+   "file": "FiducialsToModelDistance/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The Testing/Python directory contains only a commented-out registration, but the module's own unittest is still registered by slicer_add_python_unittest in FiducialsToModelDistance/CMakeLists.txt line 27, so the test does run. The empty directory is harmless clutter.",
+   "suggestion": "Remove the unused Testing/Python directory or add a real test file.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Catalog entry pins a moving branch and the source revision could not be verified",
+   "file": "CMakeLists.txt",
+   "line_start": 13,
+   "line_end": 13,
+   "evidence": "set(EXTENSION_DEPENDS \"NA\") # Specified as a space separated string, a list or 'NA' if any",
+   "explanation": "The catalog entry uses scm_revision 'master' and EXTENSION_DEPENDS 'NA' with empty build_dependencies, which is consistent with the source (no dependencies are used). I could not resolve the commit 9ba774a39460fac85da215c5cfbbb19881094d6b or the branch tip from this environment, so the exact reviewed revision is unverified; the code shown is what was reviewed.",
+   "suggestion": "No action required for the dependency settings; consider whether a fixed revision is preferable for reproducibility.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Could not resolve the git revision 9ba774a39460fac85da215c5cfbbb19881094d6b or the current master tip; the review covers the file contents provided in the submission.",
+  "Binary files (FiducialsToModelDistance.png, Screenshots/*.PNG) were not inspected beyond their sizes.",
+  "No build or test run was possible, so the CMake configuration and the module's unittest were not executed.",
+  "Repository metadata such as commit history, maintenance activity, issues and CI status was not accessible."
+ ],
+ "questions_for_author": [
+  "Which license applies to this extension, and can a LICENSE file be added to the repository?",
+  "Is the 'Hausdorff Distance' metric intended to be the symmetric maximum (max of the two directed maxima)? The current code and test use the minimum.",
+  "Should the metrics table be cleared between runs so that fiducial-to-model and fiducial-to-fiducial results are not mixed in one table?"
+ ]
+}

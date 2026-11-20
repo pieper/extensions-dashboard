@@ -1,0 +1,165 @@
+{
+ "purpose": "CurveMaker is a Slicer scripted module that turns a list of fiducial/markup points into a 3D curve (optionally a closed ring, optionally a cardinal spline) rendered as a tube model, and reports curve length, point-to-curve distances and per-point curvature. It targets researchers who need a quick spline/tube through landmarks, e.g. for trajectory or catheter-path visualization.",
+ "summary": "No malicious or network behavior: the module only uses Slicer/VTK/numpy, installs nothing and transmits nothing, so safety and environment are fine. However the repository contains no license file or license headers anywhere (README.md is four lines, no terms), which blocks distribution permission. Soundness has real defects: setup() assumes a 3D view exists, distanceToPoint() returns a bare numpy.Inf that the caller unpacks as a tuple, observers are never removed in cleanup(), and numpy.Inf no longer exists in NumPy 2. Documentation is a two-line README with no tutorial, sample data or tests, and functionality overlaps the MarkupsToModel extension.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read all of CurveMaker/CurveMaker.py (1094 lines) and both CMakeLists.txt files: no network access, no subprocess/eval/exec/pickle, no file writes, no downloads, no credentials, no text aimed at reviewers. Only Slicer/VTK/numpy APIs are used."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Module-level imports are os, unittest, math, numpy and 'from __main__ import vtk, qt, ctk, slicer' (CurveMaker.py:1-5); numpy ships with Slicer, nothing is pip-installed, no sys.path or environment changes, no global logging/warning changes."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CurveMaker/CMakeLists.txt installs CurveMaker.py via slicerMacroBuildScriptedModule and the catalog entry (empty build_dependencies, no EXTENSION_DEPENDS) is consistent; but line 25 registers a unittest from a file that contains no TestCase, and CMakeLists.txt:1 requires CMake 2.8.9, which CMake 4.x rejects."
+  },
+  "license": {
+   "rating": "blocking",
+   "rationale": "The whole repository was listed and searched case-insensitively for license/copyright/BSD/MIT/Apache: no LICENSE file, no header in CurveMaker.py or the CMake files, and README.md (4 lines) states no terms. There is therefore no permission to redistribute the extension."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read the widget setup, observer handling, updateCurve, computeCurvatures and distanceToPoint. Several concrete defects: setup() dereferences layout.threeDWidget(0) unconditionally, distanceToPoint() returns a scalar that the caller unpacks as a tuple, cleanup() is 'pass' so observers leak, and numpy.Inf is used (removed in NumPy 2)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md is two lines of text, there is no tutorial, sample data or working test (Testing/Python/CMakeLists.txt has the test commented out), and the curve-from-markups/tube functionality overlaps the MarkupsToModel extension; the module itself is usable and self-describing in the GUI."
+  }
+ },
+ "findings": [
+  {
+   "category": "license",
+   "severity": "blocking",
+   "title": "No license file or license terms anywhere in the repository",
+   "file": "README.md",
+   "line_start": 1,
+   "line_end": 4,
+   "evidence": "CurveMaker\n==========\n\n3D Slicer scripted module to generage a curve from a list of fiducials.",
+   "explanation": "The repository listing contains only CMakeLists.txt, CurveMaker.png, README.md, CurveMaker/CMakeLists.txt, CurveMaker/CurveMaker.py, the icon and the Testing CMakeLists files; a case-insensitive search for 'license|copyright|BSD|MIT|apache' over all text files returned no matches. Without any license or copyright grant, users and the extension index have no permission to redistribute the module, so the distribution-permission admission requirement is unmet.",
+   "suggestion": "Add a LICENSE file (any OSI-approved or otherwise permissive license is acceptable) and a short copyright/license statement in README.md and/or the header of CurveMaker.py.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "setup() assumes a 3D view exists and crashes in layouts without one",
+   "file": "CurveMaker/CurveMaker.py",
+   "line_start": 368,
+   "line_end": 371,
+   "evidence": "layout = slicer.app.layoutManager()\n    view = layout.threeDWidget(0).threeDView()\n    renderer = layout.activeThreeDRenderer()\n    self.scalarBarWidget.SetInteractor(renderer.GetRenderWindow().GetInteractor())",
+   "explanation": "When the module is opened while the current layout has no 3D view (for example 'Red slice only' or a custom slice-only layout), layoutManager.threeDWidget(0) returns None, so .threeDView() raises AttributeError during setup() and the module panel fails to build. The scalar bar is also bound to whichever 3D view happened to be first, and is never re-bound or detached.",
+   "suggestion": "Guard the 3D-view lookup (skip scalar-bar setup when no 3D view is available) and attach the scalar bar lazily when curvature display is enabled, or use the view's own renderer via a layout observer.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "distanceToPoint() returns a scalar that the caller unpacks as a tuple",
+   "file": "CurveMaker/CurveMaker.py",
+   "line_start": 1034,
+   "line_end": 1035,
+   "evidence": "if self.CurvePoly == None:\n      return numpy.Inf",
+   "explanation": "updateTargetFiducialsTable() does '(err, evec) = self.logic.distanceToPoint(pos, extrapolate)' (line 613). Before any curve has been generated CurvePoly is None, so distanceToPoint returns a float and the unpacking raises TypeError, breaking the Distance table as soon as a target markups node is selected before pressing 'Generate Curve'.",
+   "suggestion": "Return a tuple such as (float('inf'), numpy.zeros(3)) in the early-return branch, or handle the None-curve case in the caller.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "cleanup() does nothing, leaving observers and the scalar bar attached",
+   "file": "CurveMaker/CurveMaker.py",
+   "line_start": 386,
+   "line_end": 387,
+   "evidence": "def cleanup(self):\n    pass",
+   "explanation": "Observers are added to the source markups node, the destination model node and its display node (lines 407, 426, 429, 578) but never removed when the module widget is closed or the scene is closed. The observers keep references to the widget's Python methods, so later node modifications can call into a half-destroyed widget, and the vtkScalarBarWidget stays registered with the 3D view interactor.",
+   "suggestion": "Remove all observer tags and disable the scalar bar widget in cleanup(), and reset the stored node references.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "numpy.Inf removed in NumPy 2 breaks distance computation",
+   "file": "CurveMaker/CurveMaker.py",
+   "line_start": 1048,
+   "line_end": 1048,
+   "evidence": "minMag2 = numpy.Inf",
+   "explanation": "numpy.Inf was deprecated in NumPy 1.20 and removed in NumPy 2.0; on a Slicer build shipping NumPy 2 the Distance table raises AttributeError. The same alias is used at line 1035.",
+   "suggestion": "Use float('inf') or numpy.inf.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Unbound nnvec when two consecutive curve points coincide",
+   "file": "CurveMaker/CurveMaker.py",
+   "line_start": 1059,
+   "line_end": 1067,
+   "evidence": "norm = numpy.linalg.norm(nvec)\n      if norm != 0:\n        nnvec = nvec / norm\n\n      # Calculate the distance between the point and the segment\n      mag2 = 0.0\n\n      op = npoint - p1\n      aproj = numpy.inner(op, nnvec)",
+   "explanation": "If a segment has zero length (duplicate control points, or a spline that produces repeated samples), nnvec is never assigned and numpy.inner(op, nnvec) raises UnboundLocalError, aborting the distance table update. computeCurvatures() has the analogous division by ds without a zero check (lines 906-909).",
+   "suggestion": "Skip zero-length segments (continue) or initialise nnvec to a zero vector and guard the divisions.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Registered unittest does not exist in the module script",
+   "file": "CurveMaker/CMakeLists.txt",
+   "line_start": 23,
+   "line_end": 25,
+   "evidence": "# Register the unittest subclass in the main script as a ctest.\n  # Note that the test will also be available at runtime.\n  slicer_add_python_unittest(SCRIPT ${MODULE_NAME}.py)",
+   "explanation": "CurveMaker.py imports unittest (line 2) but defines no unittest.TestCase subclass, and CurveMaker/Testing/Python/CMakeLists.txt has its test commented out. The generated ctest therefore has nothing to run and will fail or silently pass, so the extension has no automated coverage.",
+   "suggestion": "Add a CurveMakerTest(unittest.TestCase) class exercising nodeToPoly/calculateLineLength/distanceToPoint, or remove the registration.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "cmake_minimum_required(VERSION 2.8.9) is rejected by CMake 4",
+   "file": "CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "cmake_minimum_required(VERSION 2.8.9)",
+   "explanation": "CMake 4.x removed compatibility with cmake_minimum_required values below 3.5 and errors out, so the extension cannot be configured on a modern build machine unless the Slicer superbuild injects CMAKE_POLICY_VERSION_MINIMUM.",
+   "suggestion": "Raise the minimum to a version supported by current Slicer builds (e.g. 3.16 or higher).",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No documentation, tutorial, sample data or tests; overlaps MarkupsToModel",
+   "file": "README.md",
+   "line_start": 1,
+   "line_end": 4,
+   "evidence": "CurveMaker\n==========\n\n3D Slicer scripted module to generage a curve from a list of fiducials.",
+   "explanation": "The only documentation is a two-line README (with a typo); there is no tutorial, no sample markups, no screenshots in the repository and no working test. The core function (fit a curve through markups and render it as a tube) is already provided by the MarkupsToModel extension, so users have no guidance on when to prefer this module.",
+   "suggestion": "Add a README with usage steps and a sample .mrk.json, and state the difference from MarkupsToModel.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Legacy Slicer-4 idioms and unused imports",
+   "file": "CurveMaker/CurveMaker.py",
+   "line_start": 1,
+   "line_end": 5,
+   "evidence": "import os\nimport unittest\nfrom __main__ import vtk, qt, ctk, slicer\nimport math\nimport numpy",
+   "explanation": "os, math and unittest are unused; 'from __main__ import ...' is the pre-Slicer-5 pattern (slicer.util / slicer.qSlicerWidget imports are preferred), and self.tag is never initialised in setup() (line 43 is commented out) although onTargetFiducialsSelected reads it at line 572. None of this changes behavior today but makes the module fragile.",
+   "suggestion": "Drop unused imports, initialise self.tag = None in setup(), and modernise the imports.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Whether the catalog revision 'master' currently resolves to the reviewed commit 32e2b08ae427074f0d4c98261d53857c9962382f (no network access; the entry uses a moving branch reference, which is allowed but means an approval covers only the reviewed source).",
+  "Whether slicerMacroBuildScriptedModule installs CurveMaker/Resources/Icons/CurveMaker.png even though MODULE_PYTHON_RESOURCES is empty (CurveMaker/CMakeLists.txt:9-10); if it does not, the module will show a generic icon.",
+  "Whether the extension actually builds and loads on current Slicer versions (no build or Slicer runtime available).",
+  "Whether the referenced wiki homepage/screenshot URLs in CMakeLists.txt:6,10,11 still exist.",
+  "Git history, maintenance activity and issue tracker of https://github.com/tokjun/CurveMaker."
+ ],
+ "questions_for_author": [
+  "Which license governs CurveMaker, and can a LICENSE file be added so the extension may be redistributed?",
+  "Was the module tested on a current Slicer 5.x build, in particular in a layout without a 3D view and with NumPy 2?",
+  "Is the module still maintained, given that MarkupsToModel already provides curve fitting and tube rendering from markups?"
+ ]
+}

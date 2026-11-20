@@ -1,0 +1,1087 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Existing weights are deleted before the new download is known to succeed",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+   "line": 135,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Weights folder is deleted before the download URL is validated",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 135,
+     "line_end": 142,
+     "evidence": "        if self.destWeightFolder.exists():\n            shutil.rmtree(self.destWeightFolder)\n        self.destWeightFolder.mkdir(parents=True, exist_ok=True)\n\n        try:\n            download_url = self.getLatestReleaseUrl()",
+     "explanation": "getLatestReleaseUrl() returns None when PyGithub is unavailable or the API call fails (lines 65-77), and session.get(None) then raises inside the try block. By that point the existing weights (including ones the user installed manually per README.md:298-318) have already been deleted, so a transient GitHub API failure leaves the user with no model and a generic error.",
+     "suggestion": "Resolve and validate download_url first, download to a temporary file, verify it, and only then replace the existing weights folder.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 135
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Existing weights are deleted before the new download is known to succeed",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 135,
+     "line_end": 143,
+     "evidence": "if self.destWeightFolder.exists():\n            shutil.rmtree(self.destWeightFolder)\n        self.destWeightFolder.mkdir(parents=True, exist_ok=True)\n\n        try:\n            download_url = self.getLatestReleaseUrl()",
+     "explanation": "The folder is removed before getLatestReleaseUrl() and the HTTP request run. If the GitHub API returns None, the request fails, or the zip is corrupt, the previously working model is gone and the user must reinstall it manually. This is data loss inside the extension's own folder, which is an ordinary robustness bug rather than a malicious one.",
+     "suggestion": "Download to a temporary directory, verify and extract it there, then swap it in atomically. Keep the old weights on failure.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 135
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Model weights downloaded at runtime have no stated license or terms",
+   "category": "license",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "README.md",
+   "line": 52,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Model weights downloaded at runtime have no stated license or terms",
+     "file": "README.md",
+     "line_start": 46,
+     "line_end": 74,
+     "evidence": "- **Training dataset:** 470 dento-maxillo-facial CT and CBCT scans.",
+     "explanation": "The extension code is Apache-2.0, but the model weights it downloads from GitHub releases and the Zenodo record have no license text in this repository. Users and redistributors cannot tell whether the weights may be used commercially or redistributed. The README asks only for citation. The rights should be confirmed and stated.",
+     "suggestion": "Add the license for the pretrained weights (for example the Zenodo record's license) to the README and the release notes.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 52
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "PyGithub is pip-installed into Slicer's shared Python environment without asking, just by opening the module",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+   "line": 171,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "PyGithub is pip-installed into Slicer's shared Python environment without asking, just by opening the module",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 171,
+     "line_end": 188,
+     "evidence": "    def _ensurePipDependencies(self):\n        if not self.hasInternetConnectionF():\n            return\n\n        try:\n            import github  # noqa",
+     "explanation": "SegmentationWidget.__init__ constructs PythonDependencyChecker() (SegmentationWidget.py:170), whose __init__ calls _ensurePipDependencies (line 47), which runs slicer.util.pip_install(\"PyGithub\") (line 182) with no confirmation. Any user who merely opens the module modifies Slicer's shared site-packages; PyGithub pulls in cryptography, cffi, pynacl, pyjwt and may upgrade requests/urllib3 that Slicer bundles, which can break other extensions and DICOM networking for users who never run a segmentation.",
+     "suggestion": "Do not install at widget construction. Ask the user before installing, or avoid the dependency entirely: query the GitHub releases API with the already-bundled `requests` (or use the Slicer download/network utilities) instead of PyGithub.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 171
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "PyGithub is pip-installed into Slicer's shared environment when the module opens, without consent",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 171,
+     "line_end": 182,
+     "evidence": "slicer.util.pip_install(\"PyGithub\")",
+     "explanation": "_ensurePipDependencies runs from PythonDependencyChecker.__init__, which SegmentationWidget.__init__ calls at line 170. Opening the module therefore installs packages into the shared Slicer Python environment, even if the user never runs a segmentation. PyGithub's dependencies can alter packages that Slicer bundles, such as requests. The installation is not confirmed by the user, which the review policy asks reviewers to flag.",
+     "suggestion": "Remove the GitHub dependency and use requests against the release API, which Slicer already bundles. Otherwise install only when the user clicks Apply and after a confirmation dialog.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 182
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Weights-update prompt ignores the user's answer: QMessageBox return value used as a boolean",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+   "line": 53,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Weights-update prompt ignores the user's answer: QMessageBox return value used as a boolean",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 53,
+     "line_end": 59,
+     "evidence": "        elif self.areWeightsOutdated():\n            if qt.QMessageBox.question(\n                    None,\n                    \"New weights are available\",\n                    \"New weights are available. Would you like to download them?\"\n            ):",
+     "explanation": "qt.QMessageBox.question returns a StandardButton value (Yes=16384, No=65536); both are non-zero and therefore truthy in Python. The condition is always true, so a user who clicks 'No' still gets downloadWeights() called, which rmtree's the existing weights folder and re-downloads hundreds of MB. The dialog is effectively decorative and the user's explicit refusal is overridden.",
+     "suggestion": "Compare explicitly: `if qt.QMessageBox.question(...) == qt.QMessageBox.Yes:` (or use qt.QMessageBox.StandardButton.Yes).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 53
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Declining the weight update still downloads and replaces the weights",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 53,
+     "line_end": 60,
+     "evidence": "elif self.areWeightsOutdated():\n            if qt.QMessageBox.question(\n                    None,\n                    \"New weights are available\",",
+     "explanation": "qt.QMessageBox.question returns a standard-button enum value (Yes and No are both nonzero), so the truthiness test is always true. The user is asked whether to download, but a No answer still calls downloadWeights, which deletes the current weights folder. The sibling check in SegmentationWidget.py line 267 correctly compares to qt.QMessageBox.No, so the code is inconsistent. Confidence is medium because it depends on PythonQt return-value behavior, which I could not run.",
+     "suggestion": "Compare the result explicitly, for example 'if qt.QMessageBox.question(...) == qt.QMessageBox.Yes:', and avoid deleting existing weights until a replacement has been downloaded and verified.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 53
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Connectivity check only catches ConnectionError; read timeouts propagate",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+   "line": 15,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Connectivity check only catches ConnectionError; read timeouts propagate",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 15,
+     "line_end": 19,
+     "evidence": "    try:\n        requests.get(\"https://www.google.com\", timeout=timeOut_sec)\n        return True\n    except requests.ConnectionError:\n        return False",
+     "explanation": "requests.ReadTimeout (and other RequestException subclasses such as TooManyRedirects or SSLError) are not ConnectionError, so on a slow or filtered network the exception escapes hasInternetConnection() and surfaces as an unhandled traceback in the module instead of the intended 'no internet' path.",
+     "suggestion": "Catch requests.RequestException (or requests.exceptions.Timeout as well).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 15
+     }
+    }
+   ]
+  },
+  {
+   "title": "Downloaded model weights are used without any integrity verification",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+   "line": 74,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Downloaded model weights are used without any integrity verification",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 74,
+     "line_end": 75,
+     "evidence": "            assets = [asset for release in repo.get_releases() for asset in release.get_assets()]\n            return assets[0].browser_download_url",
+     "explanation": "The code takes the first asset of the first release and extracts it with zipfile.extractall (line 166) with no checksum or signature check. The extracted nnU-Net checkpoint is later deserialized by the NNUNet extension (torch.load), so a compromised or replaced release asset would be executed as pickle data on the user's machine. HTTPS to github.com limits but does not remove this risk, and there is no pinning to a known-good release.",
+     "suggestion": "Pin the expected release asset and verify a published SHA-256 (or signature) before extraction; fail loudly on mismatch.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 74
+     }
+    }
+   ]
+  },
+  {
+   "title": "Downloaded weights are extracted without integrity verification or path checks",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+   "line": 142,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Downloaded weights are extracted without integrity verification or path checks",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 142,
+     "line_end": 166,
+     "evidence": "response = session.get(download_url, stream=True)\n            response.raise_for_status()\n\n            file_name = download_url.split(\"/\")[-1]",
+     "explanation": "The zip is taken from the first asset of the latest GitHub release, with no checksum, signature, or pinned hash. It is extracted with zipfile.extractall into the module folder. The source is the author's own release, so the risk is limited to a compromised release or a malicious archive entry path (zip slip). The code does not validate member names.",
+     "suggestion": "Pin and verify a SHA-256 for the expected weights archive, and validate member paths before extraction.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 142
+     }
+    }
+   ]
+  },
+  {
+   "title": "License of the downloaded model weights is not stated in the repository",
+   "category": "license",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 326,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "License of the downloaded model weights is not stated in the repository",
+     "file": "README.md",
+     "line_start": 322,
+     "line_end": 326,
+     "evidence": "The pretrained model is available on Zenodo: [Download the pretrained model from Zenodo](https://zenodo.org/doi/10.5281/zenodo.10829674)",
+     "explanation": "The extension code is Apache-2.0 (LICENSE.txt), but the nnU-Net checkpoint that the module downloads and runs (README.md:294-318, PythonDependencyChecker.py:115-166) has no license statement in the repository. Users and downstream packagers therefore cannot tell under what terms the model may be used or redistributed; the Zenodo record may state terms but that is not referenced here.",
+     "suggestion": "State the weights' license (and any research-only restriction) in README.md and next to the release assets.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 326
+     }
+    }
+   ]
+  },
+  {
+   "title": "Module contacts google.com on open as a connectivity probe",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+   "line": 14,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Module contacts google.com on open as a connectivity probe",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 10,
+     "line_end": 19,
+     "evidence": "    import requests\n    try:\n        requests.get(\"https://www.google.com\", timeout=timeOut_sec)\n        return True\n    except requests.ConnectionError:\n        return False",
+     "explanation": "hasInternetConnection() is called from PythonDependencyChecker.__init__ (line 47) and from areWeightsOutdated/downloadWeights, so simply opening the DentalSegmentator module sends an HTTP request to a third party (Google) with the user's IP and user agent, with no opt-in and no disclosure. It also misreports 'no internet' on networks that block Google (e.g. some hospital or Chinese networks), disabling weight download. No medical data is transmitted.",
+     "suggestion": "Probe the actual endpoint you need (e.g. api.github.com or the release URL) instead of google.com, and only do so when the user triggers a download.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 14
+     }
+    }
+   ]
+  },
+  {
+   "title": "No clinical-use disclaimer despite clinical framing",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 206,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No clinical-use disclaimer despite clinical framing",
+     "file": "README.md",
+     "line_start": 206,
+     "line_end": 208,
+     "evidence": "## Research Applications Examples\n\nDentalSegmentator can support a wide range of clinical and translational research projects involving dental and craniofacial imaging.",
+     "explanation": "The README advertises clinical workflows (guided tooth autotransplantation, endodontics, orbital surgery planning) and the module is offered in the Segmentation category, but there is no statement that the output is not validated for primary diagnosis or treatment planning. Users may over-trust an unvalidated AI output in patient care.",
+     "suggestion": "Add an explicit research-use / not-a-medical-device disclaimer to README.md and the module help text.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 206
+     }
+    }
+   ]
+  },
+  {
+   "title": "Observer cleanup relies on __del__ and a new SegmentEditorNode is created on every scene close",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+   "line": 179,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Observer cleanup relies on __del__ and a new SegmentEditorNode is created on every scene close",
+     "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+     "line_start": 179,
+     "line_end": 190,
+     "evidence": "    def __del__(self):\n        slicer.mrmlScene.RemoveObserver(self.sceneCloseObserver)\n        super().__del__()",
+     "explanation": "The widget adds a scene observer (line 175) but has no cleanup() override, so the observer is only removed if Python's __del__ happens to run (unreliable under PythonQt and on module reload), leaving a dangling callback into a destroyed widget. onSceneChanged also calls AddNewNodeByClass(\"vtkMRMLSegmentEditorNode\") on every scene close without removing the previous node, accumulating orphan nodes in the scene.",
+     "suggestion": "Override cleanup() to remove the observer and disconnect signals; reuse or remove the previous segmentEditorNode in onSceneChanged.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+      "line": 179
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Destructor calls super().__del__ and removes the observer unsafely",
+     "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+     "line_start": 179,
+     "line_end": 181,
+     "evidence": "def __del__(self):\n        slicer.mrmlScene.RemoveObserver(self.sceneCloseObserver)\n        super().__del__()",
+     "explanation": "qt.QWidget may not define __del__, so super().__del__() can raise AttributeError during garbage collection. The observer is also removed in __del__, not in an explicit cleanup, so it can run late or after the scene is gone. This is a minor cleanup issue.",
+     "suggestion": "Remove the observer in an explicit cleanup() method called by the module widget, and drop the super().__del__ call.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+      "line": 179
+     }
+    }
+   ]
+  },
+  {
+   "title": "Opening the module globally changes the user's layout and 3D view settings",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+   "line": 197,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Opening the module globally changes the user's layout and 3D view settings",
+     "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+     "line_start": 192,
+     "line_end": 199,
+     "evidence": "        set3DViewBackgroundColors([1, 1, 1], [1, 1, 1])\n        setConventionalWideScreenView()\n        setBoxAndTextVisibilityOnThreeDViews(False)",
+     "explanation": "_initSlicerDisplay is called from __init__ (line 176) and from onSceneChanged (line 190), so merely opening the module (or closing a scene) switches the layout to Conventional Widescreen, forces a white 3D background and hides the orientation cube/labels for the whole application, without restoring the user's previous settings.",
+     "suggestion": "Apply these view changes only when the user runs a segmentation, and restore the previous view node settings afterwards.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+      "line": 197
+     }
+    }
+   ]
+  },
+  {
+   "title": "Self-test depends on SlicerPythonTestRunner, which is not declared as a dependency",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DentalSegmentator/DentalSegmentator.py",
+   "line": 49,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Self-test depends on SlicerPythonTestRunner, which is not declared as a dependency",
+     "file": "DentalSegmentator/DentalSegmentator.py",
+     "line_start": 48,
+     "line_end": 53,
+     "evidence": "            from SlicerPythonTestRunnerLib import RunnerLogic, RunnerWidget, RunSettings, isRunningInTestMode\n            from pathlib import Path\n        except ImportError:\n            slicer.util.warningDisplay(\"Please install SlicerPythonTestRunner extension to run the self tests.\")",
+     "explanation": "The registered unittest (slicer_add_python_unittest in DentalSegmentator/CMakeLists.txt:42) silently passes with only a warning when SlicerPythonTestRunner is absent, so CI and users get a green test that ran nothing. The dependency is not in EXTENSION_DEPENDS/build_dependencies.",
+     "suggestion": "Declare SlicerPythonTestRunner as a test dependency, or make the test fail/skip explicitly (unittest.SkipTest) so the absence is visible in test reports.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentator.py",
+      "line": 49
+     }
+    }
+   ]
+  },
+  {
+   "title": "SlicerOpenAnatomy extension is installed silently during glTF export",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+   "line": 608,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "SlicerOpenAnatomy extension is installed silently during glTF export",
+     "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+     "line_start": 605,
+     "line_end": 623,
+     "evidence": "        extensionManager = slicer.app.extensionsManagerModel()\n        extensionManager.setInteractive(False)\n        extName = \"SlicerOpenAnatomy\"\n        if extensionManager.isExtensionInstalled(extName):\n            return",
+     "explanation": "When the user ticks glTF export and clicks Export, the module installs a third-party extension from the Slicer server and then registers and loads its module (factory.registerModule/loadModules) without any confirmation dialog. The user asked to export a file, not to install software; the install also persists in their Slicer profile. The source is the official extension server, so the risk is limited, but the action is unannounced.",
+     "suggestion": "Ask the user before installing (or simply tell them to install SlicerOpenAnatomy and abort the glTF export).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+      "line": 608
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "SlicerOpenAnatomy is installed silently from the extension server during glTF export",
+     "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+     "line_start": 605,
+     "line_end": 616,
+     "evidence": "success = extensionManager.installExtensionFromServer(extName, False, False)",
+     "explanation": "When the user exports glTF and SlicerOpenAnatomy is missing, the code installs another extension without a prompt, after checking only for internet access. This changes the Slicer installation as a side effect of an export click that does not name the extension.",
+     "suggestion": "Show a confirmation dialog that names the extension before installing it.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+      "line": 614
+     }
+    }
+   ]
+  },
+  {
+   "title": "Stop handler blocks the GUI thread while waiting for inference to finish",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+   "line": 210,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Stop handler blocks the GUI thread while waiting for inference to finish",
+     "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+     "line_start": 210,
+     "line_end": 214,
+     "evidence": "        self.isStopping = True\n        self.logic.stopSegmentation()\n        self.logic.waitForSegmentationFinished()\n        slicer.app.processEvents()",
+     "explanation": "waitForSegmentationFinished() is called synchronously from the button slot, so Slicer's UI freezes (no repaint, no progress) until the nnU-Net subprocess actually exits, which can take many seconds. The subsequent processEvents() cannot help because it runs only after the wait returns.",
+     "suggestion": "Wait asynchronously (e.g. poll with a QTimer or use the logic's finished signal) and keep the UI responsive while stopping.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+      "line": 210
+     }
+    }
+   ]
+  },
+  {
+   "title": "glTF export uses the selector's current node instead of the node passed in, and indexes extensionModulePaths without a guard",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+   "line": 594,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "glTF export uses the selector's current node instead of the node passed in, and indexes extensionModulePaths without a guard",
+     "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+     "line_start": 592,
+     "line_end": 620,
+     "evidence": "            segmentationItem = shNode.GetItemByDataNode(self.segmentationNodeSelector.currentNode())",
+     "explanation": "_exportToGLTF receives segmentationNode but resolves the subject-hierarchy item from the widget selector, so exporting a node that is not the current selection (e.g. from tests or scripted use) exports the wrong segmentation. Line 620 then does extensionModulePaths(extName)[0] without checking the list is non-empty, which raises IndexError if the freshly installed extension exposes no module path.",
+     "suggestion": "Use the segmentationNode argument for GetItemByDataNode and guard the extensionModulePaths result.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/SegmentationWidget.py",
+      "line": 594
+     }
+    }
+   ]
+  },
+  {
+   "title": "Catalog points to a moving branch rather than a pinned revision",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "DentalSegmentator.json",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Catalog points to a moving branch rather than a pinned revision",
+     "file": "DentalSegmentator.json",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "\"scm_revision\": \"main\",",
+     "explanation": "The reviewed commit is d25a19b, but the catalog tracks main. Later changes would be built without review. This is allowed by policy but should be noted.",
+     "suggestion": "Consider pinning scm_revision to a reviewed commit or tag.",
+     "confidence": "high",
+     "verification": {
+      "status": "file not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Large binary media committed to the repository",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "README.md",
+   "line": 158,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Large binary media committed to the repository",
+     "file": "README.md",
+     "line_start": 158,
+     "line_end": 158,
+     "evidence": "<img src=\"https://github.com/gaudot/SlicerDentalSegmentator/raw/main/Screenshots/dentalsegmentator_3dmodel.gif\" width=\"85%\" alt=\"3D anatomical models generated by DentalSegmentator\"/>",
+     "explanation": "Screenshots/dentalsegmentator_3dmodel.gif is ~6 MB and the Screenshots folder totals several MB, plus ~940 KB of test NIfTI data. This bloats every clone of the extension; it does not affect the built package.",
+     "suggestion": "Consider hosting the large demo gif externally or compressing it; the small test NIfTI files are reasonable to keep.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 158
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Existing weights are deleted before the new download is known to succeed",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+   "line": 135,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Weights folder is deleted before the download URL is validated",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 135,
+     "line_end": 142,
+     "evidence": "        if self.destWeightFolder.exists():\n            shutil.rmtree(self.destWeightFolder)\n        self.destWeightFolder.mkdir(parents=True, exist_ok=True)\n\n        try:\n            download_url = self.getLatestReleaseUrl()",
+     "explanation": "getLatestReleaseUrl() returns None when PyGithub is unavailable or the API call fails (lines 65-77), and session.get(None) then raises inside the try block. By that point the existing weights (including ones the user installed manually per README.md:298-318) have already been deleted, so a transient GitHub API failure leaves the user with no model and a generic error.",
+     "suggestion": "Resolve and validate download_url first, download to a temporary file, verify it, and only then replace the existing weights folder.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 135
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Existing weights are deleted before the new download is known to succeed",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 135,
+     "line_end": 143,
+     "evidence": "if self.destWeightFolder.exists():\n            shutil.rmtree(self.destWeightFolder)\n        self.destWeightFolder.mkdir(parents=True, exist_ok=True)\n\n        try:\n            download_url = self.getLatestReleaseUrl()",
+     "explanation": "The folder is removed before getLatestReleaseUrl() and the HTTP request run. If the GitHub API returns None, the request fails, or the zip is corrupt, the previously working model is gone and the user must reinstall it manually. This is data loss inside the extension's own folder, which is an ordinary robustness bug rather than a malicious one.",
+     "suggestion": "Download to a temporary directory, verify and extract it there, then swap it in atomically. Keep the old weights on failure.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 135
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Model weights downloaded at runtime have no stated license or terms",
+   "category": "license",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "README.md",
+   "line": 52,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Model weights downloaded at runtime have no stated license or terms",
+     "file": "README.md",
+     "line_start": 46,
+     "line_end": 74,
+     "evidence": "- **Training dataset:** 470 dento-maxillo-facial CT and CBCT scans.",
+     "explanation": "The extension code is Apache-2.0, but the model weights it downloads from GitHub releases and the Zenodo record have no license text in this repository. Users and redistributors cannot tell whether the weights may be used commercially or redistributed. The README asks only for citation. The rights should be confirmed and stated.",
+     "suggestion": "Add the license for the pretrained weights (for example the Zenodo record's license) to the README and the release notes.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 52
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "PyGithub is pip-installed into Slicer's shared Python environment without asking, just by opening the module",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+   "line": 171,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "PyGithub is pip-installed into Slicer's shared Python environment without asking, just by opening the module",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 171,
+     "line_end": 188,
+     "evidence": "    def _ensurePipDependencies(self):\n        if not self.hasInternetConnectionF():\n            return\n\n        try:\n            import github  # noqa",
+     "explanation": "SegmentationWidget.__init__ constructs PythonDependencyChecker() (SegmentationWidget.py:170), whose __init__ calls _ensurePipDependencies (line 47), which runs slicer.util.pip_install(\"PyGithub\") (line 182) with no confirmation. Any user who merely opens the module modifies Slicer's shared site-packages; PyGithub pulls in cryptography, cffi, pynacl, pyjwt and may upgrade requests/urllib3 that Slicer bundles, which can break other extensions and DICOM networking for users who never run a segmentation.",
+     "suggestion": "Do not install at widget construction. Ask the user before installing, or avoid the dependency entirely: query the GitHub releases API with the already-bundled `requests` (or use the Slicer download/network utilities) instead of PyGithub.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 171
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "PyGithub is pip-installed into Slicer's shared environment when the module opens, without consent",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 171,
+     "line_end": 182,
+     "evidence": "slicer.util.pip_install(\"PyGithub\")",
+     "explanation": "_ensurePipDependencies runs from PythonDependencyChecker.__init__, which SegmentationWidget.__init__ calls at line 170. Opening the module therefore installs packages into the shared Slicer Python environment, even if the user never runs a segmentation. PyGithub's dependencies can alter packages that Slicer bundles, such as requests. The installation is not confirmed by the user, which the review policy asks reviewers to flag.",
+     "suggestion": "Remove the GitHub dependency and use requests against the release API, which Slicer already bundles. Otherwise install only when the user clicks Apply and after a confirmation dialog.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 182
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Weights-update prompt ignores the user's answer: QMessageBox return value used as a boolean",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+   "line": 53,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Weights-update prompt ignores the user's answer: QMessageBox return value used as a boolean",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 53,
+     "line_end": 59,
+     "evidence": "        elif self.areWeightsOutdated():\n            if qt.QMessageBox.question(\n                    None,\n                    \"New weights are available\",\n                    \"New weights are available. Would you like to download them?\"\n            ):",
+     "explanation": "qt.QMessageBox.question returns a StandardButton value (Yes=16384, No=65536); both are non-zero and therefore truthy in Python. The condition is always true, so a user who clicks 'No' still gets downloadWeights() called, which rmtree's the existing weights folder and re-downloads hundreds of MB. The dialog is effectively decorative and the user's explicit refusal is overridden.",
+     "suggestion": "Compare explicitly: `if qt.QMessageBox.question(...) == qt.QMessageBox.Yes:` (or use qt.QMessageBox.StandardButton.Yes).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 53
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Declining the weight update still downloads and replaces the weights",
+     "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+     "line_start": 53,
+     "line_end": 60,
+     "evidence": "elif self.areWeightsOutdated():\n            if qt.QMessageBox.question(\n                    None,\n                    \"New weights are available\",",
+     "explanation": "qt.QMessageBox.question returns a standard-button enum value (Yes and No are both nonzero), so the truthiness test is always true. The user is asked whether to download, but a No answer still calls downloadWeights, which deletes the current weights folder. The sibling check in SegmentationWidget.py line 267 correctly compares to qt.QMessageBox.No, so the code is inconsistent. Confidence is medium because it depends on PythonQt return-value behavior, which I could not run.",
+     "suggestion": "Compare the result explicitly, for example 'if qt.QMessageBox.question(...) == qt.QMessageBox.Yes:', and avoid deleting existing weights until a replacement has been downloaded and verified.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DentalSegmentator/DentalSegmentatorLib/PythonDependencyChecker.py",
+      "line": 53
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D6",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of license",
+   "category": "license",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "deepseek": "minor",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D8",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "license": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 8,
+  "single": 13,
+  "unverified": 1,
+  "total": 18
+ }
+}

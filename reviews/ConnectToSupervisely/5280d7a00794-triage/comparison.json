@@ -1,0 +1,904 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Missing-requirement install is not --no-deps and can upgrade or downgrade Slicer-bundled packages",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/utils.py",
+   "line": 167,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Missing-requirement install is not --no-deps and can upgrade or downgrade Slicer-bundled packages",
+     "file": "ConnectToSupervisely/moduleLib/utils.py",
+     "line_start": 165,
+     "line_end": 167,
+     "evidence": "slicer.util.pip_install(\" \".join(shlex.quote(r) for r in missing))",
+     "explanation": "get_missing_requirements() only filters on top-level names that are absent, but pip then resolves each requirement's own dependencies, which can replace numpy, requests or other packages Slicer bundles. The dialog text claims \"Packages already installed in 3D Slicer are not changed\" (utils.py:200), which is not guaranteed for transitive dependencies. The backup/restore mechanism (utils.py:55-109) mitigates but does not prevent the breakage.",
+     "suggestion": "Install with --no-deps and verify each requirement against the installed version, or install into an isolated environment; correct the dialog wording.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/moduleLib/utils.py",
+      "line": 167
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Module setup pip-installs Supervisely and its requirements into Slicer's shared Python with no way to decline",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/utils.py",
+   "line": 163,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Module setup pip-installs Supervisely and its requirements into Slicer's shared Python with no way to decline",
+     "file": "ConnectToSupervisely/moduleLib/utils.py",
+     "line_start": 144,
+     "line_end": 218,
+     "evidence": "slicer.util.pip_install(f\"--no-deps supervisely=={SUPERVISELY_VERSION}\")",
+     "explanation": "import_supervisely() is called from setup() of both widgets (labelingJobsAnnotating.py:79, labelingJobsReviewing.py:80), so simply opening the module runs pip_install into Slicer's shared Python. The preceding SuperviselyDialog is type=\"info\" with only an OK button, so the user cannot cancel; the only escape is closing Slicer. This changes the interpreter for every other extension in that Slicer installation.",
+     "suggestion": "Use a confirm dialog with a real Cancel path and only install after explicit consent; keep the install in a documented, user-initiated step.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "ConnectToSupervisely/moduleLib/utils.py",
+      "line": 163
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Opening the module silently installs the supervisely SDK and missing dependencies into Slicer's shared Python, then restarts Slicer",
+     "file": "ConnectToSupervisely/moduleLib/utils.py",
+     "line_start": 162,
+     "line_end": 167,
+     "evidence": "if get_installed_version(\"supervisely\") != SUPERVISELY_VERSION:\n            slicer.util.pip_install(f\"--no-deps supervisely=={SUPERVISELY_VERSION}\")\n            importlib.invalidate_caches()\n        missing = get_missing_requirements()\n        if missing:\n            slicer.util.pip_install(\" \".join(shlex.quote(r) for r in missing))",
+     "explanation": "On first open, import_supervisely shows an informational dialog and calls install_supervisely, which runs pip install --no-deps for an exact SDK pin plus any missing transitive requirements, then forces slicer.util.restart(). The user is not asked to confirm, and this affects the whole Slicer process, not just this module. Any transitive dependency that is pulled in can change other extensions' environment. The change is recorded and a restore button is offered, which partly mitigates the risk. The dependency set of supervisely 6.74.48 was not inspected, so whether it pulls packages that bundle Qt or VTK is unknown.",
+     "suggestion": "Ask for explicit confirmation before downloading and installing (the current dialog is informational only). Document the packages that will be added to Slicer's environment. Check that the transitive set does not include Qt/VTK bundles or packages Slicer pins, such as numpy or requests, and state this in the README.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/moduleLib/utils.py",
+      "line": 162
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Network downloads and uploads run synchronously on the GUI thread",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+   "line": 247,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Network downloads and uploads run synchronously on the GUI thread",
+     "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+     "line_start": 223,
+     "line_end": 267,
+     "evidence": "self._dowloadProject()",
+     "explanation": "downloadData() calls VolumeProject.download() and uploadAnnObjectChangesToServer() performs per-segment uploads and per-object removals directly inside the button handler under waitCursor. For large volume projects the Slicer UI freezes for the whole transfer and the progress bar cannot repaint reliably; the same applies to _filterVolumeJobs(), which issues one project.get_info_by_id() call per project on the GUI thread.",
+     "suggestion": "Move the transfer into a slicer.util.createProgressDialog-driven worker thread or a CLI, and update the UI from the main thread.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+      "line": 247
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Slicer is restarted automatically after the install, without an explicit save prompt in the extension's flow",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/utils.py",
+   "line": 202,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Slicer is restarted automatically after the install, without an explicit save prompt in the extension's flow",
+     "file": "ConnectToSupervisely/moduleLib/utils.py",
+     "line_start": 202,
+     "line_end": 217,
+     "evidence": "3D Slicer will be restarted after installation.",
+     "explanation": "After installing, the code calls slicer.util.restart() (utils.py:208) and also on the failure path (utils.py:217). A user who opens the module with an unsaved scene loses in-memory work; the extension gives no save prompt and no cancel option.",
+     "suggestion": "Ask the user to save and confirm the restart, or defer the restart until the user chooses it.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/moduleLib/utils.py",
+      "line": 202
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "clear() wipes the entire MRML scene, including data the extension did not load",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/utils.py",
+   "line": 247,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "clear() wipes the entire MRML scene, including data the extension did not load",
+     "file": "ConnectToSupervisely/moduleLib/utils.py",
+     "line_start": 240,
+     "line_end": 251,
+     "evidence": "slicer.mrmlScene.Clear()",
+     "explanation": "clear() is called on team change, job change, logout, job finish and submit (labelingJobsAnnotating.py:176,198,301; labelingJobsReviewing.py:179,201,299). It removes every node in the scene, so any volume, segmentation or unsaved annotation the user loaded independently is destroyed without a dedicated confirmation. The save prompt only appears when self.logic.volume is set and only covers the extension's own annotations.",
+     "suggestion": "Remove only the nodes the extension created (track their IDs) and confirm before clearing anything else.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/moduleLib/utils.py",
+      "line": 247
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Catalog entry pins a moving branch rather than a commit",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "ConnectToSupervisely.s4ext",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Catalog entry pins a moving branch rather than a commit",
+     "file": "ConnectToSupervisely.s4ext",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "scm_revision",
+     "explanation": "The catalog entry uses scm_revision \"master\", so the code users install is whatever the branch points at, not the commit 5280d7a this review examined. Branch references are allowed, but the reviewed revision is not what the index will build.",
+     "suggestion": "Pin scm_revision to a tagged release or commit for reproducible builds.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Catalog entry tracks the floating 'master' branch rather than a pinned commit",
+     "file": "",
+     "line_start": 0,
+     "line_end": 0,
+     "evidence": "\"scm_revision\": \"master\",",
+     "explanation": "scm_revision is 'master', so the index build will fetch whatever commit is at the branch tip at build time. The reviewed commit 5280d7a is not the revision the index will build. This is a reproducibility concern, not a defect, and it is acceptable under the index policy for branch references.",
+     "suggestion": "Consider pinning scm_revision to the reviewed commit 5280d7a007948ac0486b57edaf55aefdb6479c6a so the reviewed code is what gets built, and bump it on each update.",
+     "confidence": "high",
+     "verification": {
+      "status": "quote not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Global logger level and Data Probe visibility are toggled process-wide",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "ConnectToSupervisely/labelingJobsAnnotating.py",
+   "line": 138,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Global logger level and Data Probe visibility are toggled process-wide",
+     "file": "ConnectToSupervisely/labelingJobsAnnotating.py",
+     "line_start": 135,
+     "line_end": 143,
+     "evidence": "logger.setLevel(logging.CRITICAL)",
+     "explanation": "enter() raises the root logger to CRITICAL and hides the Data Probe for the whole Slicer session while the module is open. The logger level is restored immediately, but the Data Probe change is global and only undone in exit(); if the module crashes or is reloaded, other modules keep the modified state.",
+     "suggestion": "Use a module-scoped logger instead of the root logger and restore the Data Probe in cleanup() as well as exit().",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/labelingJobsAnnotating.py",
+      "line": 138
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Module-level logging level is changed globally in enter() without restore on exception",
+     "file": "ConnectToSupervisely/labelingJobsAnnotating.py",
+     "line_start": 134,
+     "line_end": 143,
+     "evidence": "logger = logging.getLogger()\n            original_level = logger.getEffectiveLevel()\n            logger.setLevel(logging.CRITICAL)\n            activeModule = dotenv.get_key(ENV_FILE_PATH, \"ACTIVE_SLY_MODULE\")\n            logger.setLevel(original_level)",
+     "explanation": "enter() sets the root logger to CRITICAL around a dotenv call and restores it afterwards. If dotenv.get_key raises, the root logger stays at CRITICAL for the whole Slicer session, silencing logs for other extensions. The exposure is small, but it is a global side effect.",
+     "suggestion": "Use try/finally around the dotenv call, or drop the global level change since dotenv.get_key does not need it.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/labelingJobsAnnotating.py",
+      "line": 136
+     }
+    }
+   ]
+  },
+  {
+   "title": "Local project data is deleted recursively without a path sanity check",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+   "line": 239,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Local project data is deleted recursively without a path sanity check",
+     "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+     "line_start": 704,
+     "line_end": 709,
+     "evidence": "remove_dir(self.savePath)",
+     "explanation": "removeLocalData() recursively deletes self.savePath, which is built as os.path.join(self.workingDir, f\"{self.activeJob.project_id}\") (baseLogic.py:227) where workingDir comes from the user-editable working-directory button. If a user points the working directory at an existing folder, the extension deletes <workingDir>/<project_id> on logout/finish. The path is extension-derived, so risk is limited, but there is no guard that the directory belongs to the extension.",
+     "suggestion": "Write a marker file into the download directory and refuse to delete a directory that lacks it.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+      "line": 239
+     }
+    }
+   ]
+  },
+  {
+   "title": "Login credentials and token are stored in plaintext in the home directory",
+   "category": "safety",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+   "line": 157,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Login credentials and token are stored in plaintext in the home directory",
+     "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+     "line_start": 155,
+     "line_end": 172,
+     "evidence": "self.api = Api.from_credentials(",
+     "explanation": "With \"Remember login\" checked, Api.from_credentials(..., env_file=ENV_FILE_PATH) writes the server address and credentials/token to ~/supervisely_slicer.env (baseLogic.py:47) with default file permissions. On a shared workstation another local user can read the token. The behaviour is opt-in and documented in README.md:139, but the file is not permission-restricted.",
+     "suggestion": "Create the env file with 0600 permissions and mention the plaintext storage in the UI next to the checkbox.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+      "line": 157
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Server token and login name are stored in plaintext in a home-directory .env file when 'remember login' is ticked",
+     "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+     "line_start": 157,
+     "line_end": 172,
+     "evidence": "self.api = Api.from_credentials(\n            server_address=self.ui.serverAddress.text,\n            login=self.ui.login.text,\n            password=self.ui.password.text,\n            override=self.ui.rememberLogin.isChecked(),\n            env_file=ENV_FILE_PATH,\n        )",
+     "explanation": "With rememberLogin checked, Api.from_credentials is called with override=True and env_file pointing to ~/supervisely_slicer.env. The file then holds the account token in plaintext, and any local user or process with read access to the home directory can use it. The behaviour is opt-in and disclosed in the README, so this is a minor hardening issue rather than a concealed-data problem.",
+     "suggestion": "Store the token with OS keychain or restricted file permissions (chmod 600) where possible. Keep the opt-in wording explicit in the UI, noting that the token is saved in plaintext.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+      "line": 157
+     }
+    }
+   ]
+  },
+  {
+   "title": "No automated tests or sample data",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 19,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No automated tests or sample data",
+     "file": "README.md",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "A 3D Slicer extension designed to organize and manage the work of labeling teams on the",
+     "explanation": "The repository contains no test module and no sample Labeling Job data; every code path requires a live Supervisely account and server, so regressions in the download/upload logic cannot be caught automatically.",
+     "suggestion": "Add a ScriptedLoadableModuleTest with mocked API responses and a small sample volume project.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "README.md",
+      "line": 19
+     }
+    }
+   ]
+  },
+  {
+   "title": "SuperviselyDialog.__bool__ reads an attribute that is never set for delay/comment dialogs",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/ui.py",
+   "line": 176,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "SuperviselyDialog.__bool__ reads an attribute that is never set for delay/comment dialogs",
+     "file": "ConnectToSupervisely/moduleLib/ui.py",
+     "line_start": 173,
+     "line_end": 177,
+     "evidence": "def __bool__(self):",
+     "explanation": "self.decision is only assigned in on_ok_clicked/on_cancel_clicked, which are not connected for type \"delay\" or \"comment\". Any truth-value test of such a dialog raises AttributeError; the code currently avoids it only by not testing those instances.",
+     "suggestion": "Set self.decision = False in __init__ before the type branches.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/moduleLib/ui.py",
+      "line": 176
+     }
+    }
+   ]
+  },
+  {
+   "title": "changeVolumeStatus can raise UnboundLocalError when the volume name is not in the job entities",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+   "line": 378,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "changeVolumeStatus can raise UnboundLocalError when the volume name is not in the job entities",
+     "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+     "line_start": 373,
+     "line_end": 378,
+     "evidence": "self.api.labeling_job.set_entity_review_status(self.activeJob.id, volumeId, status)",
+     "explanation": "volumeId is only assigned inside the loop when entity[\"name\"] == self.volume.name. If the refreshed job no longer contains that entity (for example after a sync or a server-side change), volumeId is unbound and the accept/reject action fails with an obscure error instead of a clear message.",
+     "suggestion": "Initialise volumeId to None and raise a descriptive error when no matching entity is found.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+      "line": 378
+     }
+    }
+   ]
+  },
+  {
+   "title": "python-dotenv is imported defensively but used unconditionally",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+   "line": 29,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "python-dotenv is imported defensively but used unconditionally",
+     "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+     "line_start": 29,
+     "line_end": 78,
+     "evidence": "import dotenv  # isort:skip",
+     "explanation": "The import is wrapped in try/except ModuleNotFoundError, but BaseLogic.__init__ immediately calls dotenv.get_key(ENV_FILE_PATH, \"WORKING_DIR\") (baseLogic.py:78). If python-dotenv is not installed and is not a dependency of the installed Supervisely release, the module fails to load with NameError instead of the intended blocked-widget message.",
+     "suggestion": "Declare python-dotenv in requirements.txt and handle its absence explicitly in import_supervisely().",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+      "line": 29
+     }
+    }
+   ]
+  },
+  {
+   "title": "No automated tests and no sample data in the repository",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": null,
+   "line": 0,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "No automated tests and no sample data in the repository",
+     "file": "",
+     "line_start": 0,
+     "line_end": 0,
+     "evidence": "",
+     "explanation": "The file list contains no test directory or sample data. Behaviour that touches a live server (login, download, upload, tag and figure sync) cannot be checked by a reviewer or regression-tested. This is a maturity point and is non-blocking under the index policy.",
+     "suggestion": "Add unit tests for the pure helpers in utils.py (requirement parsing, backup/restore) and document a test Supervisely instance or mock for the logic layer.",
+     "confidence": "high",
+     "verification": {
+      "status": "no quote",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Missing-requirement install is not --no-deps and can upgrade or downgrade Slicer-bundled packages",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/utils.py",
+   "line": 167,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Missing-requirement install is not --no-deps and can upgrade or downgrade Slicer-bundled packages",
+     "file": "ConnectToSupervisely/moduleLib/utils.py",
+     "line_start": 165,
+     "line_end": 167,
+     "evidence": "slicer.util.pip_install(\" \".join(shlex.quote(r) for r in missing))",
+     "explanation": "get_missing_requirements() only filters on top-level names that are absent, but pip then resolves each requirement's own dependencies, which can replace numpy, requests or other packages Slicer bundles. The dialog text claims \"Packages already installed in 3D Slicer are not changed\" (utils.py:200), which is not guaranteed for transitive dependencies. The backup/restore mechanism (utils.py:55-109) mitigates but does not prevent the breakage.",
+     "suggestion": "Install with --no-deps and verify each requirement against the installed version, or install into an isolated environment; correct the dialog wording.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/moduleLib/utils.py",
+      "line": 167
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Module setup pip-installs Supervisely and its requirements into Slicer's shared Python with no way to decline",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/utils.py",
+   "line": 163,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Module setup pip-installs Supervisely and its requirements into Slicer's shared Python with no way to decline",
+     "file": "ConnectToSupervisely/moduleLib/utils.py",
+     "line_start": 144,
+     "line_end": 218,
+     "evidence": "slicer.util.pip_install(f\"--no-deps supervisely=={SUPERVISELY_VERSION}\")",
+     "explanation": "import_supervisely() is called from setup() of both widgets (labelingJobsAnnotating.py:79, labelingJobsReviewing.py:80), so simply opening the module runs pip_install into Slicer's shared Python. The preceding SuperviselyDialog is type=\"info\" with only an OK button, so the user cannot cancel; the only escape is closing Slicer. This changes the interpreter for every other extension in that Slicer installation.",
+     "suggestion": "Use a confirm dialog with a real Cancel path and only install after explicit consent; keep the install in a documented, user-initiated step.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "ConnectToSupervisely/moduleLib/utils.py",
+      "line": 163
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Opening the module silently installs the supervisely SDK and missing dependencies into Slicer's shared Python, then restarts Slicer",
+     "file": "ConnectToSupervisely/moduleLib/utils.py",
+     "line_start": 162,
+     "line_end": 167,
+     "evidence": "if get_installed_version(\"supervisely\") != SUPERVISELY_VERSION:\n            slicer.util.pip_install(f\"--no-deps supervisely=={SUPERVISELY_VERSION}\")\n            importlib.invalidate_caches()\n        missing = get_missing_requirements()\n        if missing:\n            slicer.util.pip_install(\" \".join(shlex.quote(r) for r in missing))",
+     "explanation": "On first open, import_supervisely shows an informational dialog and calls install_supervisely, which runs pip install --no-deps for an exact SDK pin plus any missing transitive requirements, then forces slicer.util.restart(). The user is not asked to confirm, and this affects the whole Slicer process, not just this module. Any transitive dependency that is pulled in can change other extensions' environment. The change is recorded and a restore button is offered, which partly mitigates the risk. The dependency set of supervisely 6.74.48 was not inspected, so whether it pulls packages that bundle Qt or VTK is unknown.",
+     "suggestion": "Ask for explicit confirmation before downloading and installing (the current dialog is informational only). Document the packages that will be added to Slicer's environment. Check that the transitive set does not include Qt/VTK bundles or packages Slicer pins, such as numpy or requests, and state this in the README.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/moduleLib/utils.py",
+      "line": 162
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Network downloads and uploads run synchronously on the GUI thread",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+   "line": 247,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Network downloads and uploads run synchronously on the GUI thread",
+     "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+     "line_start": 223,
+     "line_end": 267,
+     "evidence": "self._dowloadProject()",
+     "explanation": "downloadData() calls VolumeProject.download() and uploadAnnObjectChangesToServer() performs per-segment uploads and per-object removals directly inside the button handler under waitCursor. For large volume projects the Slicer UI freezes for the whole transfer and the progress bar cannot repaint reliably; the same applies to _filterVolumeJobs(), which issues one project.get_info_by_id() call per project on the GUI thread.",
+     "suggestion": "Move the transfer into a slicer.util.createProgressDialog-driven worker thread or a CLI, and update the UI from the main thread.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+      "line": 247
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Slicer is restarted automatically after the install, without an explicit save prompt in the extension's flow",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/utils.py",
+   "line": 202,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Slicer is restarted automatically after the install, without an explicit save prompt in the extension's flow",
+     "file": "ConnectToSupervisely/moduleLib/utils.py",
+     "line_start": 202,
+     "line_end": 217,
+     "evidence": "3D Slicer will be restarted after installation.",
+     "explanation": "After installing, the code calls slicer.util.restart() (utils.py:208) and also on the failure path (utils.py:217). A user who opens the module with an unsaved scene loses in-memory work; the extension gives no save prompt and no cancel option.",
+     "suggestion": "Ask the user to save and confirm the restart, or defer the restart until the user chooses it.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/moduleLib/utils.py",
+      "line": 202
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "clear() wipes the entire MRML scene, including data the extension did not load",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ConnectToSupervisely/moduleLib/utils.py",
+   "line": 247,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "clear() wipes the entire MRML scene, including data the extension did not load",
+     "file": "ConnectToSupervisely/moduleLib/utils.py",
+     "line_start": 240,
+     "line_end": 251,
+     "evidence": "slicer.mrmlScene.Clear()",
+     "explanation": "clear() is called on team change, job change, logout, job finish and submit (labelingJobsAnnotating.py:176,198,301; labelingJobsReviewing.py:179,201,299). It removes every node in the scene, so any volume, segmentation or unsaved annotation the user loaded independently is destroyed without a dedicated confirmation. The save prompt only appears when self.logic.volume is set and only covers the extension's own annotations.",
+     "suggestion": "Remove only the nodes the extension created (track their IDs) and confirm before clearing anything else.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ConnectToSupervisely/moduleLib/utils.py",
+      "line": 247
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D6",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "minor"
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D8",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "minor"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "minor issues"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 8,
+  "single": 10,
+  "unverified": 1,
+  "total": 14
+ }
+}

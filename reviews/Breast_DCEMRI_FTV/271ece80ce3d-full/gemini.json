@@ -1,0 +1,100 @@
+{
+ "purpose": "Breast_DCEMRI_FTV is a two-module 3D Slicer extension developed by the UCSF Breast Imaging Research Group for breast cancer researchers to compute functional tumor volume (FTV) from dynamic contrast-enhanced MRI (DCE-MRI) exams. It loads pre-contrast, early post-contrast, and late post-contrast series, allows ROI and omit-region definition, overlays Signal Enhancement Ratio (SER) color maps, and generates summary PDF/DICOM/text reports.",
+ "summary": "Breast_DCEMRI_FTV provides a well-documented workflow for computing functional tumor volume (FTV) from breast DCE-MRI exams. However, there are two blocking issues that should be resolved:\n1. Both modules run `pip_install` at top-level module import time (during Slicer startup) without user confirmation, and request `cv2` / `opencv-python` instead of `opencv-python-headless`.\n2. `gzip_gunzip_pyfuncs.py` runs unquoted `os.system` commands calling `C:\\Program Files\\7-Zip\\7z` and unconditionally deletes original user DICOM files (`os.remove(fullfile)`) without checking if `7z` succeeded.\n\n🔴 Do not merge yet: please move package installation out of top-level imports (and use `opencv-python-headless`), and replace the `os.system` / `os.remove` logic in `gzip_gunzip_pyfuncs.py` with safe standard-library `gzip` handling.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected `gzip_gunzip_pyfuncs.py` in both modules and searched all files for network, execution, and file deletion calls. Found no data exfiltration or malicious code, but `gunzipAllFilesDCE` invokes unquoted `os.system` commands on file paths and unconditionally calls `os.remove` on original user DICOM files even if `7z` fails."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "Inspected `DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py`, `DCE_TumorMapProcess/DCE_TumorMapProcess.py`, and `pyproject.toml`. Both scripted modules execute `_pipEnsure` / `slicer.util.pip_install` at top-level import time (during Slicer startup) without user consent, and specify `cv2` (in `DCE_TumorMapProcess.py`) and `opencv-python` (in `pyproject.toml`) rather than `opencv-python-headless`."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Inspected root and module `CMakeLists.txt` files and catalog JSON. All imported Python files in `Breast_DCEMRI_FTV_plugins1` and `Breast_DCEMRI_FTV_plugins2` are listed in `CMakeLists.txt`, though unused `.new.py` files and a 13 MB instruction PDF are committed to the repository."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `license.txt`, `copyright.txt`, and `README.md`. The repository is licensed under the 3D Slicer Contribution and Software License Agreement v1.0 and BSD-style UCSF copyright notice permitting distribution."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected both main module scripts and helper plugins. Found blocking modal dialogs and unguarded state assumptions in `setup()`, persistent modification of global DataProbe settings, a hardcoded typo (`C:\\Program Fileszz\\7-Zip`) disabling `extractGZ`, and case-sensitive resource path mismatches."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md` and module implementations. The extension provides a complete, well-documented workflow for breast DCE-MRI functional tumor volume calculation and reporting, with detailed user instructions and clinical trial background."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "Top-level pip installation at module import time and non-headless OpenCV dependency",
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line_start": 58,
+   "line_end": 64,
+   "evidence": "def _importOptional(package, moduleName=None):\n  moduleName = moduleName or package\n  try:\n    return __import__(moduleName)\n  except ImportError:\n    _pipEnsure(package)\n    return __import__(moduleName)",
+   "explanation": "Both `DCE_IDandPhaseSelect.py` (lines 54-58) and `DCE_TumorMapProcess.py` (lines 83-89) execute `_pipEnsure` / `slicer.util.pip_install` at module top-level import time (when 3D Slicer starts up and discovers scripted modules, even if the user never opens the module) without user confirmation. Furthermore, `DCE_TumorMapProcess.py` line 84 calls `_importOptional('cv2', 'cv2')` (there is no valid PyPI package named `cv2`, and `pyproject.toml` lists `opencv-python` instead of `opencv-python-headless`, which bundles duplicate Qt libraries that conflict with Slicer's Qt).",
+   "suggestion": "Move optional package imports and `pip_install` calls inside the widget `setup()` or logic `run()` methods after prompting the user for confirmation, and install `opencv-python-headless` rather than `cv2` or `opencv-python`.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Unquoted os.system calls and unconditional deletion of original user DICOM files in gunzipAllFilesDCE",
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line_start": 163,
+   "line_end": 170,
+   "evidence": "            gzcmd_base = r'\"C:\\Program Files\\7-Zip\\7z\" a -tgzip '\n            #Edit 2/4/2021: if file is not gzipped, gzip it and delete the original copy\n            for f_i in files:\n                if('.gz' not in f_i):\n                    fullfile = os.path.join(dcegzipped_paths[0],f_i)\n                    gzcmd = gzcmd_base + fullfile + '.gz' + ' ' + fullfile\n                    os.system(gzcmd) #create a gzipped copy of the file\n                    os.remove(fullfile) #delete the original, non-gzipped copy of the file",
+   "explanation": "In `gzip_gunzip_pyfuncs.py` (present in both modules), `extractGZ` and `gunzipAllFilesDCE` construct shell commands by concatenating unescaped file paths and executing them with `os.system(...)`. If paths or filenames contain spaces or shell metacharacters, `os.system` will fail or execute unintended commands. In addition, lines 165-170 run `os.system(gzcmd)` and then unconditionally call `os.remove(fullfile)` on the user's original uncompressed DICOM files without checking whether `7z` succeeded, which permanently deletes user exam data if `7z` is missing or fails.",
+   "suggestion": "Use Python's built-in `gzip` and `shutil` standard library modules to decompress `.gz` files directly into a temporary directory instead of invoking external `7z` via `os.system`, and never delete original files in the user's source exam directory.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Persistent modification of global DataProbe slice view annotation settings",
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line_start": 230,
+   "line_end": 235,
+   "evidence": "    # Disable slice annotations immediately\n    slicer.modules.DataProbeInstance.infoWidget.sliceAnnotations.sliceViewAnnotationsEnabled=False\n    slicer.modules.DataProbeInstance.infoWidget.sliceAnnotations.updateSliceViewFromGUI()\n    # Disable slice annotations persistently (after Slicer restarts)\n    settings = qt.QSettings()\n    settings.setValue('DataProbe/sliceViewAnnotations.enabled', 0)",
+   "explanation": "When opening `DCE_TumorMapProcess`, `setup()` writes to `qt.QSettings()` to persistently disable Slicer's DataProbe slice view annotations across all future Slicer sessions, affecting the user's global Slicer configuration even after closing the module.",
+   "suggestion": "Avoid modifying persistent global `QSettings` for `DataProbe/sliceViewAnnotations.enabled`, or restore the user's previous setting in `cleanup()`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Case-sensitive filename mismatch for ser_colorbar.PNG",
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line_start": 932,
+   "line_end": 933,
+   "evidence": "    pathtoscript,scriptname = os.path.split(os.path.realpath(__file__))\n    colorbar_path = os.path.join(pathtoscript,'ser_colorbar.png')",
+   "explanation": "The repository and `DCE_TumorMapProcess/CMakeLists.txt` (line 23) install `ser_colorbar.PNG` with an uppercase extension, whereas `DCE_TumorMapProcess.py` looks for `ser_colorbar.png` in lowercase. On case-sensitive filesystems (such as Linux), loading the pixmap fails.",
+   "suggestion": "Match the exact filename casing (`ser_colorbar.PNG`) or rename the file to lowercase in both the repository and `CMakeLists.txt`.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Blocking file dialog and unguarded state assumptions in Widget setup()",
+   "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+   "line_start": 294,
+   "line_end": 295,
+   "evidence": "    #Edit 2/11/2021: Moving exampath selection here\n    self.exampath = qt.QFileDialog.getExistingDirectory(0,(\"Select folder for DCE-MRI exam\"))",
+   "explanation": "`DCE_IDandPhaseSelectWidget.setup()` immediately opens a modal `QFileDialog.getExistingDirectory` when the widget is initialized and proceeds to index paths and read files assuming a valid directory was chosen. Similarly, `DCE_TumorMapProcessWidget.setup()` immediately calls `slicer.util.getNode(\"path node\")` (line 240) and loads `current_exam_workspace.pickle` (line 269) inside `setup()`, which raises an unhandled exception if Module 2 is opened before Module 1 has been run.",
+   "suggestion": "Trigger directory selection via a UI button or `ctkPathLineEdit` rather than a blocking dialog inside `setup()`, and guard against missing `\"path node\"` or workspace state when `DCE_TumorMapProcessWidget.setup()` runs.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "StepByStepInstructionsForSlicerFTV_12_14_2022_FINAL_Rdcd.pdf (13 MB binary PDF file not inspected)"
+ ],
+ "questions_for_author": [
+  "Could you replace the external `7z` `os.system` calls in `gzip_gunzip_pyfuncs.py` with Python's built-in `gzip` module so that decompression works cross-platform without risking deletion of original exam files?",
+  "Could you move the runtime `pip_install` / `_pipEnsure` calls out of top-level module import into module execution (with user consent) and replace `cv2` / `opencv-python` with `opencv-python-headless`?"
+ ]
+}

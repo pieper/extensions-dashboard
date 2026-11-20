@@ -1,0 +1,238 @@
+{
+ "purpose": "A Flywheel-specific fork of SlicerCaseIterator that lets a user iterate over NIfTI cases listed in a Flywheel CSV export, segment them in Slicer, and upload the resulting masks back to the Flywheel instance. It targets research imaging teams that store their data in Flywheel.",
+ "summary": "The module does what it advertises, but it installs Python packages at module import (blocking environment issue) and has several concrete data-loss / code-execution paths: `eval()` of a string read from the MRML scene, `slicer.mrmlScene.Clear(0)` on \"Connect Flywheel\", and a cleanup routine that removes every scalar-volume and segmentation node in the scene. API keys are read from and written to plaintext config files. Packaging is mostly correct (all Python files and resources are installed, EXTENSION_DEPENDS matches), license is BSD-3. Tests are absent and docs are partly stale. Needs fixes before being offered to users.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Read FlywheelCaseIterator.py and CsvFWTableIterator.py: eval() of a scene-stored string (line 954), slicer.mrmlScene.Clear(0) on connect (line 378), and closeCase() removing all vtkMRMLScalarVolumeNode/vtkMRMLSegmentationNode in the scene (lines 923-937) are concrete data-loss/code-execution paths. API keys are read from ~/.config/flywheel/user.json and written back in plaintext."
+  },
+  "environment": {
+   "rating": "blocking",
+   "rationale": "FlywheelCaseIterator.py lines 36-46 run slicer.util.pip_install('fw-pyqt-management') and check_requirements(REQUIRED_MODULES) at module import, i.e. at Slicer startup for every user who installs the extension, with no confirmation; required_modules.json pins fw-pyqt-management 0.0.4 and the transitive dependencies (flywheel SDK etc.) are not declared anywhere."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "FlywheelCaseIterator/CMakeLists.txt installs every Python file and resource the module imports, and EXTENSION_DEPENDS 'SlicerDevelopmentToolbox' matches build_dependencies. However the pip-installed runtime dependencies are not declared, README documents a fw_case_management folder that no longer exists, and Testing/Python/CMakeLists.txt has its only test commented out."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE.txt is a standard 3-clause BSD text permitting redistribution, and each source file carries the same BSD header. Licenses of the pip-installed fw-pyqt-management and flywheel SDK packages could not be inspected."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read all module files: bare `except:` blocks silently skip failing cases (FlywheelCaseIterator.py 585-588, 606-611, 633), load_success can be unbound in _loadMaskNode (line 1169), IteratorFactory uses the removed `imp` module (line 86), and getCaseData returns a list where a tuple is documented (line 970)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md and docs/installation_and_usage.md explain the CSV workflow and mask handling well, but there are no automated tests, the docs point users at a Google Drive folder for packages, and there is no clinical-use disclaimer for a tool that writes annotations back to a data management system."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "blocking",
+   "title": "pip install and dependency check run at module import (Slicer startup)",
+   "file": "FlywheelCaseIterator/FlywheelCaseIterator.py",
+   "line_start": 36,
+   "line_end": 46,
+   "evidence": "if not importlib.util.find_spec(\"fw_pyqt_management\"):\n    slicer.util.pip_install(\"fw-pyqt-management\")\n\nfrom fw_pyqt_management.utils import check_developer_mode, check_requirements\n\ncheck_requirements(REQUIRED_MODULES)",
+   "explanation": "Scripted module files are imported when Slicer registers modules, so every user who installs this extension triggers a PyPI install of fw-pyqt-management (and whatever check_requirements pulls in, e.g. the flywheel SDK) at startup, without being asked. This modifies Slicer's shared Python environment for users who never open the module, can downgrade/pin packages Slicer bundles, and makes module loading fail entirely when the machine is offline or PyPI is unreachable.",
+   "suggestion": "Move the dependency handling into the module widget's setup()/first use, ask the user for confirmation before installing, and declare the dependencies in the extension metadata instead of installing at import.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Undeclared pinned dependency fw-pyqt-management 0.0.4 with upgrade disabled",
+   "file": "FlywheelCaseIterator/Resources/required_modules.json",
+   "line_start": 2,
+   "line_end": 6,
+   "evidence": "\"fw_pyqt_management\": {\n    \"package\": \"fw-pyqt-management\",\n    \"version\": \"0.0.4\",\n    \"upgrade\": false\n  }",
+   "explanation": "The extension hard-pins a third-party package and disables upgrades, and its transitive requirements (flywheel SDK and anything else fw-pyqt-management declares) are installed into Slicer's Python without review or declaration. If those requirements pin or downgrade packages Slicer bundles (numpy, requests, etc.), other extensions break for all users of the installation.",
+   "suggestion": "Declare the dependency in the catalog entry/CMake and let the user install it, or at minimum document the full transitive requirement set and avoid exact pins of shared packages.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "eval() of a string read from the MRML scene",
+   "file": "FlywheelCaseIterator/FlywheelCaseIteratorLib/CsvFWTableIterator.py",
+   "line_start": 954,
+   "line_end": 954,
+   "evidence": "caseData = eval(self.parameterNode.GetParameter(\"CaseData\"))",
+   "explanation": "The CaseData parameter is read from a vtkMRMLScriptedModuleNode that lives in the MRML scene. A scene (.mrml/.mrb) received from a colleague or downloaded from a data repository can contain a node named 'FlywheelCaseIterator' whose CaseData parameter holds arbitrary Python; when the user starts or advances a batch, getCaseData() executes it with Slicer's privileges. closeCase() already uses the safe ast.literal_eval for the same value (line 910), so the eval is unnecessary.",
+   "suggestion": "Use ast.literal_eval here as well, or store the case data as individual node-ID parameters instead of a serialized dict.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Connecting to Flywheel clears the whole MRML scene without confirmation",
+   "file": "FlywheelCaseIterator/FlywheelCaseIteratorLib/CsvFWTableIterator.py",
+   "line_start": 377,
+   "line_end": 379,
+   "evidence": "# Clear out any other instance's data from Slicer before proceeding.\nslicer.mrmlScene.Clear(0)\nself.batchTableSelector.setCurrentNodeID(\"\")",
+   "explanation": "Pressing 'Connect Flywheel' discards every node in the current scene, including the user's own loaded volumes, segmentations and any unsaved work, with no prompt and no undo. A user who has been annotating in another module and then connects to Flywheel loses that work.",
+   "suggestion": "Ask for confirmation (or only remove nodes the extension itself created, e.g. via the singleton parameter node) before clearing the scene.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Case cleanup deletes every volume and segmentation node in the scene",
+   "file": "FlywheelCaseIterator/FlywheelCaseIteratorLib/CsvFWTableIterator.py",
+   "line_start": 923,
+   "line_end": 937,
+   "evidence": "deque(\n                map(\n                    slicer.mrmlScene.RemoveNode,\n                    slicer.util.getNodesByClass(\"vtkMRMLScalarVolumeNode\"),\n                )\n            )",
+   "explanation": "closeCase() runs on every case change and in its finally block removes all vtkMRMLScalarVolumeNode and vtkMRMLSegmentationNode instances in the scene, not just the nodes belonging to the current case. Any volume or segmentation the user loaded independently (e.g. a reference atlas, or work in progress in another module) is silently destroyed when advancing to the next case.",
+   "suggestion": "Remove only the node IDs recorded in the case data (as the try block already does) and drop the scene-wide sweep.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "API key read from other tools' config and persisted in plaintext",
+   "file": "FlywheelCaseIterator/FlywheelCaseIteratorLib/CsvFWTableIterator.py",
+   "line_start": 350,
+   "line_end": 352,
+   "evidence": "if api_key:\n            fw_client = flywheel.Client(api_key)\n            self.config[\"api_key\"] = api_key",
+   "explanation": "The module silently falls back to the API key stored by the Flywheel CLI in ~/.config/flywheel/user.json (lines 312-317) and then writes the key in plaintext into ~/.config/flywheel/fw_connect.json. Credentials are therefore harvested from another tool's config and stored unencrypted on disk; the docs mention the saving but not the CLI fallback.",
+   "suggestion": "Only use a key the user explicitly entered, and store it with restrictive file permissions or in Slicer's settings rather than a plaintext JSON file.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Default cache directory is a fixed path under /tmp",
+   "file": "FlywheelCaseIterator/Resources/config_defaults.json",
+   "line_start": 3,
+   "line_end": 4,
+   "evidence": "\"CachePath\": \"/tmp\",\n  \"CacheDirName\": \"flywheel_cache\"",
+   "explanation": "Downloaded patient images are cached in /tmp/flywheel_cache, a world-writable, predictable location on Linux/macOS. Another local user can pre-create that directory or symlinks inside it, and cached medical images are left behind after the session with default permissions.",
+   "suggestion": "Default to a per-user directory (e.g. under the user's home or Slicer's temporary directory created with tempfile.mkdtemp) and create it with user-only permissions.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Bare except blocks silently skip failing cases",
+   "file": "FlywheelCaseIterator/FlywheelCaseIterator.py",
+   "line_start": 585,
+   "line_end": 588,
+   "evidence": "try:\n            self._loadCase()\n        except:\n            self.nextCase()",
+   "explanation": "start(), nextCase() and previousCase() (lines 585-588, 606-611, 633) catch every exception, including KeyboardInterrupt/SystemExit, and just advance the index. A case that fails to load (network error, permission problem, bad file) is skipped with no user-visible message, so a reader can silently miss cases and believe the batch was complete.",
+   "suggestion": "Catch Exception, log the failing case index, and surface a warning to the user (slicer.util.warningDisplay) when cases are skipped.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "load_success may be unbound in _loadMaskNode",
+   "file": "FlywheelCaseIterator/FlywheelCaseIteratorLib/CsvFWTableIterator.py",
+   "line_start": 1128,
+   "line_end": 1171,
+   "evidence": "ma_node = slicer.util.loadLabelVolume(ma_path)\n            if ma_node:",
+   "explanation": "load_success is only assigned inside `if ma_node:`; if loadLabelVolume returns None the code falls through to `if not load_success:` at line 1169 and raises UnboundLocalError instead of returning None, which then propagates as a case-load failure.",
+   "suggestion": "Initialise load_success = False before the branch and return None when the label volume could not be loaded.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Reload path uses the removed `imp` module",
+   "file": "FlywheelCaseIterator/FlywheelCaseIteratorLib/IteratorFactory.py",
+   "line_start": 86,
+   "line_end": 89,
+   "evidence": "import imp\n\n        f, filename, description = imp.find_module(packageName)",
+   "explanation": "The imp module was deprecated in Python 3.4 and removed in Python 3.12, which newer Slicer versions ship. onReload() of the module widget will therefore raise ImportError on those Slicer builds.",
+   "suggestion": "Use importlib (importlib.reload / importlib.util.find_spec) instead of imp.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "getCaseData returns a list where a tuple is documented",
+   "file": "FlywheelCaseIterator/FlywheelCaseIteratorLib/CsvFWTableIterator.py",
+   "line_start": 969,
+   "line_end": 970,
+   "evidence": "except Exception:\n            return [None, None, [], []]",
+   "explanation": "Callers unpack the result as a 4-tuple (e.g. `im, ma, add_im, add_ma = self.getCaseData()`), and the error path returns a list; more importantly the exception is swallowed without logging, so a corrupted CaseData parameter silently looks like an empty case.",
+   "suggestion": "Return a tuple and log the exception.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "KeyError when an additional-image entry is empty",
+   "file": "FlywheelCaseIterator/FlywheelCaseIteratorLib/CsvFWTableIterator.py",
+   "line_start": 773,
+   "line_end": 781,
+   "evidence": "if image_data and (\n                      image_file := self._download_from_container(\n                          image_data[\"parent\"], image_data[\"name\"]\n                      )\n                  ):",
+   "explanation": "In the else branch the code logs `image_data[\"name\"]` even when image_data is falsy (None/{}), which raises TypeError/KeyError and aborts loading of the whole case instead of skipping the bad entry.",
+   "suggestion": "Guard the log message with `if image_data:` and use .get('name').",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "README module structure no longer matches the repository",
+   "file": "README.md",
+   "line_start": 133,
+   "line_end": 138,
+   "evidence": "├── fw_case_management\n│   ├── config.py\n│   ├── fw_container_items.py",
+   "explanation": "The documented fw_case_management package is not in the repository and not installed by FlywheelCaseIterator/CMakeLists.txt; the code now imports fw_pyqt_management from PyPI. Users and reviewers following the README will look for code that does not exist, and the actual runtime dependency is undocumented.",
+   "suggestion": "Update the module-structure section and document the fw-pyqt-management dependency.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "No automated tests are registered",
+   "file": "FlywheelCaseIterator/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The only test registration is commented out, and FlywheelCaseIterator.py contains no unittest subclass for the slicer_add_python_unittest call in FlywheelCaseIterator/CMakeLists.txt line 32. Nothing verifies that the module loads or that the CSV parsing works, so regressions reach users unnoticed.",
+   "suggestion": "Add a minimal module test (module loads, iterator factory returns the CSV widget) and enable it in CMake.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Installation docs point at a Google Drive folder for packages",
+   "file": "docs/installation_and_usage.md",
+   "line_start": 53,
+   "line_end": 57,
+   "evidence": "1. Download the latest version of the extension package from the\n[Releases](https://drive.google.com/drive/folders/13MZ5DUShqhP9nc0hGGihKcKEBLiOBqTk?usp=sharing)\npage.",
+   "explanation": "Users are directed to download extension packages from an unversioned Google Drive folder rather than the Slicer extension manager, which makes provenance of the binaries unclear and bypasses the catalog build.",
+   "suggestion": "Point users at the Extension Manager once the extension is published and remove the Drive instructions.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No clinical-use disclaimer for a tool that writes annotations back to a data system",
+   "file": "README.md",
+   "line_start": 154,
+   "line_end": 163,
+   "evidence": "## Disclaimer\n\nThis Slicer Extension is adapted from Slicer Case Iterator and is maintained by\nFlywheel.",
+   "explanation": "The disclaimer only covers maintenance responsibility; it does not state that the tool is for research use and not for clinical diagnosis, although it is used to produce and upload segmentations.",
+   "suggestion": "Add a research-use-only statement to the README and module acknowledgement.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "The implementation of fw_pyqt_management (check_requirements, check_developer_mode, Config, FileItem._add_to_cache, ContainerParentModel) is not in this repository and could not be inspected; it is pip-installed at import, so its behavior (including whether it pins/downgrades Slicer-bundled packages",
+  "Licenses of the pip-installed packages fw-pyqt-management and the flywheel SDK were not verified.",
+  "The exact source revision e23ba0dff8db72a3283e38000c4d1130442aa31f was not resolved against the GitLab repository; the review is based on the file contents provided for that commit.",
+  "No build, load, or runtime test was performed; the module's behavior on Windows (symlink/developer-mode requirement) and on Slicer versions shipping Python 3.12 was not verified.",
+  "The remaining lines of CsvFWTableIterator.py beyond line 1554 (if any) and the .gitlab-ci.yml / .pre-commit-config.yaml contents were not read."
+ ],
+ "questions_for_author": [
+  "What exactly does fw_pyqt_management.check_requirements() install, and can the install be moved out of module import into an explicit, user-confirmed step?",
+  "Why does connecting to Flywheel need slicer.mrmlScene.Clear(0), and can it be limited to nodes created by this extension?",
+  "Can the eval() in getCaseData() be replaced with ast.literal_eval, as closeCase() already does?",
+  "Why does closeCase() remove every scalar-volume and segmentation node in the scene rather than only the case's own node IDs?"
+ ]
+}

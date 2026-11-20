@@ -1,0 +1,179 @@
+{
+ "purpose": "GeodesicSlicer is a scripted Slicer module for neuronavigation-free brain stimulation targeting. It computes geodesic paths on a scalp mesh, places EEG 10-20 fiducials, projects a stimulation site to the scalp, and estimates an adjusted rTMS motor threshold. It is aimed at TMS/NIBS researchers.",
+ "summary": "I read the catalog entry, the module CMake files, and the full GeodesicSlicer.py (1962 lines). I found no network access, no package installation, no dynamic code execution, and no data transmission, so the safety picture is clean. The main issues are soundness: mesh functions depend on hard-coded scene node IDs (vtkMRMLSegmentationNode1, vtkMRMLModelNode4), the EEG Cz search loop has no iteration cap, and the module has no working tests. The catalog uses an unpinned \"master\" branch. I could not inspect the Example_template binaries or the exact source at the stated commit.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read all of GeodesicSlicer.py and the CMake files. No network calls, subprocess, pip installs, eval/exec, pickle, or telemetry were seen. The only file writes are a derived .stl next to the user's volume (lines 627-630, 742-750), which is a minor overwrite risk rather than a safety issue."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "No import-time side effects, no pip installs, no sys.path or global logging changes, and no Qt/VTK bundling. Heavy VTK/numpy imports are at module top, which is acceptable for a scripted module."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMake lists GeodesicSlicer.py and Resources/Icons/GeodesicSlicer.png, which match the file list. EXTENSION_DEPENDS \"NA\" matches build_dependencies []. scm_revision is the branch name \"master\" rather than a commit, so the built revision is not pinned."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE and LICENCE are both present and the README and module state CeCILL v2.1, a FLOSS license that permits redistribution. I did not read the license texts in full. The source headers still contain unfilled template placeholders (lines 11 and 37)."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Scene node IDs are hard-coded (lines 640, 646, 759, 764). The EEG Cz fixed-point loop has no cap (line 1036). Slicing by fixed index assumes fiducial ordering (line 1771). Long mesh jobs block the GUI thread with time.sleep (lines 707, 716, 740)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README and help text point to a 4.10 wiki page. The test CMake is commented out (GeodesicSlicer/Testing/Python/CMakeLists.txt line 2) and no test class exists in GeodesicSlicer.py. A reference template folder is mentioned but I could not read it. Citations and a clear research-use disclaimer are present."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Hard-coded scene node IDs break mesh creation and can alter unrelated nodes",
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line_start": 640,
+   "line_end": 646,
+   "evidence": "SegNode_View = slicer.util.getNode('vtkMRMLSegmentationNode1')\nSegNode_View.SetDisplayVisibility(0)\n\nslicer.util.loadModel(name2)\n\n#Add skin color\nModelNode_color= slicer.util.getNode('vtkMRMLModelNode4')",
+   "explanation": "mesh() and mesh2() look up nodes by fixed IDs. If the user's scene already contains a segmentation or model with those IDs (for example after a previous run or with other data loaded), slicer.util.getNode returns the wrong node. The code then hides that node (SetDisplayVisibility(0)) and recolours it. If the ID is absent, the call raises an exception after the STL has already been written.",
+   "suggestion": "Keep references to the nodes that were created (the segmentationNode object and the node returned by loadModel), and use those instead of looking up fixed IDs. Apply the same fix in mesh2 (lines 759-764).",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Unbounded fixed-point loop in EEG() can hang the GUI",
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line_start": 1034,
+   "line_end": 1036,
+   "evidence": "closestPointIdCz_tmp_sag=0 #to determine Cz\n\n    while closestPointIdCz_tmp_cor !=closestPointIdCz_tmp_sag:",
+   "explanation": "The Cz search loop repeats until the closest-vertex index from the sagittal pass equals the one from the coronal pass. Nothing caps the iterations, and the loop runs on the GUI thread. If the two estimates oscillate between vertices, Slicer freezes with no way out.",
+   "suggestion": "Add a maximum iteration count with a user-facing error, and run the computation with progress feedback so the GUI stays responsive.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Input validation misses fewer than two fiducials and fails with an IndexError",
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line_start": 791,
+   "line_end": 794,
+   "evidence": "if not fiducialInput.currentNode():\n        error_text='Add at least two fiducials'",
+   "explanation": "run_djikstra and draw check only that a fiducial node exists. They then index list[1] (lines 830-831, 929-930), so a node with a single point raises an unhandled IndexError with no user message.",
+   "suggestion": "Check GetNumberOfFiducials() >= 2 (and == 4 for EEG, which already exists) and show the error text the message promises.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Output STL is written beside the source volume with no check or confirmation",
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line_start": 626,
+   "line_end": 630,
+   "evidence": "volumeNode2 = slicer.util.getNode(nom)\nfilename2 = volumeNode2.GetStorageNode().GetFileName()\nnom=filename2+'.stl'",
+   "explanation": "The output path is derived from the volume's storage file name plus '.stl'. The file is overwritten silently if it exists. If the volume was never saved, GetStorageNode() returns None and the call crashes after the segmentation work is done.",
+   "suggestion": "Write to a user-chosen or temporary location, or at least check that the storage node exists and warn before overwriting. Keep the mesh in the scene where possible.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Blocking time.sleep calls on the GUI thread in mesh2",
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line_start": 707,
+   "line_end": 707,
+   "evidence": "      progressBar.value = 10\n      time.sleep(5)",
+   "explanation": "mesh2 calls time.sleep for 5, 5, and 3 seconds in the GUI thread, so the application freezes during those pauses. The sleeps are not needed for the computation.",
+   "suggestion": "Remove the sleeps. Use processEvents or a progress dialog if needed.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Electrode selection depends on fiducial order via fixed slice indices",
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line_start": 1771,
+   "line_end": 1772,
+   "evidence": "EEG_electrodes_real=EEG_electrodes[4:-3] #remove nasion,inion,tragus left & right, stim_point & T3P3\nEEG_electrodes_names_real=EEG_electrodes_names[4:-3]",
+   "explanation": "ProjectedPoint assumes the first four fiducials are the landmarks and the last three are the stimulation point and T3P3. A user who adds or reorders fiducials gets a wrong nearest-electrode list with no warning.",
+   "suggestion": "Select electrodes by their label names rather than by slice position, and validate the fiducial count and labels before use.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Dead or unused code paths in the widget",
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line_start": 408,
+   "line_end": 409,
+   "evidence": "def onSelect(self):\n      self.applyButton.enabled = self.inputTargetModelSelector.currentNode() and self.outputSelector.currentNode()",
+   "explanation": "onSelect refers to self.outputSelector, which is never created, so it would fail if called. Both 'Find the shortest path' and 'Make 10-20' reuse self.applyButton and self.inputTargetModelSelector. The reused names are harmless only because connections are made before reassignment. This is confusing and fragile.",
+   "suggestion": "Remove onSelect and give each widget a unique name.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No working test suite",
+   "file": "GeodesicSlicer/Testing/Python/CMakeLists.txt",
+   "line_start": 2,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The module's unit-test registration is commented out, and no test class is defined in the module file. Changes to geodesic or threshold calculations cannot be checked automatically.",
+   "suggestion": "Add a small test using the bundled template, or a synthetic mesh, to check path length and fiducial placement.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Catalog pins the moving branch 'master' instead of a commit",
+   "file": "GeodesicSlicer.json",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "\"scm_revision\": \"master\",",
+   "explanation": "scm_revision is a branch name, so the revision built by the index can change without a catalog update. The reviewed source is commit 9641c81, which the index does not record.",
+   "suggestion": "Pin scm_revision to a full commit hash, such as 9641c81e8fef5183594f53f40bffad01b1a0a0b8, that has been reviewed.",
+   "confidence": "high"
+  },
+  {
+   "category": "license",
+   "severity": "info",
+   "title": "Duplicate license files and unfilled template text in source headers",
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line_start": 11,
+   "line_end": 11,
+   "evidence": "# Ce logiciel est un programme informatique servant à [rappeler les caractéristiques techniques de votre logiciel].",
+   "explanation": "LICENCE and LICENSE are both present, with different sizes (22364 and 21778 bytes). The module header still has placeholders such as '[rappeler les caractéristiques techniques de votre logiciel]'. These do not block distribution but should be cleaned up.",
+   "suggestion": "Keep one license file and replace the placeholder descriptions in the headers.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "Outdated documentation link and debug prints",
+   "file": "README.md",
+   "line_start": 8,
+   "line_end": 8,
+   "evidence": "- For documentation, tutorials, and more information about the extension, please see: https://www.slicer.org/wiki/Documentation/4.10/Modules/GeodesicSlicer",
+   "explanation": "The README and help text point to a 4.10 wiki page. The module prints debug output (print(nom), print ('length= ' ...)) during processing, which clutters the Python console.",
+   "suggestion": "Point to current documentation and replace print calls with logging.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "Example_template/Template.nii and Template.stl (about 95 MB combined) were not readable; their content and license status were not verified.",
+  "The exact source at commit 9641c81 was not fetched. The review is based on the files supplied in the submission bundle.",
+  "The full text of LICENSE and LICENCE was not read; I only confirmed that CeCILL is named in the README and module.",
+  "No Slicer runtime was used. I did not run the module, the mesh pipeline, or any tests, so the behaviour of the hard-coded node IDs and the Cz loop is inferred from the code.",
+  "The screenshot URL and the external documentation links were not accessed.",
+  "No CI results were available to me."
+ ],
+ "questions_for_author": [
+  "Can the mesh and EEG workflows run in a scene that already contains segmentation or model nodes? Why are fixed node IDs used instead of node references?",
+  "Is the Cz fixed-point loop guaranteed to converge? Has it been tested on meshes where the two estimates might oscillate?",
+  "Will you pin scm_revision to a commit hash rather than 'master'?",
+  "Are the large Example_template files (Template.nii, Template.stl) intended to remain in the source repository, and do they need a separate license statement?"
+ ]
+}

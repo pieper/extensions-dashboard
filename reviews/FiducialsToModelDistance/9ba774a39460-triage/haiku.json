@@ -1,0 +1,100 @@
+{
+ "purpose": "A 3D Slicer scripted module that computes distances from fiducial points to a model surface or to another fiducial set, and writes summary metrics and per-point distances to table nodes. It is intended for researchers doing registration or error analysis.",
+ "summary": "The Python module is small and local-only: no network access, no package installs, no subprocess or eval, and it uses the standard ScriptedLoadableModule structure with observer cleanup. The main admission blocker is that the repository contains no license file or license text, so distribution permission is not established. The catalog also tracks the moving branch \"master\" rather than a pinned commit. Soundness issues are minor: a Hausdorff-style metric and a signed \"Minimum Distance\" are not clearly defined, and tests are thin.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Read FiducialsToModelDistance.py fully: no network calls, no subprocess/eval/exec, no pickle, no file writes or deletions, no telemetry. Only writes to in-scene MRML table nodes."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Imports numpy lazily inside functions and does not install packages, pin versions, change sys.path, or alter global logging. CMakeLists.txt declares no extra dependencies."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Root and module CMakeLists.txt list FiducialsToModelDistance.py and the Icons/UI resources, which the directory listing shows as present. EXTENSION_DEPENDS \"NA\" matches build_dependencies []. scm_revision is the branch 'master', not a pinned commit, so the built source can change without a catalog update."
+  },
+  "license": {
+   "rating": "blocking",
+   "rationale": "Searched all text files for 'license|copyright' and got no matches; there is no LICENSE file in the listing and no license statement in README.md or the module header. Distribution permission for the code is therefore not established."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "Logic in compute() and pointDistancesLabelsFromSurface() is reasonable. Hausdorff is computed as max of per-point minimum distances (line 270), which is not the standard symmetric Hausdorff definition. The 'Minimum Distance' metric is signed (line 264), while the test expects -1.3, so the sign convention is not documented. Errors are shown via errorDisplay (line 141)."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md with two screenshots describes both modes. Tests exist as a ScriptedLoadableModuleTest with a cube and fiducial case, but the separate Testing/Python test file is commented out. No clinical-use disclaimer is present."
+  }
+ },
+ "findings": [
+  {
+   "category": "license",
+   "severity": "blocking",
+   "title": "No license file or license terms in the repository",
+   "file": "README.md",
+   "line_start": 1,
+   "line_end": 15,
+   "evidence": "This is an extension for 3D Slicer that computes distance between two point sets or a point set and a surface mesh.",
+   "explanation": "The repository has no LICENSE/COPYING file, and a text search for 'license' or 'copyright' across the repository returns nothing. README.md and the module header give no terms, so the extension and its contributors' code have no stated distribution permission. The index policy requires clear distribution terms before the extension can be offered to users.",
+   "suggestion": "Add a LICENSE file (any OSI-approved or equivalent license) at the repository root and state the license in README.md.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "minor",
+   "title": "Catalog tracks moving branch 'master' instead of a pinned commit",
+   "file": "",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "\"scm_revision\": \"master\",",
+   "explanation": "scm_revision is 'master', so the built extension is whatever master points to at build time. The reviewed commit 9ba774a39460fac85da215c5cfbbb19881094d6b is not what the index will build, and later changes would bypass review.",
+   "suggestion": "Pin scm_revision to a reviewed commit hash (or a release tag) in the catalog entry.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Hausdorff metric is not the standard definition",
+   "file": "FiducialsToModelDistance/FiducialsToModelDistance.py",
+   "line_start": 266,
+   "line_end": 270,
+   "evidence": "# Hausdorff Distance is the max of the minimum distances\n metricValues.append(max(abs(pointDistances).min(), abs(inversePointDistances).min()))",
+   "explanation": "For fiducial-to-fiducial comparisons, the code takes max(min distance of A to B, min distance of B to A) (line 270). The symmetric Hausdorff distance is the max over points of the nearest-neighbour distance, so this min-based value can understate it. Users reporting it as Hausdorff could be misled.",
+   "suggestion": "Use the max of per-point nearest distances in each direction, or rename the metric and document the definition.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Signed minimum distance reported without documentation",
+   "file": "FiducialsToModelDistance/FiducialsToModelDistance.py",
+   "line_start": 262,
+   "line_end": 264,
+   "evidence": "metricLabels.append(\"Minimum Distance\")\n metricValues.append(pointDistances.min())",
+   "explanation": "'Minimum Distance' is computed from signed values (line 264) while 'Maximum Absolute Distance' is used for the surface case, so users get a negative minimum that is not explained in the UI or README. This is confusing for clinical error reporting.",
+   "suggestion": "Document the sign convention in the help text, or report absolute values consistently.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Test coverage and disclaimer are limited",
+   "file": "FiducialsToModelDistance/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "The only test is a single ScriptedLoadableModuleTest case. The separate Testing/Python test file is commented out, and the test depends on a node named 'Model' existing (line 310). The README has no clinical-use disclaimer for a tool that computes surgical or registration error metrics.",
+   "suggestion": "Enable or remove the commented test, add a clinical-use disclaimer, and document sign and definition conventions for the metrics.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "The .ui file and icon under Resources/ were not read; only their existence in the listing was confirmed.",
+  "The source at the pinned commit 9ba774a39460fac85da215c5cfbbb19881094d6b was not fetched; the review is of the content supplied in the prompt.",
+  "No build, install or run of the module in Slicer was performed.",
+  "The .gitignore, screenshots and the remote repository's license file (if any outside this checkout) were not inspected beyond the listing."
+ ],
+ "questions_for_author": []
+}

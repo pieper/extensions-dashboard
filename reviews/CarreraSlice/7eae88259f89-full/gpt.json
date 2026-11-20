@@ -1,0 +1,116 @@
+{
+ "purpose": "CarreraSlice provides interactive image segmentation using Fast GrowCut and level-set evolution. It is intended for Slicer users who draw foreground and background seeds and refine a labelmap interactively.",
+ "summary": "The inspected source has no repository-wide distribution permission for the extension's own code, and its label editing can destroy existing label data. The native GrowCut implementation also assumes input scalar types without validation. The Python module uses Python 2 syntax and cannot load in current Python 3 Slicer. The catalog's moving branch and supplied commit could not be resolved, and no build or runtime test was possible. 🔴 Do not merge yet: establish distribution permission and fix the data-loss and unsafe input handling paths.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "Inspected CarreraSliceEffect.py, vtkFastGrowCut.cxx, vtkFastGrowCut.h, and utilities.h. Interactive painting and reset can overwrite existing labels, and unchecked scalar casts can read beyond an input voxel buffer."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "Inspected the active CMake path and installed Python modules and searched source for package installation, networking, and process execution. No automatic Python package installation was found; the sample startup scripts are not listed for installation."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "Inspected the root, src, and wrapper CMake files; the supplied catalog says master and lists no build dependencies, consistent with EXTENSION_DEPENDS NA. The branch, supplied commit, and an actual catalog build could not be independently verified."
+  },
+  "license": {
+   "rating": "blocking",
+   "rationale": "Listed the source tree, read README and representative core files, and searched all text for license and permission notices. Third-party and Slicer notices exist, but no license granting redistribution of the extension's own core code was found."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Inspected the installed Python modules and interactive initialization and cleanup paths. Python 2-only syntax prevents loading in Python 3 Slicer, and early cleanup leaves observers and Editor shortcuts behind."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "Inspected README, SlicerHelp.txt, the in-module help, and CMake test configuration. Instructions are brief and the native tests are disabled by default; runtime usefulness was not verified."
+  }
+ },
+ "findings": [
+  {
+   "category": "license",
+   "severity": "blocking",
+   "title": "No distribution terms found for the extension's own code",
+   "file": "README",
+   "line_start": 1,
+   "line_end": 3,
+   "evidence": "Grow cut, level set integration for interactive segmentation. Ivan Kolesov, LiangJia Zhu, Yi Gao, Peter Karasev. \n\nDecember 2013",
+   "explanation": "The repository listing and text search show notices for specific third-party files and Slicer-derived files, but no repository-wide license or permission for the original segmentation and effect implementation. The author attribution in the README does not grant the catalog permission to distribute those files.",
+   "suggestion": "Add explicit distribution terms from the relevant rights holders covering the extension's original code, and clarify the terms and provenance of any bundled data.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Painting replaces unrelated label values across whole slices",
+   "file": "src/carreraslice_wrap/CarreraSliceEffect.py",
+   "line_start": 774,
+   "line_end": 780,
+   "evidence": "        if self.ijkPlane==\"IJ\":\n            if signAccum==-1: # We're drawing\n                deltPaint=self.labArr[self.linInd] # find the next stuff that was painted\n                newLab= (self.ij_tmpArr + deltPaint)!=0\n            elif signAccum==1: # user is erasing\n                deltPaint=(self.labArr[self.linInd])==0\n                newLab=(deltPaint==0)*(self.ij_tmpArr!=0)",
+   "explanation": "On a paint event the code converts all nonzero labels on the slice to a Boolean mask, then assigns self.labVal * newLab to the entire slice at line 802; neighboring slices are similarly reassigned at lines 821–827. In an existing multi-label labelmap, even untouched structures on those slices are silently converted to the current label, destroying their identities. The slice is also cleared on mouse press before the edit completes.",
+   "suggestion": "Preserve every unrelated label value, limit writes to the actual painted or erased voxels, and provide a proper undo snapshot; test with multiple pre-existing labels and interrupted interactions.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Reset shortcut clears the entire active labelmap without warning",
+   "file": "src/carreraslice_wrap/CarreraSliceEffect.py",
+   "line_start": 967,
+   "line_end": 974,
+   "evidence": "  def resetFastGrowCutFlag(self):\n        self.bSegmenterInitialized = \"no\"\n        self.bEditGrowCutSeed = True\n        self.growCutSeedArray[:] = 0\n        self.growCutSegArray[:] = 0\n        \n        seedArray = slicer.util.array(self.labelNode.GetName())\n        seedArray[:] = 0",
+   "explanation": "The R shortcut invokes this function while the bot is active. Although presented as resetting Fast GrowCut parameters, it zeroes every voxel of the user's active label volume, including any pre-existing segmentation, without confirmation or an undo snapshot in this path.",
+   "suggestion": "Reset only internal state or work on a separate seed node; if clearing user data is necessary, explicitly confirm and save an undo state first.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "GrowCut treats arbitrary source volumes as signed-short buffers",
+   "file": "src/fastGrowCut/Logic/utilities.h",
+   "line_start": 111,
+   "line_end": 115,
+   "evidence": "    for(k = imROI[2]; k < imROI[5]; k++)\n        for(j = imROI[1]; j < imROI[4]; j++)\n             for(i = imROI[0]; i < imROI[3]; i++){\n               imROIVec[index++] = *(static_cast<PixelType*>(im->GetScalarPointer(i,j,k)));\n            }",
+   "explanation": "vtkFastGrowCut.h defines SrcPixelType as short, and vtkFastGrowCut.cxx passes the user-selected source image to this template without a scalar-type check. An unsigned-char source is read as two-byte values, potentially reading beyond the allocated final voxel; other types are misinterpreted and produce incorrect segmentation. The Python entry point accepts the image without converting it.",
+   "suggestion": "Validate scalar types and component counts, or convert inputs to supported types before native processing; use type-dispatched VTK access and test boundary voxels.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Installed effect uses Python 2 syntax and cannot load in Python 3 Slicer",
+   "file": "src/carreraslice_wrap/CarreraSliceEffect.py",
+   "line_start": 255,
+   "line_end": 260,
+   "evidence": "    if event == \"LeftButtonPressEvent\":\n      xy = self.interactor.GetEventPosition()\n      viewName,orient = get_view_names(self.sliceWidget)\n      ijk= smart_xyToIJK(xy,self.sliceWidget)\n      if not orient:\n        print \"Warning, unexpected view orientation!?\"",
+   "explanation": "CMake includes CarreraSliceEffect and KUtil as scripted modules. Both contain Python 2 print statements, which cause SyntaxError in Python 3 before the effect can be registered; the code also depends on the legacy Editor API. This is ordinary extension functionality feedback, separate from catalog admission.",
+   "suggestion": "Port the module and KUtil to Python 3 and the supported Segment Editor API, then exercise loading and segmentation in a current Slicer release.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Stopping during GrowCut leaves observers and Editor shortcuts altered",
+   "file": "src/carreraslice_wrap/CarreraSliceEffect.py",
+   "line_start": 1192,
+   "line_end": 1197,
+   "evidence": "    # remove GrowCut observer\n    self.sliceLogic.RemoveObserver(self.fGCLabelMod_tag)\n    print(\"Fast GrowCut deletion completed\")\n            \n    if self.fullInitialized==False: #if initialized, remove, otherwise do nothing\n        return",
+   "explanation": "Initialization removes the Editor's shortcut keys and installs mouse_obs_growcut. If the user stops before starting the level-set phase, destroy returns here without removing those mouse observers or reinstalling Editor shortcuts, leaving callbacks active and normal shortcuts disabled.",
+   "suggestion": "Always remove GrowCut observers from their original owners and restore Editor shortcuts, including on initialization failure and early stop.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No commands, Slicer build, runtime segmentation tests, or CI results were available.",
+  "Could not independently resolve the catalog's master branch or verify that the supplied 7eae88259f89a302cf59c74b2baed7add0eb15ef commit matches the inspected snapshot.",
+  "Binary sample images, including the unavailable large DS004.mha, were not inspected for content, provenance, or redistribution consent.",
+  "External Slicer APIs, linked wiki documentation, and any permission granted outside the supplied repository were not accessible.",
+  "Native code was inspected selectively, not exhaustively; the full safety and clinical validation of the algorithms was not established."
+ ],
+ "questions_for_author": [
+  "Can the rights holders provide explicit distribution terms for the original extension code and clarify the provenance and redistribution permissions of the bundled example images?",
+  "Which current Slicer version and Editor implementation is intended to support this extension?"
+ ]
+}

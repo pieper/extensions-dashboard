@@ -1,0 +1,1129 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Mixed compressed series deletes original files without checking compression",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+   "line": 165,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Mixed compressed series deletes original files without checking compression",
+     "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+     "line_start": 165,
+     "line_end": 170,
+     "evidence": "            for f_i in files:\n                if('.gz' not in f_i):\n                    fullfile = os.path.join(dcegzipped_paths[0],f_i)\n                    gzcmd = gzcmd_base + fullfile + '.gz' + ' ' + fullfile\n                    os.system(gzcmd) #create a gzipped copy of the file\n                    os.remove(fullfile) #delete the original, non-gzipped copy of the file",
+     "explanation": "During phase selection for a mixed compressed/uncompressed DCE folder, this deletes each original uncompressed file even if 7-Zip fails, for example because of an invalid executable or a path containing spaces. The input exam can therefore lose its only copy of DICOM images or other files.",
+     "suggestion": "Never modify source exams; decompress or copy into a private temporary directory, and verify subprocess success before using outputs.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+      "line": 165
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py:163-170 runs os.system(7z a ...) with an unquoted path and a hard-coded C:\\Program Files\\7-Zip path. It then calls os.remove(fullfile) without checking the return code or that the .gz exists. If 7z is missing (non-Windows) or the path has spaces, the original is deleted. This only happens in the mixed gz/non-gz case, but it is real data loss on the user's exam files. Because it needs 7z to fail and the folder to be mixed, I rate it major rather than blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py:145-170 selects the mixed/unrecognized-file branch and executes `os.system(gzcmd) #create a gzipped copy of the file` followed immediately by `os.remove(fullfile) #delete the original, non-gzipped copy of the file`, without checking the result. chooseEarly_LateByManufacturer.py:70-76 calls this for a gunzipped exam. If the destination exists and compression fails, original files can be lost. Note extractGZ first checks a different, apparently mistyped 7-Zip directory (gzip_gunzip_pyfuncs.py:30-33), which can impede the usual route; the destructive path remains reachable when its prerequisites are satisfied."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "In both `DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py` (lines 163-170) and `DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py` (lines 163-170), `gunzipAllFilesDCE` enters the mixed branch whenever a DCE series directory contains any file that does not match `.gz`, `.dcm`, `.DCM`, or `isdigit()` (e.g. `.DS_Store` or `Thumbs.db`), or contains both `.gz` and uncompressed files. It then runs `os.system(gzcmd)` with unquoted paths and hard-coded `C:\\Program Files\\7-Zip\\7z` and immediately calls `os.remove(fullfile)` without checking the return code or verifying that `fullfile + '.gz'` was created. If 7-Zip is not installed, on non-Windows platforms, or if the path contains spaces, this permanently deletes the user's original DICOM files."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Report filename is interpolated into a shell command",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line": 788,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Report filename is interpolated into a shell command",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+     "line_start": 788,
+     "line_end": 790,
+     "evidence": "    #save as dicom too\n    command = \"img2dcm\" + \" \" + savenamejpeg + \" \" + savenamedcm #use img2dcm to create dicom report from jpeg\n    os.system(command)",
+     "explanation": "The JPEG and DICOM paths are derived from the path chosen in the report save dialog. Shell metacharacters in a chosen or externally supplied path can execute arbitrary commands, and spaces also break normal paths. The gzip helpers similarly concatenate exam paths into shell commands.",
+     "suggestion": "Invoke the executable with subprocess and an argument list without a shell, and handle failures explicitly.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+      "line": 788
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py:789-790 builds the img2dcm command by string concatenation and runs it with os.system. The path comes from the user's own save dialog (lines 434-438), so there is no outside attacker, only self-inflicted injection or breakage with spaces. It is poor practice (subprocess with an argument list would fix it) but not a concrete path to harm."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess/DCE_TumorMapProcess.py:2575-2583 passes the save-dialog result to createPDFreport. DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py:433-435 derives the JPEG and DICOM paths, and lines 789-790 execute `command = \"img2dcm\" + \" \" + savenamejpeg + \" \" + savenamedcm` and `os.system(command)`. An attacker-controlled selected path containing shell syntax can execute commands; ordinary spaces can break the conversion. It requires a suitable path reaching report generation, not merely opening the module."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In `DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py:788-790`, `command = \"img2dcm\" + \" \" + savenamejpeg + \" \" + savenamedcm` and `os.system(command)` passes unquoted file paths derived from `qt.QFileDialog.getSaveFileName` (and defaulting to `exampath/SlicerReports/...`) to the system shell. Similarly, `gzip_gunzip_pyfuncs.py` (lines 79-86, 98-99, 154-155, 168-169, 174-175) concatenates unquoted paths into `os.system()`. While the paths come from user-selected local folders/dialogs rather than untrusted remote input (making arbitrary command injection mainly a self-inflicted or crafted-folder-name risk, and breaking paths with spaces), passing unquoted paths to `os.system` instead of `subprocess.run([..., path])` or Python's built-in `gzip` module is a real defect."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Report generation deletes any existing gunzipped directory",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line": 108,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Report generation deletes any existing gunzipped directory",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+     "line_start": 108,
+     "line_end": 113,
+     "evidence": "def deleteGunzipped(exampath):\n    #Edit 7/16/2020: If there is a gunzipped folder inside the exampath, delete it\n    gunzip_path = os.path.join(exampath,\"gunzipped\")\n\n    if(os.path.isdir(gunzip_path) == 1):\n        shutil.rmtree(gunzip_path)",
+     "explanation": "Module 2 calls this unconditionally after generating a report, including for uncompressed exams. Any pre-existing directory named gunzipped under the selected exam, including user-owned data never created by this extension, is recursively deleted without confirmation.",
+     "suggestion": "Use a uniquely created temporary directory and only delete directories owned by the current run; never recursively delete a pre-existing exam folder.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+      "line": 108
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "gzip_gunzip_pyfuncs.py:108-113 does rmtree on exampath/gunzipped if that directory exists. That name is the extension's own temporary directory, created at lines 126-127. Deleting a user's pre-existing folder of the same name is unlikely, and the call at DCE_TumorMapProcess.py:2586 is cleanup. A minor risk."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess/DCE_TumorMapProcess.py:2583-2586 calls `gzip_gunzip_pyfuncs.deleteGunzipped(exampath)` after the report function returns, independently of gzipped status. DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py:110-113 sets `gunzip_path = os.path.join(exampath,\"gunzipped\")` and calls `shutil.rmtree(gunzip_path)` whenever it is a directory. A pre-existing user-owned directory at that location can be deleted recursively without a provenance check or confirmation."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In `DCE_TumorMapProcess/DCE_TumorMapProcess.py:2586`, `gzip_gunzip_pyfuncs.deleteGunzipped(exampath)` is called unconditionally after report generation (regardless of whether `gzipped == 1`), and `deleteGunzipped` in `DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py:108-115` calls `shutil.rmtree(os.path.join(exampath, \"gunzipped\"))`. Note that in `DCE_IDandPhaseSelect`, `extractGZ` (line 30) checks `os.path.isdir(r'C:\\Program Fileszz\\7-Zip')` (a typo with `zz`), so `extractGZ` never creates `\"gunzipped\"` itself, while `deleteGunzipped` still deletes `exampath/gunzipped` if present. Since `\"gunzipped\"` is the extension's specific working folder name inside `exampath`, accidental collision with unrelated user data is unlikely, making this a minor issue rather than blocking."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Report sidecars overwrite existing files without confirmation",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line": 641,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Report sidecars overwrite existing files without confirmation",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+     "line_start": 641,
+     "line_end": 644,
+     "evidence": "    txt_file = open(savenametxt, \"w+\")\n\n    txt_file.write( \"I-SPY ID: \" + idstr + \"\\r\\n\")\n    txt_file.write( \"Date: \" + studydate[4:6]+\"/\"+studydate[6:]+\"/\"+studydate[0:4]+\" \"+studytime[0:2]+\":\"+studytime[2:4]+\":\"+studytime[4:] + \"\\r\\n\")",
+     "explanation": "The report dialog asks for a PDF path, but the code derives a same-stem .txt path and opens it in truncating mode without checking whether it already exists. It also writes a same-stem JPEG; choosing a new PDF name can silently destroy unrelated existing sidecar files.",
+     "suggestion": "Check all output paths before writing and ask for explicit overwrite confirmation, or create a new output directory.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+      "line": 641
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "ftv_plots.py:434-438 derives the .jpeg, .dcm and .txt names from the PDF name chosen in the dialog, and line 641 opens the .txt in 'w+' mode. There is no existence check on the sidecar files. The user picks the stem and the sidecars are report outputs, so overwriting is possible but unlikely. A minor issue."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess/DCE_TumorMapProcess.py:2575-2583 prompts for a PDF and passes the path to the report. DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py:433-438 derives same-stem names, and line 641 executes `txt_file = open(savenametxt, \"w+\")`, truncating an existing text file without checking it. Line 785 similarly saves the JPEG. Confirming the PDF path does not confirm overwriting unrelated sidecars; this is a concrete data-loss path."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In `DCE_TumorMapProcess/DCE_TumorMapProcess.py:2566-2578`, the user selects a `.pdf` save path (defaulting to `exampath/SlicerReports/<site>_<id>_<visit>.pdf`), and `DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py:434-438, 641, 785-790` derives `.jpeg`, `.dcm`, and `.txt` paths by replacing the last 3 characters (`savenamepdf[:-3] + ...`) and writes them without checking if the sidecar files already exist. Because the user explicitly chose the base report path in a save dialog (by default in a dedicated `SlicerReports` subdirectory), writing companion report files with the same stem is expected behavior for this report generator, though using `os.path.splitext` and documenting/confirming sidecar overwrites would be cleaner."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Top-level pip installation at module import time and non-headless OpenCV dependency",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 58,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Top-level pip installation at module import time and non-headless OpenCV dependency",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 58,
+     "line_end": 64,
+     "evidence": "def _importOptional(package, moduleName=None):\n  moduleName = moduleName or package\n  try:\n    return __import__(moduleName)\n  except ImportError:\n    _pipEnsure(package)\n    return __import__(moduleName)",
+     "explanation": "Both `DCE_IDandPhaseSelect.py` (lines 54-58) and `DCE_TumorMapProcess.py` (lines 83-89) execute `_pipEnsure` / `slicer.util.pip_install` at module top-level import time (when 3D Slicer starts up and discovers scripted modules, even if the user never opens the module) without user confirmation. Furthermore, `DCE_TumorMapProcess.py` line 84 calls `_importOptional('cv2', 'cv2')` (there is no valid PyPI package named `cv2`, and `pyproject.toml` lists `opencv-python` instead of `opencv-python-headless`, which bundles duplicate Qt libraries that conflict with Slicer's Qt).",
+     "suggestion": "Move optional package imports and `pip_install` calls inside the widget `setup()` or logic `run()` methods after prompting the user for confirmation, and install `opencv-python-headless` rather than `cv2` or `opencv-python`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 58
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DCE_IDandPhaseSelect.py:54-58 and DCE_TumorMapProcess.py:83-89 run at module level and call pip_install via _pipEnsure whenever an import fails. The install happens at Slicer startup or module discovery, with no confirmation. _importOptional('cv2','cv2') passes 'cv2' to pip, which is the wrong distribution name (opencv-python). pyproject.toml:8 lists opencv-python, not the headless variant. This only triggers when the packages are missing, and it is the install-at-import pattern the policy asks to change. It is not malicious, so major rather than blocking."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py:42-58 and DCE_TumorMapProcess/DCE_TumorMapProcess.py:46-64,83-89 contain top-level import-time dependency installation on failed imports; the fallback calls `slicer.util.pip_install(package)` without a local prompt. TumorMapProcess.py:84 calls `cv2 = _importOptional('cv2', 'cv2')`, using the import name rather than the OpenCV distribution, so a missing cv2 can prevent loading. pyproject.toml:6-9 declares `\"opencv-python\",` rather than the headless distribution. I did not verify that this project metadata is actually installed by the Slicer build, nor the internal consent behavior of slicer.packaging.pip_ensure; the direct pip fallback is demonstrable."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "In `DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py:54-58` and `DCE_TumorMapProcess/DCE_TumorMapProcess.py:58-64, 83-89`, missing dependencies trigger `_pipEnsure` -> `slicer.util.pip_install(...)` at module top-level import time (during Slicer startup/module discovery, before the user ever opens the module and without confirmation). Furthermore, `DCE_TumorMapProcess.py:84` calls `_importOptional('cv2', 'cv2')`, attempting to `pip install cv2` (which does not exist on PyPI as a valid distribution name for OpenCV), and `pyproject.toml:8` specifies `opencv-python` instead of `opencv-python-headless`, which bundles duplicate Qt libraries that conflict with Slicer's Qt environment. Under the Slicer Extensions Index review policy, installing packages at module import/Slicer startup and specifying `opencv-python` instead of `opencv-python-headless` are blocking environment issues."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Unquoted os.system calls and unconditional deletion of original user DICOM files in gunzipAllFilesDCE",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line": 163,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Unquoted os.system calls and unconditional deletion of original user DICOM files in gunzipAllFilesDCE",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+     "line_start": 163,
+     "line_end": 170,
+     "evidence": "            gzcmd_base = r'\"C:\\Program Files\\7-Zip\\7z\" a -tgzip '\n            #Edit 2/4/2021: if file is not gzipped, gzip it and delete the original copy\n            for f_i in files:\n                if('.gz' not in f_i):\n                    fullfile = os.path.join(dcegzipped_paths[0],f_i)\n                    gzcmd = gzcmd_base + fullfile + '.gz' + ' ' + fullfile\n                    os.system(gzcmd) #create a gzipped copy of the file\n                    os.remove(fullfile) #delete the original, non-gzipped copy of the file",
+     "explanation": "In `gzip_gunzip_pyfuncs.py` (present in both modules), `extractGZ` and `gunzipAllFilesDCE` construct shell commands by concatenating unescaped file paths and executing them with `os.system(...)`. If paths or filenames contain spaces or shell metacharacters, `os.system` will fail or execute unintended commands. In addition, lines 165-170 run `os.system(gzcmd)` and then unconditionally call `os.remove(fullfile)` on the user's original uncompressed DICOM files without checking whether `7z` succeeded, which permanently deletes user exam data if `7z` is missing or fails.",
+     "suggestion": "Use Python's built-in `gzip` and `shutil` standard library modules to decompress `.gz` files directly into a temporary directory instead of invoking external `7z` via `os.system`, and never delete original files in the user's source exam directory.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+      "line": 163
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "The 7z calls are unquoted os.system calls and the deletion is unchecked (gzip_gunzip_pyfuncs.py:153-175). It duplicates D1, with the same major-severity data-loss path in the mixed-series case. The command-injection part is limited because the paths are the user's own exam paths."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py:74-80 and 163-170 concatenate paths into shell commands; lines 169-170 run `os.system(gzcmd) #create a gzipped copy of the file` then `os.remove(fullfile) #delete the original, non-gzipped copy of the file` regardless of exit status. The corresponding plugin1 copy at the same lines is actually called by DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/chooseEarly_LateByManufacturer.py:70-76. This duplicates D1's original-file loss and adds shell injection; entry into that branch requires a prepared destination and the mixed or unrecognized-file case. The extractGZ prerequisite at plugin1/gzip_gunzip_pyfuncs.py:30-33 may impede the ordinary path."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "In both `DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py:163-175` and `DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py:163-175`, `gunzipAllFilesDCE` builds shell commands by string concatenation without quoting file paths and runs them via `os.system(gzcmd)`, then unconditionally deletes the user's original uncompressed file via `os.remove(fullfile)` on line 170 without checking if `7z` succeeded or if `fullfile + '.gz'` exists. If `C:\\Program Files\\7-Zip\\7z` is missing, if running on macOS/Linux, or if `fullfile` contains spaces, `os.system(gzcmd)` fails and `os.remove(fullfile)` permanently destroys the user's original exam files."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Dependencies are installed on module import and cv2 uses the wrong distribution name",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 83,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Dependencies are installed on module import and cv2 uses the wrong distribution name",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 83,
+     "line_end": 89,
+     "evidence": "nib = _importOptional('nibabel')\ncv2 = _importOptional('cv2', 'cv2')\nnrrd = _importOptional('pynrrd', 'nrrd')\nyattag = _importOptional('yattag')\nmatplotlib = _importOptional('matplotlib')\nimport matplotlib.pyplot as plt\nskimage = _importOptional('scikit-image', 'skimage')",
+     "explanation": "The helper calls pip when an import fails, so module discovery can change the shared environment before the user opens the extension. In particular cv2 is an import name, not the OpenCV distribution name, so a missing cv2 can cause module loading to fail; pyproject.toml instead declares opencv-python, which bundles Qt rather than the headless variant.",
+     "suggestion": "Move dependency setup to a user-confirmed module action; use an appropriate Slicer-compatible headless OpenCV distribution and check requirements before proceeding.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 83
+     }
+    }
+   ],
+   "id": "D7",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess.py:83-89 calls _importOptional at import time. 'cv2' is passed as the pip package name, which is wrong (opencv-python is the distribution), so the pip install fails and the module fails to load. pyproject.toml:8 lists opencv-python (non-headless), which bundles its own Qt libraries. The pip installs happen at module discovery without consent. This is a real environment concern; I rate it major."
+    },
+    "gpt": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess/DCE_TumorMapProcess.py:58-64 calls `_pipEnsure(package)` on ImportError, and lines 83-89 perform those imports at module scope, including `cv2 = _importOptional('cv2', 'cv2')`. The direct fallback at lines 52-56 calls pip without an explicit confirmation. A missing cv2 can cause module loading to fail because cv2 is the import name, not the OpenCV distribution. pyproject.toml:8 declares `\"opencv-python\",`; I did not establish that this metadata is installed during normal extension operation. This duplicates D5."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "This is the same underlying issue as D5: `DCE_TumorMapProcess/DCE_TumorMapProcess.py:83-89` (and `DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py:54-58`) runs `pip_install` at top-level module import time during Slicer startup, uses `'cv2'` as the pip package name in `_importOptional('cv2', 'cv2')` (causing installation and module loading to fail when `cv2` is not already installed), and declares `opencv-python` (which bundles conflicting Qt libraries) instead of `opencv-python-headless` in `pyproject.toml:8`. Under the review policy, package installation at module import/startup and `opencv-python` (non-headless) / broken module loading are blocking issues."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Blocking file dialog and unguarded state assumptions in Widget setup()",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+   "line": 294,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Blocking file dialog and unguarded state assumptions in Widget setup()",
+     "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+     "line_start": 294,
+     "line_end": 295,
+     "evidence": "    #Edit 2/11/2021: Moving exampath selection here\n    self.exampath = qt.QFileDialog.getExistingDirectory(0,(\"Select folder for DCE-MRI exam\"))",
+     "explanation": "`DCE_IDandPhaseSelectWidget.setup()` immediately opens a modal `QFileDialog.getExistingDirectory` when the widget is initialized and proceeds to index paths and read files assuming a valid directory was chosen. Similarly, `DCE_TumorMapProcessWidget.setup()` immediately calls `slicer.util.getNode(\"path node\")` (line 240) and loads `current_exam_workspace.pickle` (line 269) inside `setup()`, which raises an unhandled exception if Module 2 is opened before Module 1 has been run.",
+     "suggestion": "Trigger directory selection via a UI button or `ctkPathLineEdit` rather than a blocking dialog inside `setup()`, and guard against missing `\"path node\"` or workspace state when `DCE_TumorMapProcessWidget.setup()` runs.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+      "line": 294
+     }
+    }
+   ]
+  },
+  {
+   "title": "Case-sensitive filename mismatch for ser_colorbar.PNG",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 932,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Case-sensitive filename mismatch for ser_colorbar.PNG",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 932,
+     "line_end": 933,
+     "evidence": "    pathtoscript,scriptname = os.path.split(os.path.realpath(__file__))\n    colorbar_path = os.path.join(pathtoscript,'ser_colorbar.png')",
+     "explanation": "The repository and `DCE_TumorMapProcess/CMakeLists.txt` (line 23) install `ser_colorbar.PNG` with an uppercase extension, whereas `DCE_TumorMapProcess.py` looks for `ser_colorbar.png` in lowercase. On case-sensitive filesystems (such as Linux), loading the pixmap fails.",
+     "suggestion": "Match the exact filename casing (`ser_colorbar.PNG`) or rename the file to lowercase in both the repository and `CMakeLists.txt`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 932
+     }
+    }
+   ]
+  },
+  {
+   "title": "Persistent modification of global DataProbe slice view annotation settings",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 230,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Persistent modification of global DataProbe slice view annotation settings",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 230,
+     "line_end": 235,
+     "evidence": "    # Disable slice annotations immediately\n    slicer.modules.DataProbeInstance.infoWidget.sliceAnnotations.sliceViewAnnotationsEnabled=False\n    slicer.modules.DataProbeInstance.infoWidget.sliceAnnotations.updateSliceViewFromGUI()\n    # Disable slice annotations persistently (after Slicer restarts)\n    settings = qt.QSettings()\n    settings.setValue('DataProbe/sliceViewAnnotations.enabled', 0)",
+     "explanation": "When opening `DCE_TumorMapProcess`, `setup()` writes to `qt.QSettings()` to persistently disable Slicer's DataProbe slice view annotations across all future Slicer sessions, affecting the user's global Slicer configuration even after closing the module.",
+     "suggestion": "Avoid modifying persistent global `QSettings` for `DataProbe/sliceViewAnnotations.enabled`, or restore the user's previous setting in `cleanup()`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 230
+     }
+    }
+   ]
+  },
+  {
+   "title": "ROI coordinates outside image bounds are not clipped",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_map_gen.py",
+   "line": 89,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "ROI coordinates outside image bounds are not clipped",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_map_gen.py",
+     "line_start": 89,
+     "line_end": 97,
+     "evidence": "      zs = int( round( float(center[2]) - float(radius[2]) ) )\n      zf = int( round( float(center[2]) + float(radius[2]) ) )\n\n      #because it's a numpy array, it must have dimension order z,y,x in order to match orientations with input image\n      #4/27/21: Add the +1 to each dimension to compensate for\n      #Python array indexing rules\n      voi_mask[xs:xf+1,ys:yf+1,zs:zf+1] = maskval\n      #voi_mask[ys:yf+1,xs:xf+1,zs:zf+1] = maskval\n      return xs,xf,ys,yf,zs,zf,voi_mask",
+     "explanation": "When the ROI crosses an image boundary, negative NumPy slice bounds wrap from the far edge and may produce an empty or incorrect mask; excessive positive limits are also used later by explicit colorization loops. FTV computation can fail or omit portions of the selected lesion.",
+     "suggestion": "Clip all ROI and omit bounds to image dimensions and reject empty intersections before calculating thresholds or coloring voxels.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_map_gen.py",
+      "line": 89
+     }
+    }
+   ]
+  },
+  {
+   "title": "Registered module test calls an undefined test method",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 2619,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Registered module test calls an undefined test method",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 2619,
+     "line_end": 2625,
+     "evidence": "  def runTest(self):\n    \"\"\"Run as few or as many tests as needed here.\n    \"\"\"\n    self.setUp()\n    self.test_roiAndOmitsTest1()\n\n  def test_DCE_TumorMapProcess1(self):",
+     "explanation": "The registered module test calls test_roiAndOmitsTest1, but the defined test shown immediately below has a different name. Consequently the self-test cannot exercise the workflow as intended.",
+     "suggestion": "Replace the template test with working automated tests for phase selection, ROI boundaries, and report generation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 2619
+     }
+    }
+   ]
+  },
+  {
+   "title": "Workspace is stored in a shared fixed file next to installed code",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+   "line": 143,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Workspace is stored in a shared fixed file next to installed code",
+     "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+     "line_start": 143,
+     "line_end": 150,
+     "evidence": "  #Save workspace for original exam selected by user\n  if(orig == 1):\n    #7/9/2021: Make this path part independent of computer & directory\n    #code is stored in.\n    extension_path = os.path.join( os.path.dirname( __file__ ), '..' )\n    wkspc_savepath = os.path.join(extension_path,'current_exam_workspace.pickle')\n    with open(wkspc_savepath,'wb') as f:\n      pickle.dump([tempres, all_folders_info, dce_folders, dce_ind, fsort, studydate, nslice, earlyPostContrastNum, latePostContrastNum, earlydiffmm, earlydiffss, latediffmm, latediffss],f)",
+     "explanation": "An installation directory may be read-only, preventing module 1 from completing. Concurrent sessions also overwrite the same file, while module 2 unpickles it, potentially associating one session's exam metadata with another session's images.",
+     "suggestion": "Keep the state in the MRML scene or a uniquely scoped, access-controlled temporary location, and avoid pickle for cross-session data.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+      "line": 143
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Mixed compressed series deletes original files without checking compression",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+   "line": 165,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Mixed compressed series deletes original files without checking compression",
+     "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+     "line_start": 165,
+     "line_end": 170,
+     "evidence": "            for f_i in files:\n                if('.gz' not in f_i):\n                    fullfile = os.path.join(dcegzipped_paths[0],f_i)\n                    gzcmd = gzcmd_base + fullfile + '.gz' + ' ' + fullfile\n                    os.system(gzcmd) #create a gzipped copy of the file\n                    os.remove(fullfile) #delete the original, non-gzipped copy of the file",
+     "explanation": "During phase selection for a mixed compressed/uncompressed DCE folder, this deletes each original uncompressed file even if 7-Zip fails, for example because of an invalid executable or a path containing spaces. The input exam can therefore lose its only copy of DICOM images or other files.",
+     "suggestion": "Never modify source exams; decompress or copy into a private temporary directory, and verify subprocess success before using outputs.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+      "line": 165
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py:163-170 runs os.system(7z a ...) with an unquoted path and a hard-coded C:\\Program Files\\7-Zip path. It then calls os.remove(fullfile) without checking the return code or that the .gz exists. If 7z is missing (non-Windows) or the path has spaces, the original is deleted. This only happens in the mixed gz/non-gz case, but it is real data loss on the user's exam files. Because it needs 7z to fail and the folder to be mixed, I rate it major rather than blocking."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py:145-170 selects the mixed/unrecognized-file branch and executes `os.system(gzcmd) #create a gzipped copy of the file` followed immediately by `os.remove(fullfile) #delete the original, non-gzipped copy of the file`, without checking the result. chooseEarly_LateByManufacturer.py:70-76 calls this for a gunzipped exam. If the destination exists and compression fails, original files can be lost. Note extractGZ first checks a different, apparently mistyped 7-Zip directory (gzip_gunzip_pyfuncs.py:30-33), which can impede the usual route; the destructive path remains reachable when its prerequisites are satisfied."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "In both `DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py` (lines 163-170) and `DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py` (lines 163-170), `gunzipAllFilesDCE` enters the mixed branch whenever a DCE series directory contains any file that does not match `.gz`, `.dcm`, `.DCM`, or `isdigit()` (e.g. `.DS_Store` or `Thumbs.db`), or contains both `.gz` and uncompressed files. It then runs `os.system(gzcmd)` with unquoted paths and hard-coded `C:\\Program Files\\7-Zip\\7z` and immediately calls `os.remove(fullfile)` without checking the return code or verifying that `fullfile + '.gz'` was created. If 7-Zip is not installed, on non-Windows platforms, or if the path contains spaces, this permanently deletes the user's original DICOM files."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Report filename is interpolated into a shell command",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line": 788,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Report filename is interpolated into a shell command",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+     "line_start": 788,
+     "line_end": 790,
+     "evidence": "    #save as dicom too\n    command = \"img2dcm\" + \" \" + savenamejpeg + \" \" + savenamedcm #use img2dcm to create dicom report from jpeg\n    os.system(command)",
+     "explanation": "The JPEG and DICOM paths are derived from the path chosen in the report save dialog. Shell metacharacters in a chosen or externally supplied path can execute arbitrary commands, and spaces also break normal paths. The gzip helpers similarly concatenate exam paths into shell commands.",
+     "suggestion": "Invoke the executable with subprocess and an argument list without a shell, and handle failures explicitly.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+      "line": 788
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py:789-790 builds the img2dcm command by string concatenation and runs it with os.system. The path comes from the user's own save dialog (lines 434-438), so there is no outside attacker, only self-inflicted injection or breakage with spaces. It is poor practice (subprocess with an argument list would fix it) but not a concrete path to harm."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess/DCE_TumorMapProcess.py:2575-2583 passes the save-dialog result to createPDFreport. DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py:433-435 derives the JPEG and DICOM paths, and lines 789-790 execute `command = \"img2dcm\" + \" \" + savenamejpeg + \" \" + savenamedcm` and `os.system(command)`. An attacker-controlled selected path containing shell syntax can execute commands; ordinary spaces can break the conversion. It requires a suitable path reaching report generation, not merely opening the module."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In `DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py:788-790`, `command = \"img2dcm\" + \" \" + savenamejpeg + \" \" + savenamedcm` and `os.system(command)` passes unquoted file paths derived from `qt.QFileDialog.getSaveFileName` (and defaulting to `exampath/SlicerReports/...`) to the system shell. Similarly, `gzip_gunzip_pyfuncs.py` (lines 79-86, 98-99, 154-155, 168-169, 174-175) concatenates unquoted paths into `os.system()`. While the paths come from user-selected local folders/dialogs rather than untrusted remote input (making arbitrary command injection mainly a self-inflicted or crafted-folder-name risk, and breaking paths with spaces), passing unquoted paths to `os.system` instead of `subprocess.run([..., path])` or Python's built-in `gzip` module is a real defect."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Report generation deletes any existing gunzipped directory",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line": 108,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Report generation deletes any existing gunzipped directory",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+     "line_start": 108,
+     "line_end": 113,
+     "evidence": "def deleteGunzipped(exampath):\n    #Edit 7/16/2020: If there is a gunzipped folder inside the exampath, delete it\n    gunzip_path = os.path.join(exampath,\"gunzipped\")\n\n    if(os.path.isdir(gunzip_path) == 1):\n        shutil.rmtree(gunzip_path)",
+     "explanation": "Module 2 calls this unconditionally after generating a report, including for uncompressed exams. Any pre-existing directory named gunzipped under the selected exam, including user-owned data never created by this extension, is recursively deleted without confirmation.",
+     "suggestion": "Use a uniquely created temporary directory and only delete directories owned by the current run; never recursively delete a pre-existing exam folder.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+      "line": 108
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "gzip_gunzip_pyfuncs.py:108-113 does rmtree on exampath/gunzipped if that directory exists. That name is the extension's own temporary directory, created at lines 126-127. Deleting a user's pre-existing folder of the same name is unlikely, and the call at DCE_TumorMapProcess.py:2586 is cleanup. A minor risk."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess/DCE_TumorMapProcess.py:2583-2586 calls `gzip_gunzip_pyfuncs.deleteGunzipped(exampath)` after the report function returns, independently of gzipped status. DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py:110-113 sets `gunzip_path = os.path.join(exampath,\"gunzipped\")` and calls `shutil.rmtree(gunzip_path)` whenever it is a directory. A pre-existing user-owned directory at that location can be deleted recursively without a provenance check or confirmation."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In `DCE_TumorMapProcess/DCE_TumorMapProcess.py:2586`, `gzip_gunzip_pyfuncs.deleteGunzipped(exampath)` is called unconditionally after report generation (regardless of whether `gzipped == 1`), and `deleteGunzipped` in `DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py:108-115` calls `shutil.rmtree(os.path.join(exampath, \"gunzipped\"))`. Note that in `DCE_IDandPhaseSelect`, `extractGZ` (line 30) checks `os.path.isdir(r'C:\\Program Fileszz\\7-Zip')` (a typo with `zz`), so `extractGZ` never creates `\"gunzipped\"` itself, while `deleteGunzipped` still deletes `exampath/gunzipped` if present. Since `\"gunzipped\"` is the extension's specific working folder name inside `exampath`, accidental collision with unrelated user data is unlikely, making this a minor issue rather than blocking."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Report sidecars overwrite existing files without confirmation",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line": 641,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Report sidecars overwrite existing files without confirmation",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+     "line_start": 641,
+     "line_end": 644,
+     "evidence": "    txt_file = open(savenametxt, \"w+\")\n\n    txt_file.write( \"I-SPY ID: \" + idstr + \"\\r\\n\")\n    txt_file.write( \"Date: \" + studydate[4:6]+\"/\"+studydate[6:]+\"/\"+studydate[0:4]+\" \"+studytime[0:2]+\":\"+studytime[2:4]+\":\"+studytime[4:] + \"\\r\\n\")",
+     "explanation": "The report dialog asks for a PDF path, but the code derives a same-stem .txt path and opens it in truncating mode without checking whether it already exists. It also writes a same-stem JPEG; choosing a new PDF name can silently destroy unrelated existing sidecar files.",
+     "suggestion": "Check all output paths before writing and ask for explicit overwrite confirmation, or create a new output directory.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+      "line": 641
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "ftv_plots.py:434-438 derives the .jpeg, .dcm and .txt names from the PDF name chosen in the dialog, and line 641 opens the .txt in 'w+' mode. There is no existence check on the sidecar files. The user picks the stem and the sidecars are report outputs, so overwriting is possible but unlikely. A minor issue."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess/DCE_TumorMapProcess.py:2575-2583 prompts for a PDF and passes the path to the report. DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py:433-438 derives same-stem names, and line 641 executes `txt_file = open(savenametxt, \"w+\")`, truncating an existing text file without checking it. Line 785 similarly saves the JPEG. Confirming the PDF path does not confirm overwriting unrelated sidecars; this is a concrete data-loss path."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In `DCE_TumorMapProcess/DCE_TumorMapProcess.py:2566-2578`, the user selects a `.pdf` save path (defaulting to `exampath/SlicerReports/<site>_<id>_<visit>.pdf`), and `DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py:434-438, 641, 785-790` derives `.jpeg`, `.dcm`, and `.txt` paths by replacing the last 3 characters (`savenamepdf[:-3] + ...`) and writes them without checking if the sidecar files already exist. Because the user explicitly chose the base report path in a save dialog (by default in a dedicated `SlicerReports` subdirectory), writing companion report files with the same stem is expected behavior for this report generator, though using `os.path.splitext` and documenting/confirming sidecar overwrites would be cleaner."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Top-level pip installation at module import time and non-headless OpenCV dependency",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 58,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Top-level pip installation at module import time and non-headless OpenCV dependency",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 58,
+     "line_end": 64,
+     "evidence": "def _importOptional(package, moduleName=None):\n  moduleName = moduleName or package\n  try:\n    return __import__(moduleName)\n  except ImportError:\n    _pipEnsure(package)\n    return __import__(moduleName)",
+     "explanation": "Both `DCE_IDandPhaseSelect.py` (lines 54-58) and `DCE_TumorMapProcess.py` (lines 83-89) execute `_pipEnsure` / `slicer.util.pip_install` at module top-level import time (when 3D Slicer starts up and discovers scripted modules, even if the user never opens the module) without user confirmation. Furthermore, `DCE_TumorMapProcess.py` line 84 calls `_importOptional('cv2', 'cv2')` (there is no valid PyPI package named `cv2`, and `pyproject.toml` lists `opencv-python` instead of `opencv-python-headless`, which bundles duplicate Qt libraries that conflict with Slicer's Qt).",
+     "suggestion": "Move optional package imports and `pip_install` calls inside the widget `setup()` or logic `run()` methods after prompting the user for confirmation, and install `opencv-python-headless` rather than `cv2` or `opencv-python`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 58
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DCE_IDandPhaseSelect.py:54-58 and DCE_TumorMapProcess.py:83-89 run at module level and call pip_install via _pipEnsure whenever an import fails. The install happens at Slicer startup or module discovery, with no confirmation. _importOptional('cv2','cv2') passes 'cv2' to pip, which is the wrong distribution name (opencv-python). pyproject.toml:8 lists opencv-python, not the headless variant. This only triggers when the packages are missing, and it is the install-at-import pattern the policy asks to change. It is not malicious, so major rather than blocking."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py:42-58 and DCE_TumorMapProcess/DCE_TumorMapProcess.py:46-64,83-89 contain top-level import-time dependency installation on failed imports; the fallback calls `slicer.util.pip_install(package)` without a local prompt. TumorMapProcess.py:84 calls `cv2 = _importOptional('cv2', 'cv2')`, using the import name rather than the OpenCV distribution, so a missing cv2 can prevent loading. pyproject.toml:6-9 declares `\"opencv-python\",` rather than the headless distribution. I did not verify that this project metadata is actually installed by the Slicer build, nor the internal consent behavior of slicer.packaging.pip_ensure; the direct pip fallback is demonstrable."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "In `DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py:54-58` and `DCE_TumorMapProcess/DCE_TumorMapProcess.py:58-64, 83-89`, missing dependencies trigger `_pipEnsure` -> `slicer.util.pip_install(...)` at module top-level import time (during Slicer startup/module discovery, before the user ever opens the module and without confirmation). Furthermore, `DCE_TumorMapProcess.py:84` calls `_importOptional('cv2', 'cv2')`, attempting to `pip install cv2` (which does not exist on PyPI as a valid distribution name for OpenCV), and `pyproject.toml:8` specifies `opencv-python` instead of `opencv-python-headless`, which bundles duplicate Qt libraries that conflict with Slicer's Qt environment. Under the Slicer Extensions Index review policy, installing packages at module import/Slicer startup and specifying `opencv-python` instead of `opencv-python-headless` are blocking environment issues."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Unquoted os.system calls and unconditional deletion of original user DICOM files in gunzipAllFilesDCE",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line": 163,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "blocking",
+     "title": "Unquoted os.system calls and unconditional deletion of original user DICOM files in gunzipAllFilesDCE",
+     "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+     "line_start": 163,
+     "line_end": 170,
+     "evidence": "            gzcmd_base = r'\"C:\\Program Files\\7-Zip\\7z\" a -tgzip '\n            #Edit 2/4/2021: if file is not gzipped, gzip it and delete the original copy\n            for f_i in files:\n                if('.gz' not in f_i):\n                    fullfile = os.path.join(dcegzipped_paths[0],f_i)\n                    gzcmd = gzcmd_base + fullfile + '.gz' + ' ' + fullfile\n                    os.system(gzcmd) #create a gzipped copy of the file\n                    os.remove(fullfile) #delete the original, non-gzipped copy of the file",
+     "explanation": "In `gzip_gunzip_pyfuncs.py` (present in both modules), `extractGZ` and `gunzipAllFilesDCE` construct shell commands by concatenating unescaped file paths and executing them with `os.system(...)`. If paths or filenames contain spaces or shell metacharacters, `os.system` will fail or execute unintended commands. In addition, lines 165-170 run `os.system(gzcmd)` and then unconditionally call `os.remove(fullfile)` on the user's original uncompressed DICOM files without checking whether `7z` succeeded, which permanently deletes user exam data if `7z` is missing or fails.",
+     "suggestion": "Use Python's built-in `gzip` and `shutil` standard library modules to decompress `.gz` files directly into a temporary directory instead of invoking external `7z` via `os.system`, and never delete original files in the user's source exam directory.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+      "line": 163
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "The 7z calls are unquoted os.system calls and the deletion is unchecked (gzip_gunzip_pyfuncs.py:153-175). It duplicates D1, with the same major-severity data-loss path in the mixed-series case. The command-injection part is limited because the paths are the user's own exam paths."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py:74-80 and 163-170 concatenate paths into shell commands; lines 169-170 run `os.system(gzcmd) #create a gzipped copy of the file` then `os.remove(fullfile) #delete the original, non-gzipped copy of the file` regardless of exit status. The corresponding plugin1 copy at the same lines is actually called by DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/chooseEarly_LateByManufacturer.py:70-76. This duplicates D1's original-file loss and adds shell injection; entry into that branch requires a prepared destination and the mixed or unrecognized-file case. The extractGZ prerequisite at plugin1/gzip_gunzip_pyfuncs.py:30-33 may impede the ordinary path."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "In both `DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py:163-175` and `DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py:163-175`, `gunzipAllFilesDCE` builds shell commands by string concatenation without quoting file paths and runs them via `os.system(gzcmd)`, then unconditionally deletes the user's original uncompressed file via `os.remove(fullfile)` on line 170 without checking if `7z` succeeded or if `fullfile + '.gz'` exists. If `C:\\Program Files\\7-Zip\\7z` is missing, if running on macOS/Linux, or if `fullfile` contains spaces, `os.system(gzcmd)` fails and `os.remove(fullfile)` permanently destroys the user's original exam files."
+    }
+   },
+   "settled_severity": "blocking"
+  },
+  {
+   "title": "Dependencies are installed on module import and cv2 uses the wrong distribution name",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line": 83,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Dependencies are installed on module import and cv2 uses the wrong distribution name",
+     "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+     "line_start": 83,
+     "line_end": 89,
+     "evidence": "nib = _importOptional('nibabel')\ncv2 = _importOptional('cv2', 'cv2')\nnrrd = _importOptional('pynrrd', 'nrrd')\nyattag = _importOptional('yattag')\nmatplotlib = _importOptional('matplotlib')\nimport matplotlib.pyplot as plt\nskimage = _importOptional('scikit-image', 'skimage')",
+     "explanation": "The helper calls pip when an import fails, so module discovery can change the shared environment before the user opens the extension. In particular cv2 is an import name, not the OpenCV distribution name, so a missing cv2 can cause module loading to fail; pyproject.toml instead declares opencv-python, which bundles Qt rather than the headless variant.",
+     "suggestion": "Move dependency setup to a user-confirmed module action; use an appropriate Slicer-compatible headless OpenCV distribution and check requirements before proceeding.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+      "line": 83
+     }
+    }
+   ],
+   "id": "D7",
+   "outcome": "real, blocking (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess.py:83-89 calls _importOptional at import time. 'cv2' is passed as the pip package name, which is wrong (opencv-python is the distribution), so the pip install fails and the module fails to load. pyproject.toml:8 lists opencv-python (non-headless), which bundles its own Qt libraries. The pip installs happen at module discovery without consent. This is a real environment concern; I rate it major."
+    },
+    "gpt": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DCE_TumorMapProcess/DCE_TumorMapProcess.py:58-64 calls `_pipEnsure(package)` on ImportError, and lines 83-89 perform those imports at module scope, including `cv2 = _importOptional('cv2', 'cv2')`. The direct fallback at lines 52-56 calls pip without an explicit confirmation. A missing cv2 can cause module loading to fail because cv2 is the import name, not the OpenCV distribution. pyproject.toml:8 declares `\"opencv-python\",`; I did not establish that this metadata is installed during normal extension operation. This duplicates D5."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "This is the same underlying issue as D5: `DCE_TumorMapProcess/DCE_TumorMapProcess.py:83-89` (and `DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py:54-58`) runs `pip_install` at top-level module import time during Slicer startup, uses `'cv2'` as the pip package name in `_importOptional('cv2', 'cv2')` (causing installation and module loading to fail when `cv2` is not already installed), and declares `opencv-python` (which bundles conflicting Qt libraries) instead of `opencv-python-headless` in `pyproject.toml:8`. Under the review policy, package installation at module import/startup and `opencv-python` (non-headless) / broken module loading are blocking issues."
+    }
+   },
+   "settled_severity": "blocking"
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "blocking",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "blocking",
+   "gpt": "concern"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "minor",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "concern",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "needs fixes",
+  "gemini": "needs fixes",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 7,
+  "single": 13,
+  "unverified": 0,
+  "total": 13,
+  "open_disputes": 0
+ }
+}

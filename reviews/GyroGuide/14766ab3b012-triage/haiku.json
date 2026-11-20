@@ -1,0 +1,136 @@
+{
+ "purpose": "GyroGuide is a scripted Slicer module (IGT category) that computes puncture-path depth and angles relative to three reference planes from Markups fiducials, and can send a transform to an external OpenIGTLink device. It is intended for surgical navigation research use by the authors' group and Slicer users.",
+ "summary": "The catalog entry is mechanically simple, and the code has no network listener, package installs, or obvious data exfiltration (the OpenIGTLink client connects only to a user-entered host). However, the repository has no license file, which blocks distribution, and the core calculation path uses Python 2 `xrange`, which raises NameError under Slicer's Python 3, so the default Calculate path is likely broken. Angles are also passed to numpy trig functions in radians after being computed in degrees. There are no tests and no clinical-use disclaimer. Recommend needs fixes.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "concern",
+   "rationale": "Inspected GyroGuide/GyroGuide.py in full. No network listener, no install at import, no credential handling. The Send path opens an outgoing OpenIGTLink client connection to a user-entered host (lines 427-433) and calls time.sleep on the GUI thread (lines 503, 507), which can freeze Slicer. Output values drive surgical guidance without any disclaimer, so wrong numbers are a patient-safety concern."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "No pip installs, no sys.path or global logging changes, no monkey-patching found in the inspected files. Module-level 'from __main__ import vtk, qt, ctk, slicer' (line 1) is legacy but not a global side effect."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMakeLists.txt lists GyroGuide.py correctly and build_dependencies is empty, which is consistent with the code. scm_revision is a branch name ('master'), which is not reproducible. Resources/Icons is present but not referenced by CMake. Testing/Python CMake registration is commented out."
+  },
+  "license": {
+   "rating": "blocking",
+   "rationale": "The file listing for the repository (root and GyroGuide/) contains no LICENSE or COPYING file, and no license header appears in GyroGuide.py or CMakeLists.txt. Distribution terms are missing, so the extension cannot be shown to be redistributable."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Lines 549, 577, and 601 use xrange, which does not exist in Python 3 (Slicer 5). Lines 473-497 feed angles computed in degrees (lines 647-651) into numpy.sin/cos as radians. Fewer than five markers causes IndexError at lines 611-617, and the code assumes a particular marker ordering. Errors are not reported to the user. Lines 405-415 create extra connector nodes on each loop iteration."
+  },
+  "utility": {
+   "rating": "concern",
+   "rationale": "README.md is 110 bytes and gives one sentence. Helptext in line 23 is the only documentation. No tests are active (Testing/Python/CMakeLists.txt line 2 is commented out, and no test class is in GyroGuide.py), despite WITH_GENERIC_TESTS on line 17 of GyroGuide/CMakeLists.txt. No sample data, no clinical disclaimer, and no validation of the geometry against a reference."
+  }
+ },
+ "findings": [
+  {
+   "category": "license",
+   "severity": "blocking",
+   "title": "No license file or license terms in the repository",
+   "file": "CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 21,
+   "evidence": "project(GyroGuide)\n\n#-----------------------------------------------------------------------------\nset(EXTENSION_HOMEPAGE \"https://www.slicer.org/slicerWiki/index.php/Documentation/Nightly/Extensions/GyroGuide\")",
+   "explanation": "The repository file listing (root and GyroGuide/) has no LICENSE/COPYING file and no license header in the module. Without explicit terms, users and the Extensions Index have no permission to redistribute the extension. Under the index policy, missing distribution terms block approval.",
+   "suggestion": "Add a LICENSE file (any permissive or equivalent open license) at the repository root and a license header in GyroGuide.py.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "blocking",
+   "title": "Python 2 xrange used in the default Markups calculation path (NameError on Slicer 5)",
+   "file": "GyroGuide/GyroGuide.py",
+   "line_start": 577,
+   "line_end": 583,
+   "evidence": "                  for j in xrange(n):\n\n                      coord = [0.0, 0.0, 0.0]\n\n                      self.fids[i].GetNthFiducialPosition(j, coord)",
+   "explanation": "Slicer 5 runs Python 3, where xrange is undefined. When the Markers/Target/Entry nodes are vtkMRMLMarkupsFiducialNode (the normal case, see the nodeTypes filter), the code reaches the loop using xrange and raises NameError. The Calculate button therefore fails before any result is shown.",
+   "suggestion": "Replace xrange with range (also at lines 549 and 601) and test the Calculate path in Slicer 5.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Angles computed in degrees are fed to numpy trig functions as radians",
+   "file": "GyroGuide/GyroGuide.py",
+   "line_start": 467,
+   "line_end": 479,
+   "evidence": "        theta = self.result.angleRed\n\n        omega = self.result.angleGreen\n\n        phi = self.result.angleBlue",
+   "explanation": "angleRed/Green/Blue are stored in degrees (arcsin * 180/pi). The transmission code then passes them to numpy.sin/numpy.cos, which expect radians. The rotation matrix sent to the OpenIGTLink device is therefore wrong, which could misdirect a navigation device during a procedure.",
+   "suggestion": "Convert the angles to radians (numpy.radians) before building the matrix, and add a unit test comparing the transform to the displayed angles.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Clinical guidance output with no disclaimer; blocking GUI sleeps",
+   "file": "GyroGuide/GyroGuide.py",
+   "line_start": 503,
+   "line_end": 509,
+   "evidence": "        time.sleep(1)\n\n        matrix.DeepCopy((e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,0,0,0,1))\n\n        time.sleep(1)",
+   "explanation": "The module reports puncture depth and angles and transmits them to a navigation device, but has no statement that it is research-only or not validated. The Send handler blocks the GUI thread with time.sleep(1) twice, so Slicer can freeze while sending, and a wrong transform could be used for navigation.",
+   "suggestion": "Add a clinical-use disclaimer in helpText and the README, remove the sleeps (or use a Qt timer), and check the transform before sending.",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Too few markers raises an IndexError with no user message",
+   "file": "GyroGuide/GyroGuide.py",
+   "line_start": 611,
+   "line_end": 617,
+   "evidence": "        vector1 = self.position[0][0] - self.position[0][1] #a vector in the plane red\n\n        vector2 = self.position[0][0] - self.position[0][2] #a vector in the plane red",
+   "explanation": "The calculation indexes fiducials 0 through 4 of the marker list, and target/entry index 0. A list with fewer than five markers raises IndexError inside the Calculate handler, and no message explains the requirement.",
+   "suggestion": "Validate the number of markers (5) and target/entry points (1 each) and show a message box.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Connector and transform nodes accumulate on each Send",
+   "file": "GyroGuide/GyroGuide.py",
+   "line_start": 403,
+   "line_end": 415,
+   "evidence": "                  if slicer.mrmlScene.GetNthNodeByClass(i, 'vtkMRMLIGTLConnectorNode').GetName() == 'Send-Data':\n\n                      connectorNode = slicer.mrmlScene.GetNthNodeByClass(i, 'vtkMRMLIGTLConnectorNode')\n\n                  else:\n\n                      connectorNode = slicer.vtkMRMLIGTLConnectorNode()",
+   "explanation": "The connector loop creates a new vtkMRMLIGTLConnectorNode for every existing connector that is not named 'Send-Data', so repeated Send clicks add nodes to the scene. Result transform nodes are also re-created each time.",
+   "suggestion": "Look up or create a single connector node once, and reuse or update the existing transform node.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "No active tests and minimal documentation",
+   "file": "GyroGuide/Testing/Python/CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 2,
+   "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+   "explanation": "WITH_GENERIC_TESTS is set, but the module has no test class and the Testing registration is commented out. The README is one sentence, and no sample data or tutorial is included, so maintainers and users cannot verify the geometry.",
+   "suggestion": "Add a unit test with synthetic fiducials and expected angles and depth, and expand the README with usage and a disclaimer.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Legacy module structure and unpinned source revision",
+   "file": "GyroGuide/GyroGuide.py",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "from __main__ import vtk, qt, ctk, slicer",
+   "explanation": "The module uses plain classes with 'from __main__ import' rather than ScriptedLoadableModule, which is fragile on current Slicer. The catalog pins scm_revision to the branch 'master', so the built code can change without a catalog update.",
+   "suggestion": "Port to ScriptedLoadableModule and pin scm_revision to a specific commit hash.",
+   "confidence": "medium"
+  }
+ ],
+ "not_checked": [
+  "The source repository at https://github.com/lpfang/GyroGuide.git was not fetched; I reviewed only the files in the catalog snapshot, so the exact commit 14766ab3 was not verified.",
+  "No LICENSE file was confirmed in the upstream repository beyond the snapshot listing.",
+  "Could not run the module or Slicer; the xrange and angle-unit findings are from reading the code.",
+  "Icon and screenshot contents were not inspected (binary)."
+ ],
+ "questions_for_author": []
+}

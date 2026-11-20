@@ -1,0 +1,34 @@
+{
+ "purpose": "DiffusionQC (module name GradQC) quality-checks diffusion-weighted MRI by computing KL-divergence-based distances between consecutive slices for each gradient, flagging gradients as pass/fail, and offering a Slicer GUI plus a CLI to review, keep/discard gradients and write a cleaned DWI. It targets diffusion MRI researchers using Slicer/SlicerDMRI.",
+ "summary": "No malicious behavior found: no network access, telemetry, downloads or obfuscation; the license (Slicer-style BSD) permits distribution and the catalog entry matches the source (EXTENSION_DEPENDS SlicerDMRI). Main problems are environment and correctness: the superbuild pip-installs unpinned plumbum/nibabel/pynrrd into the extension's site-packages (transitively pulling numpy that can shadow Slicer's numpy), nibabel's removed `get_data()` is still used, and pressing \"Save\" overwrites the KLdiv results file with a pickled `None`, breaking later GUI runs. Also `exit(0)` inside a Qt slot and a `nextReview` loop that can run off the end. Needs fixes before offering to users.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "Searched for network/telemetry/download/eval/pickle usage: none found; all processing is local (gradient_process.py, nhdr_write.py, saveResults.py). Concerns are local side effects: `exit(0)` inside a Qt signal handler (slicerUserInteraction.py:254) and automatic writing of .nhdr/_mask/_modified files into the user's input directory (GradQC.py:288-293, saveResults.py)."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "SuperBuild/External_python-diffusionqclib.cmake:18 runs `pip install plumbum nibabel pynrrd --prefix ... --upgrade` with no pins, and CMakeLists.txt:40-44 installs that prefix into the extension's site-packages, so transitive numpy can shadow Slicer's bundled numpy for every session. Also `np.set_printoptions(...)` executes at import time (bval_bvec_io.py:6, nhdr_write.py:14), changing global numpy print options in the Slicer process."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "CMake installs GradQC.py, gradqclib/*, the CLI .py/.xml and the diffusionqclib package; EXTENSION_DEPENDS \"SlicerDMRI\" matches build_dependencies. Minor defects: diffusionQC/CMakeLists.txt:18-20 lists `${CLICODE}.py` twice instead of the .xml, and Test/run_test.py:37 requires `git lfs pull` (network) and never exits nonzero on failure."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is a Slicer-style BSD contribution/download agreement permitting use, modification and distribution with attribution; Test/Baseline/SiemensTrio-Syngo2004A-1.nrrd.license.txt states Apache 2.0 (BRAINSTools). Research-only/no-FDA-approval terms are stated in LICENSE Part B.4."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "Read GradQC.py, gradqclib/slicerUserInteraction.py, diffusionqclib/*.py: pressing Save passes KLdiv=None into saveResults, overwriting `_KLdiv.npy` with a pickled None and breaking the next GUI run; `img.get_data()` (removed in nibabel>=5) is used for NIfTI masks; `nextReview` can index past the end; `returnNode=True` is deprecated/removed in Slicer 5."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md is thorough (usage, automatic/visual workflows, NIfTI support, troubleshooting), a sample DWI and baseline results exist, and the algorithm is documented with a DOI. Tests are ineffective (run_test.py never fails the ctest) and the README lacks an explicit clinical-use disclaimer (only the LICENSE has one)."
+  }
+ },
+ "findings": [],
+ "not_checked": [],
+ "questions_for_author": []
+}

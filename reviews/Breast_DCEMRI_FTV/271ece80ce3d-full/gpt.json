@@ -1,0 +1,137 @@
+{
+ "purpose": "This extension loads breast DCE-MRI exams, selects contrast phases, and computes functional tumor volume within a user-defined region. It is intended for breast imaging researchers and produces segmentation overlays and reports.",
+ "summary": "The examined source has blocking data-loss and command-injection paths, as well as unsolicited dependency installation at import. The FTV calculation and workspace handling also have non-blocking robustness problems. The README identifies the Slicer license, and CMake lists the plugin files, but the catalog’s moving revision and the supplied commit could not be independently resolved. 🔴 Do not merge yet: fix the data-loss and injection paths and validate the selected revision.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "I traced compressed-image handling in both gzip helpers, report cleanup, and report generation. These paths can delete original or pre-existing files, overwrite unconfirmed sidecars, and pass user-controlled paths to a shell."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "Both module entry points install missing dependencies during import; module 2 attempts to install the import name cv2, while pyproject.toml specifies Qt-bundling opencv-python. These changes affect the shared Slicer environment."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "Both CMake module lists and the supplied catalog metadata were inspected; the declared extension dependencies match the empty catalog dependency list. The source repository and moving master revision could not be resolved independently, and no build was run."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "README.md states that users must abide by the included Slicer license, and license.txt contains the Slicer contribution and software license agreement; copyright.txt supplies the authors' notice. I did not verify third-party binary assets or external package licenses."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "I inspected ROI mask generation, workspace persistence, and module cleanup. ROI bounds are not clipped and the fixed workspace file may fail in a read-only installation or mix concurrent sessions."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md explains the two-module workflow and cites literature, and the report explicitly says NOT FOR DIAGNOSIS. The linked step-by-step PDF could not be inspected and the module test entry point refers to a nonexistent method."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Report generation deletes any existing gunzipped directory",
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/gzip_gunzip_pyfuncs.py",
+   "line_start": 108,
+   "line_end": 113,
+   "evidence": "def deleteGunzipped(exampath):\n    #Edit 7/16/2020: If there is a gunzipped folder inside the exampath, delete it\n    gunzip_path = os.path.join(exampath,\"gunzipped\")\n\n    if(os.path.isdir(gunzip_path) == 1):\n        shutil.rmtree(gunzip_path)",
+   "explanation": "Module 2 calls this unconditionally after generating a report, including for uncompressed exams. Any pre-existing directory named gunzipped under the selected exam, including user-owned data never created by this extension, is recursively deleted without confirmation.",
+   "suggestion": "Use a uniquely created temporary directory and only delete directories owned by the current run; never recursively delete a pre-existing exam folder.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Mixed compressed series deletes original files without checking compression",
+   "file": "DCE_IDandPhaseSelect/Breast_DCEMRI_FTV_plugins1/gzip_gunzip_pyfuncs.py",
+   "line_start": 165,
+   "line_end": 170,
+   "evidence": "            for f_i in files:\n                if('.gz' not in f_i):\n                    fullfile = os.path.join(dcegzipped_paths[0],f_i)\n                    gzcmd = gzcmd_base + fullfile + '.gz' + ' ' + fullfile\n                    os.system(gzcmd) #create a gzipped copy of the file\n                    os.remove(fullfile) #delete the original, non-gzipped copy of the file",
+   "explanation": "During phase selection for a mixed compressed/uncompressed DCE folder, this deletes each original uncompressed file even if 7-Zip fails, for example because of an invalid executable or a path containing spaces. The input exam can therefore lose its only copy of DICOM images or other files.",
+   "suggestion": "Never modify source exams; decompress or copy into a private temporary directory, and verify subprocess success before using outputs.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Report filename is interpolated into a shell command",
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line_start": 788,
+   "line_end": 790,
+   "evidence": "    #save as dicom too\n    command = \"img2dcm\" + \" \" + savenamejpeg + \" \" + savenamedcm #use img2dcm to create dicom report from jpeg\n    os.system(command)",
+   "explanation": "The JPEG and DICOM paths are derived from the path chosen in the report save dialog. Shell metacharacters in a chosen or externally supplied path can execute arbitrary commands, and spaces also break normal paths. The gzip helpers similarly concatenate exam paths into shell commands.",
+   "suggestion": "Invoke the executable with subprocess and an argument list without a shell, and handle failures explicitly.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Report sidecars overwrite existing files without confirmation",
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_plots.py",
+   "line_start": 641,
+   "line_end": 644,
+   "evidence": "    txt_file = open(savenametxt, \"w+\")\n\n    txt_file.write( \"I-SPY ID: \" + idstr + \"\\r\\n\")\n    txt_file.write( \"Date: \" + studydate[4:6]+\"/\"+studydate[6:]+\"/\"+studydate[0:4]+\" \"+studytime[0:2]+\":\"+studytime[2:4]+\":\"+studytime[4:] + \"\\r\\n\")",
+   "explanation": "The report dialog asks for a PDF path, but the code derives a same-stem .txt path and opens it in truncating mode without checking whether it already exists. It also writes a same-stem JPEG; choosing a new PDF name can silently destroy unrelated existing sidecar files.",
+   "suggestion": "Check all output paths before writing and ask for explicit overwrite confirmation, or create a new output directory.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "major",
+   "title": "Dependencies are installed on module import and cv2 uses the wrong distribution name",
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line_start": 83,
+   "line_end": 89,
+   "evidence": "nib = _importOptional('nibabel')\ncv2 = _importOptional('cv2', 'cv2')\nnrrd = _importOptional('pynrrd', 'nrrd')\nyattag = _importOptional('yattag')\nmatplotlib = _importOptional('matplotlib')\nimport matplotlib.pyplot as plt\nskimage = _importOptional('scikit-image', 'skimage')",
+   "explanation": "The helper calls pip when an import fails, so module discovery can change the shared environment before the user opens the extension. In particular cv2 is an import name, not the OpenCV distribution name, so a missing cv2 can cause module loading to fail; pyproject.toml instead declares opencv-python, which bundles Qt rather than the headless variant.",
+   "suggestion": "Move dependency setup to a user-confirmed module action; use an appropriate Slicer-compatible headless OpenCV distribution and check requirements before proceeding.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "ROI coordinates outside image bounds are not clipped",
+   "file": "DCE_TumorMapProcess/Breast_DCEMRI_FTV_plugins2/ftv_map_gen.py",
+   "line_start": 89,
+   "line_end": 97,
+   "evidence": "      zs = int( round( float(center[2]) - float(radius[2]) ) )\n      zf = int( round( float(center[2]) + float(radius[2]) ) )\n\n      #because it's a numpy array, it must have dimension order z,y,x in order to match orientations with input image\n      #4/27/21: Add the +1 to each dimension to compensate for\n      #Python array indexing rules\n      voi_mask[xs:xf+1,ys:yf+1,zs:zf+1] = maskval\n      #voi_mask[ys:yf+1,xs:xf+1,zs:zf+1] = maskval\n      return xs,xf,ys,yf,zs,zf,voi_mask",
+   "explanation": "When the ROI crosses an image boundary, negative NumPy slice bounds wrap from the far edge and may produce an empty or incorrect mask; excessive positive limits are also used later by explicit colorization loops. FTV computation can fail or omit portions of the selected lesion.",
+   "suggestion": "Clip all ROI and omit bounds to image dimensions and reject empty intersections before calculating thresholds or coloring voxels.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Workspace is stored in a shared fixed file next to installed code",
+   "file": "DCE_IDandPhaseSelect/DCE_IDandPhaseSelect.py",
+   "line_start": 143,
+   "line_end": 150,
+   "evidence": "  #Save workspace for original exam selected by user\n  if(orig == 1):\n    #7/9/2021: Make this path part independent of computer & directory\n    #code is stored in.\n    extension_path = os.path.join( os.path.dirname( __file__ ), '..' )\n    wkspc_savepath = os.path.join(extension_path,'current_exam_workspace.pickle')\n    with open(wkspc_savepath,'wb') as f:\n      pickle.dump([tempres, all_folders_info, dce_folders, dce_ind, fsort, studydate, nslice, earlyPostContrastNum, latePostContrastNum, earlydiffmm, earlydiffss, latediffmm, latediffss],f)",
+   "explanation": "An installation directory may be read-only, preventing module 1 from completing. Concurrent sessions also overwrite the same file, while module 2 unpickles it, potentially associating one session's exam metadata with another session's images.",
+   "suggestion": "Keep the state in the MRML scene or a uniquely scoped, access-controlled temporary location, and avoid pickle for cross-session data.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Registered module test calls an undefined test method",
+   "file": "DCE_TumorMapProcess/DCE_TumorMapProcess.py",
+   "line_start": 2619,
+   "line_end": 2625,
+   "evidence": "  def runTest(self):\n    \"\"\"Run as few or as many tests as needed here.\n    \"\"\"\n    self.setUp()\n    self.test_roiAndOmitsTest1()\n\n  def test_DCE_TumorMapProcess1(self):",
+   "explanation": "The registered module test calls test_roiAndOmitsTest1, but the defined test shown immediately below has a different name. Consequently the self-test cannot exercise the workflow as intended.",
+   "suggestion": "Replace the template test with working automated tests for phase selection, ROI boundaries, and report generation.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No code was executed; Slicer loading, packaging, and platform behavior were not tested.",
+  "Network access was unavailable: the repository URL, master branch target, claimed commit 271ece80ce3db9cc79596ee5436dd5d44ed1a50c, and any prior review baseline were not independently verified.",
+  "The large linked tutorial PDF and binary image assets were not inspected; third-party asset provenance was not established.",
+  "The full image processing algorithm and every manufacturer-specific path were not exhaustively audited; external packages and their transitive licenses were not inspected.",
+  "No submission checklist or CI results were provided."
+ ],
+ "questions_for_author": []
+}

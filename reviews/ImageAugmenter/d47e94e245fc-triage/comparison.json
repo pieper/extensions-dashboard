@@ -1,0 +1,1224 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "PyTorch is installed from PyPI via `pip_install(\"monai[itk]\")` instead of the PyTorch extension",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "ImageAugmenter/ImageAugmenter.py",
+   "line": 133,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "PyTorch is installed from PyPI via `pip_install(\"monai[itk]\")` instead of the PyTorch extension",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 133,
+     "line_end": 134,
+     "evidence": "            slicer.util.pip_install(\"munch\")\n            slicer.util.pip_install(\"monai[itk]\")",
+     "explanation": "MONAI declares torch as a hard dependency, so this pip call installs a PyPI torch build into Slicer's shared Python environment. The index policy explicitly forbids installing PyTorch other than through the Slicer PyTorch extension (PyTorchUtils), including 'packages that pull torch from PyPI as a dependency'. The result is a torch build that may be incompatible with Slicer's Python/VTK and that is invisible to the PyTorch extension's version management, affecting every user of that Slicer installation, not just this module. The [itk] extra additionally pulls SimpleITK from PyPI, which Slicer already bundles.",
+     "suggestion": "Depend on the PyTorch extension (add 'PyTorch' to EXTENSION_DEPENDS and to the catalog entry's build_dependencies) and install torch through PyTorchUtils (e.g. pytorchLogic.installTorch(askConfirmation=True)). Install MONAI without the [itk] extra and without letting pip resolve torch, e.g. pip_install('monai', ...) after torch is present, or pin only MONAI itself.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 133
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "major",
+     "title": "Missing PyTorchUtils dependency declaration and direct pip installation of monai",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 133,
+     "line_end": 134,
+     "evidence": "slicer.util.pip_install(\"munch\")\nslicer.util.pip_install(\"monai[itk]\")",
+     "explanation": "The extension uses PyTorch and MONAI (which depends on PyTorch), but does not declare PyTorchUtils in EXTENSION_DEPENDS / build_dependencies or ensure PyTorch is installed through Slicer's PyTorch extension. Installing MONAI via pip can pull in PyTorch from PyPI rather than Slicer's bundled PyTorch environment.",
+     "suggestion": "Declare PyTorchUtils in EXTENSION_DEPENDS and build_dependencies, and ensure dependencies are checked and installed properly via Slicer's extension mechanisms.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 133
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Augmented files are written in a detached thread; write errors are swallowed and completion is reported early",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+   "line": 116,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Augmented files are written in a detached thread; write errors are swallowed and completion is reported early",
+     "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+     "line_start": 116,
+     "line_end": 117,
+     "evidence": "    saveThread = threading.Thread(target=sitk.WriteImage, args=(img, f\"{path}/{filename}{extension}\"))\n    saveThread.start()",
+     "explanation": "save() starts a non-daemon thread per output file and never joins it. Any failure (disk full, permission denied, invalid path) is raised inside the thread and never reaches the caller, so process() still prints 'Processing completed in ... seconds' (ImageAugmenter.py:334) while files are missing or truncated. With many transforms the number of concurrent writer threads is unbounded, and if Slicer is closed right after the run the writes may be cut off. The user is told the augmented dataset was produced when it may not have been.",
+     "suggestion": "Write synchronously (or use a bounded worker with join and error propagation), collect exceptions and report them to the user, and only report completion after all writes have finished.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+      "line": 116
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Errors in image writing are swallowed; 'completed' is reported before files exist",
+     "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+     "line_start": 116,
+     "line_end": 117,
+     "evidence": "saveThread = threading.Thread(target=sitk.WriteImage, args=(img, f\"{path}/{filename}{extension}\"))\n    saveThread.start()",
+     "explanation": "save() starts sitk.WriteImage in a fire-and-forget thread and never joins it or checks the result. A disk-full, permission, or path error is lost, and process() then reports 'Processing completed' while output files may be missing or truncated. This is a silent data-loss risk for a dataset-generation tool.",
+     "suggestion": "Write synchronously, or collect threads and join them, and surface exceptions to the user before reporting completion.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+      "line": 116
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Case-name extraction uses '/' only, which breaks on Windows paths",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+   "line": 74,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Case-name extraction splits on '/' only, breaking on Windows paths",
+     "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+     "line_start": 74,
+     "line_end": 74,
+     "evidence": "    return fullImgPath.split(\"/\")[-2] if (filesStructure == HIERARCHICAL) else fullImgPath.split(\"/\")[-1]",
+     "explanation": "On Windows, os.walk returns paths with backslashes, so split('/') yields the whole path. In hierarchical mode the case name becomes the full path, and makeDir (line 47) then builds an invalid output directory name; in flat mode the 'case name' includes the directory prefix. Slicer is distributed for Windows, so this affects a large share of users.",
+     "suggestion": "Use os.path.basename / os.path.dirname (or pathlib) instead of splitting on '/'.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+      "line": 74
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Case-name extraction uses '/' only, which breaks on Windows paths",
+     "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+     "line_start": 74,
+     "line_end": 74,
+     "evidence": "return fullImgPath.split(\"/\")[-2] if (filesStructure == HIERARCHICAL) else fullImgPath.split(\"/\")[-1]",
+     "explanation": "os.walk and os.path.join return backslash-separated paths on Windows. split(\"/\") then returns the whole path, so caseName contains drive letters and separators. makeDir builds an invalid directory name (for example containing a colon), and processing fails for every case on Windows. Note: this is an inference from the code; it was not run.",
+     "suggestion": "Use os.path.basename and os.path.basename(os.path.dirname(...)) for the case name.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+      "line": 74
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Images and masks are paired by list index from independent directory walks",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterValidator.py",
+   "line": 26,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Images and masks are paired by list index from independent directory walks",
+     "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterValidator.py",
+     "line_start": 26,
+     "line_end": 27,
+     "evidence": "    if len(masks) > 0 and (len(masks) != len(imgs)):\n        return ValueError(f\"Images and masks must have same length. Found:\\n{len(imgs)} images\\n{len(masks)} masks.\\nMake sure you have specified the correct prefixes to avoid inconsistencies.\")",
+     "explanation": "collectImagesAndMasksList (ImageAugmenterUtils.py:21-33) builds imgs and masks as two separate lists in os.walk order, and the only validation is that the counts match. If a folder contains images and masks whose sort order differs (e.g. 'case1.nrrd'/'case1_mask.nrrd' vs 'case1_mask.nrrd'/'case1.nrrd', or extra files matching the mask pattern), the counts still match but image i is augmented with mask j. The augmented mask then does not correspond to the augmented image, silently producing mislabelled training data.",
+     "suggestion": "Pair each image with its mask explicitly (derive the mask path from the image path, or match by case name) and fail loudly when a pair cannot be formed.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterValidator.py",
+      "line": 26
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "No PyTorch dependency declared in EXTENSION_DEPENDS or build_dependencies",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 13,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "No PyTorch dependency declared in EXTENSION_DEPENDS or build_dependencies",
+     "file": "CMakeLists.txt",
+     "line_start": 13,
+     "line_end": 13,
+     "evidence": "set(EXTENSION_DEPENDS \"NA\") # Specified as a list or \"NA\" if no dependencies",
+     "explanation": "The module requires torch and monai at runtime (ImageAugmenter.py:36, 91), but the extension declares no dependency and the catalog entry has \"build_dependencies\": []. Users therefore get no PyTorch extension installed automatically, which is what pushes the author into the forbidden pip path, and the index cannot express the intended dependency.",
+     "suggestion": "Set EXTENSION_DEPENDS to include PyTorch and add the matching build_dependencies entry in the catalog entry, then install torch via PyTorchUtils.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 13
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "torch is required but not declared as a PyTorch extension dependency",
+     "file": "CMakeLists.txt",
+     "line_start": 13,
+     "line_end": 13,
+     "evidence": "set(EXTENSION_DEPENDS \"NA\") # Specified as a list or \"NA\" if no dependencies",
+     "explanation": "The module requires torch (checkDependencies, line 36) and needs it at setup, but the catalog entry has no build_dependencies and CMake sets EXTENSION_DEPENDS to NA. Users get no PyTorch extension and no guidance, and the install button never installs torch. The project's policy expects torch to come from the PyTorchUtils/PyTorch extension.",
+     "suggestion": "Declare PyTorch (PyTorchUtils) as a build and runtime dependency, and use the PyTorch extension's install logic rather than relying on a pre-existing torch.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 13
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Unconditional `import torch` in setup() makes the module unloadable before dependencies are installed",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "ImageAugmenter/ImageAugmenter.py",
+   "line": 91,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Unconditional `import torch` in setup() makes the module unloadable before dependencies are installed",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 91,
+     "line_end": 93,
+     "evidence": "        import torch\n\n        if torch.cuda.is_available():",
+     "explanation": "checkDependencies() (line 55) only toggles button visibility when torch/monai are missing; setup() then imports torch unconditionally at line 91. On a clean Slicer installation without torch, opening the module raises ImportError inside setup(), so the module panel never appears and the 'Install requirements' button that was just made visible can never be clicked. The advertised first-run installation path is therefore unreachable.",
+     "suggestion": "Guard the torch import (e.g. only import and enumerate CUDA devices when find_spec('torch') is not None) and return early after showing the install button.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 91
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Widget setup crashes when torch is not installed",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 91,
+     "line_end": 93,
+     "evidence": "import torch\n\n        if torch.cuda.is_available():",
+     "explanation": "setup() calls checkDependencies() and then imports torch unconditionally, outside any guard. If torch is missing, the import raises, so setup aborts after the UI is built and the install button is shown. The module is unusable until torch is present, which defeats the install-requirements flow shown by checkDependencies.",
+     "suggestion": "Guard the torch import with find_spec, or move GPU enumeration into a try block that tolerates a missing torch.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 91
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "pip install of monai[itk] can upgrade/downgrade Slicer-bundled SimpleITK and numpy",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ImageAugmenter/ImageAugmenter.py",
+   "line": 134,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "pip install of monai[itk] can upgrade/downgrade Slicer-bundled SimpleITK and numpy",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 134,
+     "line_end": 134,
+     "evidence": "            slicer.util.pip_install(\"monai[itk]\")",
+     "explanation": "The 'itk' extra installs SimpleITK from PyPI, and MONAI's own requirements pull numpy/scipy. pip resolves these against whatever versions are already present, so a user clicking 'Install requirements' can silently replace the SimpleITK/numpy versions Slicer ships, breaking other modules and Slicer core code that rely on the bundled builds. The module itself imports SimpleITK at top level (ImageAugmenter.py:10), so it does not need the extra at all.",
+     "suggestion": "Drop the [itk] extra and install only MONAI (and munch), letting Slicer's bundled SimpleITK/numpy satisfy the requirements; verify the resolved versions afterwards and report failures to the user.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 134
+     }
+    }
+   ],
+   "id": "D7"
+  },
+  {
+   "title": "Bare except in dataset loading silently drops unreadable images",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterDataset.py",
+   "line": 38,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Bare except in dataset loading silently drops unreadable images",
+     "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterDataset.py",
+     "line_start": 38,
+     "line_end": 39,
+     "evidence": "        except:\n            return None",
+     "explanation": "If sitk.ReadImage fails for a file (corrupt file, unsupported format, permission problem), load() returns None and __getitem__ simply skips all transforms for that case, so nothing is written for it and no error reaches the user. The run reports success while silently omitting cases from the augmented dataset.",
+     "suggestion": "Catch specific exceptions, log the failing path, and surface the problem to the user (or abort the run).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterDataset.py",
+      "line": 38
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Unreadable images are silently skipped",
+     "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterDataset.py",
+     "line_start": 30,
+     "line_end": 39,
+     "evidence": "except:\n            return None",
+     "explanation": "ImageAugmenterDataset.load has a bare except that returns None. A corrupt or unreadable file is then dropped with no message, so the user cannot tell that some cases were not augmented, and downstream code may index mismatched image and mask lists.",
+     "suggestion": "Catch specific exceptions, log the path, and report skipped files to the user.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterDataset.py",
+      "line": 38
+     }
+    }
+   ]
+  },
+  {
+   "title": "Cancelling the dependency-install dialog raises an exception",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ImageAugmenter/ImageAugmenter.py",
+   "line": 126,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Cancelling the dependency-install dialog raises an exception",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 126,
+     "line_end": 127,
+     "evidence": "        if not slicer.util.confirmOkCancelDisplay(\"The dependencies needed for the extension will be installed, the operation may take a few minutes. A Slicer restart will be necessary.\",\"Press OK to install and restart.\"):\n            raise ValueError(\"Missing dependencies.\")",
+     "explanation": "Declining the confirmation dialog raises ValueError, which propagates out of the slot and is shown to the user as an error, even though the user simply chose not to install. This is confusing rather than harmful.",
+     "suggestion": "Return quietly when the user cancels.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 126
+     }
+    }
+   ]
+  },
+  {
+   "title": "Existing output files are overwritten without warning",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+   "line": 116,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Existing output files are overwritten without warning",
+     "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+     "line_start": 116,
+     "line_end": 116,
+     "evidence": "args=(img, f\"{path}/{filename}{extension}\"))",
+     "explanation": "Output paths are built from the input names and written directly with no existence check. Re-running into the same output folder silently replaces earlier augmented files.",
+     "suggestion": "Warn before overwriting, or use unique names per run.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+      "line": 116
+     }
+    }
+   ]
+  },
+  {
+   "title": "Long augmentation runs execute on the GUI thread without progress repainting",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "ImageAugmenter/ImageAugmenter.py",
+   "line": 296,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Long augmentation runs execute on the GUI thread without progress repainting",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 296,
+     "line_end": 297,
+     "evidence": "        for dirIdx in range(len(dataset)):\n            transformedImages, transformedMasks = dataset[dirIdx]",
+     "explanation": "process() and preview() run the whole dataset loop in the main thread inside tryWithErrorDisplay(waitCursor=True) and only call progressBar.setValue without processing events, so Slicer's UI is frozen for the duration of a large dataset and the progress bar does not visibly update. Users cannot cancel a long run.",
+     "suggestion": "Move the loop to a worker thread (e.g. slicer.util.ProgressDialog / qt.QTimer-driven chunking) and update the progress bar from the main thread.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 296
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Long processing runs on the GUI thread without event processing",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 296,
+     "line_end": 297,
+     "evidence": "for dirIdx in range(len(dataset)):\n            transformedImages, transformedMasks = dataset[dirIdx]",
+     "explanation": "process() and preview() loop over all cases on the main Qt thread, and progressBar updates are not followed by processEvents. The Slicer window freezes for large datasets and cannot be cancelled.",
+     "suggestion": "Run work in a thread or call slicer.app.processEvents() per case, and offer cancellation.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 296
+     }
+    }
+   ]
+  },
+  {
+   "title": "No automated tests are actually registered or implemented",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "ImageAugmenter/Testing/Python/CMakeLists.txt",
+   "line": 2,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No automated tests are actually registered or implemented",
+     "file": "ImageAugmenter/Testing/Python/CMakeLists.txt",
+     "line_start": 2,
+     "line_end": 2,
+     "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+     "explanation": "The only test registration is commented out, and although ImageAugmenter/CMakeLists.txt:39 registers ImageAugmenter.py as a unittest script, that file contains no unittest.TestCase subclass, so the ctest collects nothing. Regressions such as the mask-pairing and thread-write issues above would go unnoticed.",
+     "suggestion": "Add a small module test (e.g. applying one transform to a synthetic volume and checking the output file exists) and register it.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/Testing/Python/CMakeLists.txt",
+      "line": 2
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "No active automated tests",
+     "file": "ImageAugmenter/Testing/Python/CMakeLists.txt",
+     "line_start": 1,
+     "line_end": 2,
+     "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+     "explanation": "The only test registration is commented out, and the Testing folder has no active tests. Behavior such as naming, parameter mapping, and file output is unchecked by CI.",
+     "suggestion": "Add unit tests for the path and case-name helpers and for the transform mapping.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/Testing/Python/CMakeLists.txt",
+      "line": 2
+     }
+    }
+   ]
+  },
+  {
+   "title": "Observers are never removed and the Data Probe is hidden globally without being restored",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ImageAugmenter/ImageAugmenter.py",
+   "line": 98,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Observers are never removed and the Data Probe is hidden globally without being restored",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 98,
+     "line_end": 100,
+     "evidence": "    # def cleanup(self) -> None:\n    #     \"\"\"Called when the application closes and the module widget is destroyed.\"\"\"\n    #     self.removeObservers()",
+     "explanation": "setup() registers two scene observers (lines 67-68) and calls setDataProbeVisible(False) (line 57), but cleanup() is commented out, so observers are never removed and the Data Probe stays hidden for the rest of the session even after the user leaves the module. This is a persistent change to shared Slicer UI state made on behalf of a module the user may only have opened once.",
+     "suggestion": "Restore cleanup() with self.removeObservers() and restore the previous Data Probe visibility when the module is left.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 98
+     }
+    }
+   ]
+  },
+  {
+   "title": "ValueError object passed to QLabel.setText",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ImageAugmenter/ImageAugmenter.py",
+   "line": 289,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "ValueError object passed to QLabel.setText",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 289,
+     "line_end": 290,
+     "evidence": "            infoLabel.setText(validationResult)\n            raise validationResult",
+     "explanation": "validateCollectedImagesAndMasks returns a ValueError instance rather than raising it, and the caller passes that object directly to setText, which expects a string. Depending on the PythonQt binding this raises a TypeError that masks the intended validation message.",
+     "suggestion": "Use str(validationResult) for the label, or have the validator raise and let the caller catch it.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 289
+     }
+    }
+   ]
+  },
+  {
+   "title": "getParameterNode() references an undefined class",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ImageAugmenter/ImageAugmenter.py",
+   "line": 245,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "getParameterNode() references an undefined class",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 245,
+     "line_end": 246,
+     "evidence": "    def getParameterNode(self):\n        return ImageAugmenterParameterNode(super().getParameterNode())",
+     "explanation": "ImageAugmenterParameterNode is not defined anywhere in the repository (searched the whole tree), so any call to getParameterNode() raises NameError. It is currently dead code because the parameter-node wiring is commented out, but it is a latent crash and shows that module state is not stored in a parameter node as Slicer conventions expect.",
+     "suggestion": "Either implement ImageAugmenterParameterNode and use it for state, or remove the method.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 245
+     }
+    }
+   ]
+  },
+  {
+   "title": "Multi-megabyte screenshots committed to the repository",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "docs/tutorial.md",
+   "line": 74,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Multi-megabyte screenshots committed to the repository",
+     "file": "docs/tutorial.md",
+     "line_start": 74,
+     "line_end": 74,
+     "evidence": "![filled](https://raw.githubusercontent.com/ciroraggio/SlicerImageAugmenter/main/assets/SlicerImageAugmenterScreen.png)",
+     "explanation": "The tutorial and the CMake EXTENSION_SCREENSHOTURLS reference assets/SlicerImageAugmenterScreen.png and assets/SlicerImageAugmenterSelectPreviewSamples.png, which the scan reports as ~8 MB and ~7 MB. They are documentation images rather than code, so this is not a distribution problem, but they bloat the checkout and slow the docs page.",
+     "suggestion": "Downscale or convert the screenshots to compressed PNG/JPEG.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "docs/tutorial.md",
+      "line": 74
+     }
+    }
+   ]
+  },
+  {
+   "title": "Sample data is downloaded from a GitHub release without stated license terms",
+   "category": "license",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "ImageAugmenter/ImageAugmenterLib/UI/ImageAugmenterUIUtils.py",
+   "line": 14,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Sample data is downloaded from a GitHub release without stated license terms",
+     "file": "ImageAugmenter/ImageAugmenterLib/UI/ImageAugmenterUIUtils.py",
+     "line_start": 14,
+     "line_end": 14,
+     "evidence": "        <li><a href=https://github.com/ciroraggio/SlicerImageAugmenter/releases/download/v1.0.1/PDDCA_sample_data.zip>Click here</a> to download sample data!</li>",
+     "explanation": "The PDDCA sample data is not bundled in the repository (good), but the help text and tutorial do not state the terms under which that dataset may be used or redistributed. Users should know the provenance and any restrictions before using it.",
+     "suggestion": "State the source and license/usage terms of the PDDCA sample data next to the download link.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/UI/ImageAugmenterUIUtils.py",
+      "line": 14
+     }
+    }
+   ]
+  },
+  {
+   "title": "scm_revision points to a moving branch",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "ImageAugmenter.json",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "scm_revision points to a moving branch",
+     "file": "ImageAugmenter.json",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "\"scm_revision\": \"main\",",
+     "explanation": "The catalog entry pins scm_revision to \"main\", so the built code can change without a catalog update. The exact commit reviewed here is not fixed by the entry.",
+     "suggestion": "Pin to a release tag or commit hash.",
+     "confidence": "high",
+     "verification": {
+      "status": "file not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "PyTorch is installed from PyPI via `pip_install(\"monai[itk]\")` instead of the PyTorch extension",
+   "category": "environment",
+   "severity": "blocking",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite"
+   ],
+   "severities": [
+    "blocking",
+    "major"
+   ],
+   "file": "ImageAugmenter/ImageAugmenter.py",
+   "line": 133,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "blocking",
+     "title": "PyTorch is installed from PyPI via `pip_install(\"monai[itk]\")` instead of the PyTorch extension",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 133,
+     "line_end": 134,
+     "evidence": "            slicer.util.pip_install(\"munch\")\n            slicer.util.pip_install(\"monai[itk]\")",
+     "explanation": "MONAI declares torch as a hard dependency, so this pip call installs a PyPI torch build into Slicer's shared Python environment. The index policy explicitly forbids installing PyTorch other than through the Slicer PyTorch extension (PyTorchUtils), including 'packages that pull torch from PyPI as a dependency'. The result is a torch build that may be incompatible with Slicer's Python/VTK and that is invisible to the PyTorch extension's version management, affecting every user of that Slicer installation, not just this module. The [itk] extra additionally pulls SimpleITK from PyPI, which Slicer already bundles.",
+     "suggestion": "Depend on the PyTorch extension (add 'PyTorch' to EXTENSION_DEPENDS and to the catalog entry's build_dependencies) and install torch through PyTorchUtils (e.g. pytorchLogic.installTorch(askConfirmation=True)). Install MONAI without the [itk] extra and without letting pip resolve torch, e.g. pip_install('monai', ...) after torch is present, or pin only MONAI itself.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 133
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "major",
+     "title": "Missing PyTorchUtils dependency declaration and direct pip installation of monai",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 133,
+     "line_end": 134,
+     "evidence": "slicer.util.pip_install(\"munch\")\nslicer.util.pip_install(\"monai[itk]\")",
+     "explanation": "The extension uses PyTorch and MONAI (which depends on PyTorch), but does not declare PyTorchUtils in EXTENSION_DEPENDS / build_dependencies or ensure PyTorch is installed through Slicer's PyTorch extension. Installing MONAI via pip can pull in PyTorch from PyPI rather than Slicer's bundled PyTorch environment.",
+     "suggestion": "Declare PyTorchUtils in EXTENSION_DEPENDS and build_dependencies, and ensure dependencies are checked and installed properly via Slicer's extension mechanisms.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 133
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Augmented files are written in a detached thread; write errors are swallowed and completion is reported early",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+   "line": 116,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Augmented files are written in a detached thread; write errors are swallowed and completion is reported early",
+     "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+     "line_start": 116,
+     "line_end": 117,
+     "evidence": "    saveThread = threading.Thread(target=sitk.WriteImage, args=(img, f\"{path}/{filename}{extension}\"))\n    saveThread.start()",
+     "explanation": "save() starts a non-daemon thread per output file and never joins it. Any failure (disk full, permission denied, invalid path) is raised inside the thread and never reaches the caller, so process() still prints 'Processing completed in ... seconds' (ImageAugmenter.py:334) while files are missing or truncated. With many transforms the number of concurrent writer threads is unbounded, and if Slicer is closed right after the run the writes may be cut off. The user is told the augmented dataset was produced when it may not have been.",
+     "suggestion": "Write synchronously (or use a bounded worker with join and error propagation), collect exceptions and report them to the user, and only report completion after all writes have finished.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+      "line": 116
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Errors in image writing are swallowed; 'completed' is reported before files exist",
+     "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+     "line_start": 116,
+     "line_end": 117,
+     "evidence": "saveThread = threading.Thread(target=sitk.WriteImage, args=(img, f\"{path}/{filename}{extension}\"))\n    saveThread.start()",
+     "explanation": "save() starts sitk.WriteImage in a fire-and-forget thread and never joins it or checks the result. A disk-full, permission, or path error is lost, and process() then reports 'Processing completed' while output files may be missing or truncated. This is a silent data-loss risk for a dataset-generation tool.",
+     "suggestion": "Write synchronously, or collect threads and join them, and surface exceptions to the user before reporting completion.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+      "line": 116
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Case-name extraction uses '/' only, which breaks on Windows paths",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+   "line": 74,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Case-name extraction splits on '/' only, breaking on Windows paths",
+     "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+     "line_start": 74,
+     "line_end": 74,
+     "evidence": "    return fullImgPath.split(\"/\")[-2] if (filesStructure == HIERARCHICAL) else fullImgPath.split(\"/\")[-1]",
+     "explanation": "On Windows, os.walk returns paths with backslashes, so split('/') yields the whole path. In hierarchical mode the case name becomes the full path, and makeDir (line 47) then builds an invalid output directory name; in flat mode the 'case name' includes the directory prefix. Slicer is distributed for Windows, so this affects a large share of users.",
+     "suggestion": "Use os.path.basename / os.path.dirname (or pathlib) instead of splitting on '/'.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+      "line": 74
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Case-name extraction uses '/' only, which breaks on Windows paths",
+     "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+     "line_start": 74,
+     "line_end": 74,
+     "evidence": "return fullImgPath.split(\"/\")[-2] if (filesStructure == HIERARCHICAL) else fullImgPath.split(\"/\")[-1]",
+     "explanation": "os.walk and os.path.join return backslash-separated paths on Windows. split(\"/\") then returns the whole path, so caseName contains drive letters and separators. makeDir builds an invalid directory name (for example containing a colon), and processing fails for every case on Windows. Note: this is an inference from the code; it was not run.",
+     "suggestion": "Use os.path.basename and os.path.basename(os.path.dirname(...)) for the case name.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterUtils.py",
+      "line": 74
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Images and masks are paired by list index from independent directory walks",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterValidator.py",
+   "line": 26,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Images and masks are paired by list index from independent directory walks",
+     "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterValidator.py",
+     "line_start": 26,
+     "line_end": 27,
+     "evidence": "    if len(masks) > 0 and (len(masks) != len(imgs)):\n        return ValueError(f\"Images and masks must have same length. Found:\\n{len(imgs)} images\\n{len(masks)} masks.\\nMake sure you have specified the correct prefixes to avoid inconsistencies.\")",
+     "explanation": "collectImagesAndMasksList (ImageAugmenterUtils.py:21-33) builds imgs and masks as two separate lists in os.walk order, and the only validation is that the counts match. If a folder contains images and masks whose sort order differs (e.g. 'case1.nrrd'/'case1_mask.nrrd' vs 'case1_mask.nrrd'/'case1.nrrd', or extra files matching the mask pattern), the counts still match but image i is augmented with mask j. The augmented mask then does not correspond to the augmented image, silently producing mislabelled training data.",
+     "suggestion": "Pair each image with its mask explicitly (derive the mask path from the image path, or match by case name) and fail loudly when a pair cannot be formed.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenterLib/ImageAugmenterValidator.py",
+      "line": 26
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "No PyTorch dependency declared in EXTENSION_DEPENDS or build_dependencies",
+   "category": "environment",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 13,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "No PyTorch dependency declared in EXTENSION_DEPENDS or build_dependencies",
+     "file": "CMakeLists.txt",
+     "line_start": 13,
+     "line_end": 13,
+     "evidence": "set(EXTENSION_DEPENDS \"NA\") # Specified as a list or \"NA\" if no dependencies",
+     "explanation": "The module requires torch and monai at runtime (ImageAugmenter.py:36, 91), but the extension declares no dependency and the catalog entry has \"build_dependencies\": []. Users therefore get no PyTorch extension installed automatically, which is what pushes the author into the forbidden pip path, and the index cannot express the intended dependency.",
+     "suggestion": "Set EXTENSION_DEPENDS to include PyTorch and add the matching build_dependencies entry in the catalog entry, then install torch via PyTorchUtils.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 13
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "torch is required but not declared as a PyTorch extension dependency",
+     "file": "CMakeLists.txt",
+     "line_start": 13,
+     "line_end": 13,
+     "evidence": "set(EXTENSION_DEPENDS \"NA\") # Specified as a list or \"NA\" if no dependencies",
+     "explanation": "The module requires torch (checkDependencies, line 36) and needs it at setup, but the catalog entry has no build_dependencies and CMake sets EXTENSION_DEPENDS to NA. Users get no PyTorch extension and no guidance, and the install button never installs torch. The project's policy expects torch to come from the PyTorchUtils/PyTorch extension.",
+     "suggestion": "Declare PyTorch (PyTorchUtils) as a build and runtime dependency, and use the PyTorch extension's install logic rather than relying on a pre-existing torch.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 13
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Unconditional `import torch` in setup() makes the module unloadable before dependencies are installed",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "ImageAugmenter/ImageAugmenter.py",
+   "line": 91,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Unconditional `import torch` in setup() makes the module unloadable before dependencies are installed",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 91,
+     "line_end": 93,
+     "evidence": "        import torch\n\n        if torch.cuda.is_available():",
+     "explanation": "checkDependencies() (line 55) only toggles button visibility when torch/monai are missing; setup() then imports torch unconditionally at line 91. On a clean Slicer installation without torch, opening the module raises ImportError inside setup(), so the module panel never appears and the 'Install requirements' button that was just made visible can never be clicked. The advertised first-run installation path is therefore unreachable.",
+     "suggestion": "Guard the torch import (e.g. only import and enumerate CUDA devices when find_spec('torch') is not None) and return early after showing the install button.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 91
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Widget setup crashes when torch is not installed",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 91,
+     "line_end": 93,
+     "evidence": "import torch\n\n        if torch.cuda.is_available():",
+     "explanation": "setup() calls checkDependencies() and then imports torch unconditionally, outside any guard. If torch is missing, the import raises, so setup aborts after the UI is built and the install button is shown. The module is unusable until torch is present, which defeats the install-requirements flow shown by checkDependencies.",
+     "suggestion": "Guard the torch import with find_spec, or move GPU enumeration into a try block that tolerates a missing torch.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 91
+     }
+    }
+   ],
+   "id": "D6"
+  },
+  {
+   "title": "pip install of monai[itk] can upgrade/downgrade Slicer-bundled SimpleITK and numpy",
+   "category": "environment",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ImageAugmenter/ImageAugmenter.py",
+   "line": 134,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "pip install of monai[itk] can upgrade/downgrade Slicer-bundled SimpleITK and numpy",
+     "file": "ImageAugmenter/ImageAugmenter.py",
+     "line_start": 134,
+     "line_end": 134,
+     "evidence": "            slicer.util.pip_install(\"monai[itk]\")",
+     "explanation": "The 'itk' extra installs SimpleITK from PyPI, and MONAI's own requirements pull numpy/scipy. pip resolves these against whatever versions are already present, so a user clicking 'Install requirements' can silently replace the SimpleITK/numpy versions Slicer ships, breaking other modules and Slicer core code that rely on the bundled builds. The module itself imports SimpleITK at top level (ImageAugmenter.py:10), so it does not need the extra at all.",
+     "suggestion": "Drop the [itk] extra and install only MONAI (and munch), letting Slicer's bundled SimpleITK/numpy satisfy the requirements; verify the resolved versions afterwards and report failures to the user.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ImageAugmenter/ImageAugmenter.py",
+      "line": 134
+     }
+    }
+   ],
+   "id": "D7"
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D8",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "environment": {
+   "deepseek": "blocking",
+   "flash-lite": "concern",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "minor issues",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 8,
+  "single": 10,
+  "unverified": 1,
+  "total": 18
+ }
+}

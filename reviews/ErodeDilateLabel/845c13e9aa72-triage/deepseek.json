@@ -1,0 +1,128 @@
+{
+ "purpose": "The extension provides two Slicer CLI executables (ErodeLabel, DilateLabel) that apply ITK binary erosion/dilation with a ball structuring element to a label map volume. It targets users who want simple morphological shrinking/growing of label maps inside Slicer.",
+ "summary": "Tiny, harmless C++-CLI-only extension: two ITK BinaryErode/BinaryDilate CLIs, no Python, no network, no downloads, no files installed into Slicer's Python environment. Catalog entry is consistent (build_dependencies [] matches EXTENSION_DEPENDS \"NA\", build_subdirectory \".\"). The blocking problem is licensing: there is no LICENSE file, both XML descriptors have an empty `<license></license>`, and the only notice in the sources is \"Copyright (c) Brigham and Women's Hospital. All rights reserved.\" with no grant to redistribute — i.e. no permission to distribute the extension. Non-blocking: copy-pasted \"distance map\" descriptions, success exit code on unknown pixel type, no tests/docs.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Both .cxx files (ErodeLabel/ErodeLabel.cxx, DilateLabel/DilateLabel.cxx) only read the inputVolume path and write outputVolume via itk::ImageFileReader/Writer; no network, no system()/exec, no deletion, no telemetry. The CMake files reference only Slicer/ITK macros (SEMMacroBuildCLI) and no downloads."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "No Python, no pip, no package installation, no import-time side effects; the extension builds only two CLI executables linked against ${ITK_LIBRARIES}, so users who never open the module are unaffected."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Root CMakeLists.txt adds both subdirectories and calls Slicer_EXTENSION_CPACK; EXTENSION_DEPENDS \"NA\" matches build_dependencies [] and build_subdirectory \".\"; all 8 files exist and CMake installs the CLIs via SEMMacroBuildCLI. Risk: cmake_minimum_required( VERSION 2.8.9 ) (line 1) is rejected by CMake 4.x, which can break configure."
+  },
+  "license": {
+   "rating": "blocking",
+   "rationale": "No LICENSE/COPYING file in the repository (only the 8 listed files), both descriptors have an empty <license></license> (ErodeLabel.xml:11, DilateLabel.xml:11), and the source header states \"Copyright (c) Brigham and Women's Hospital. All rights reserved.\" followed by a warranty disclaimer, with no permission to use or redistribute."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "The filters are used correctly and ITK exceptions are caught and reported via std::cerr with EXIT_FAILURE. But the unknown-component default branch prints \"unknown component type\" and then falls through to return EXIT_SUCCESS without writing any output, radius is an unconstrained <integer>, and both XML descriptions are copy-pasted from a distance-map module."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md is four lines, there is no documentation, sample data or test (Testing subdirectory commented out in both module CMakeLists.txt files). Functionality largely overlaps Slicer core's Segment Editor Morphology erode/dilate effects, and the XML descriptions are misleading."
+  }
+ },
+ "findings": [
+  {
+   "category": "license",
+   "severity": "blocking",
+   "title": "No license granting distribution permission; sources say \"All rights reserved\"",
+   "file": "ErodeLabel/ErodeLabel.cxx",
+   "line_start": 8,
+   "line_end": 12,
+   "evidence": "  Copyright (c) Brigham and Women's Hospital. All rights reserved.\n\n     This software is distributed WITHOUT ANY WARRANTY; without even \n     the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR \n     PURPOSE.  See the above copyright notices for more information.",
+   "explanation": "The repository contains no LICENSE/COPYING file, both XML descriptors have an empty <license></license> (ErodeLabel.xml:11, DilateLabel.xml:11), and the only terms in the source are an \"All rights reserved\" notice plus a warranty disclaimer. Nothing grants the right to redistribute or use the code, so the extension cannot be distributed through the extension catalog until the copyright holder adds terms (e.g. a BSD-3-Clause license text) to the repository and to the XML <license> element.",
+   "suggestion": "Add a LICENSE file with permissive terms from the copyright holder (Brigham and Women's Hospital / Junichi Tokuda), restore the full license text in the source headers, and fill in <license> in both .xml files.",
+   "confidence": "high"
+  },
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "cmake_minimum_required( VERSION 2.8.9 ) is rejected by CMake 4.x",
+   "file": "CMakeLists.txt",
+   "line_start": 1,
+   "line_end": 1,
+   "evidence": "cmake_minimum_required( VERSION 2.8.9 )",
+   "explanation": "CMake 4.0 and later refuse to configure projects that require compatibility with CMake < 3.5 (\"Compatibility with CMake < 3.5 has been removed\"). If the factory build uses such a CMake, the extension cannot be configured at all (the whole superbuild project is configured with the same CMake). I could not verify which CMake version the extension factory uses.",
+   "suggestion": "Raise the minimum to a version supported by current Slicer (e.g. cmake_minimum_required(VERSION 3.16...3.21) or simply drop the line, since the Slicer superbuild sets it).",
+   "confidence": "medium"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Unknown pixel component type reports success without writing output",
+   "file": "DilateLabel/DilateLabel.cxx",
+   "line_start": 145,
+   "line_end": 158,
+   "evidence": "      case itk::ImageIOBase::UNKNOWNCOMPONENTTYPE:\n      default:\n        std::cout << \"unknown component type\" << std::endl;\n        break;\n      }\n    }",
+   "explanation": "For an unsupported component type (or an unreadable input) the program breaks out of the switch, skips DoIt, prints a message to stdout and returns EXIT_SUCCESS. Slicer therefore treats the CLI run as completed and produces no output volume, with no error shown in the UI. Same pattern in ErodeLabel/ErodeLabel.cxx lines 145-158.",
+   "suggestion": "Return EXIT_FAILURE and write the reason to std::cerr in the UNKNOWNCOMPONENTTYPE/default branch.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "XML descriptions copied from a distance-map module and output labelled \"Distance map\"",
+   "file": "ErodeLabel/ErodeLabel.xml",
+   "line_start": 6,
+   "line_end": 33,
+   "evidence": "    <description>\n      Calculate pixel-based or physical distance map.\n    </description>",
+   "explanation": "The module panel title/description and the output port description (\"Distance map volume\", line 32) describe a distance map, but the CLI performs binary erosion. Users selecting the module in the GUI are misled about what the output is. Identical text in DilateLabel/DilateLabel.xml lines 6-8 and 32.",
+   "suggestion": "Describe erosion/dilation of the selected label and label the output as the eroded/dilated label map.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Radius accepted as unconstrained integer, converted to unsigned radius",
+   "file": "DilateLabel/DilateLabel.xml",
+   "line_start": 41,
+   "line_end": 47,
+   "evidence": "      <name>radius</name>\n      <longflag>radius</longflag>\n      <description>Radius for dilation..</description>\n      <label>Dilation Radius</label>\n      <default>1</default>",
+   "explanation": "radius is a plain <integer> with no constraint, and DilateLabel.cxx:61 calls structuringElement.SetRadius(radius), whose parameter is unsigned; a negative value entered by the user wraps to a huge radius and the structuring element allocation then fails or exhausts memory. The failure surfaces as an ITK exception (caught), but only after allocating.",
+   "suggestion": "Declare radius with <integer>…<minimum>1</minimum> (or a <double> with a range check) and validate radius > 0 before building the structuring element.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No documentation, tests or sample data; functionality overlaps core Slicer",
+   "file": "README.md",
+   "line_start": 1,
+   "line_end": 4,
+   "evidence": "ErodeDilateLabel\n================\n\n3D Slicer CLIs for binary erosion and dilation.",
+   "explanation": "The README gives no usage or tutorial, both module CMakeLists.txt files have the Testing subdirectory commented out (ErodeLabel/CMakeLists.txt:24-26), and the catalog/documentation URLs point to the retired Slicer wiki. Erode/dilate of label maps is already available in Slicer core via the Segment Editor Morphology effects, so users gain little; this is informational for tier 1.",
+   "suggestion": "Add a short usage section plus links to current documentation, and consider pointing users to the Segment Editor effects if no added value is offered.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Source headers identify the file as a different program",
+   "file": "ErodeLabel/ErodeLabel.cxx",
+   "line_start": 3,
+   "line_end": 6,
+   "evidence": "  Program:   3D Slicer DistanceMap CLI",
+   "explanation": "Both .cxx files carry a header from the \"3D Slicer DistanceMap CLI\" with Subversion keywords, indicating the files were copied from another module; it misrepresents the origin of the code (same in DilateLabel/DilateLabel.cxx:3). Not a safety issue, but it obscures provenance for license review.",
+   "suggestion": "Replace the header with an accurate program name and current copyright/license statement.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not verify that catalog scm_revision \"master\" currently resolves to the reviewed commit 845c13e9aa724f17a2f8c417f64d4973c64078f6 (no network access); the review covers only the 8 files provided at that commit.",
+  "Could not inspect the extension factory build logs or the CMake version used by the build machines, so the cmake_minimum_required compatibility issue is a risk assessment, not a verified build failure.",
+  "Could not access the linked Slicer wiki documentation or icon/screenshot URLs to check whether the documentation exists.",
+  "Could not check whether an external LICENSE file exists outside the provided file list, though the supplied file listing shows no license file."
+ ],
+ "questions_for_author": [
+  "Which license terms apply to this code, and can you add a LICENSE file plus matching <license> entries and source headers?",
+  "Can the catalog entry pin a commit/tag instead of the moving \"master\" branch so the reviewed source is fixed?",
+  "Is the minimum CMake version still acceptable for the Slicer factory, or can it be raised to a currently supported version?"
+ ]
+}

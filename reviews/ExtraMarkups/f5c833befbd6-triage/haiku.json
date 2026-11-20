@@ -1,0 +1,65 @@
+{
+ "purpose": "ExtraMarkups adds two custom markups node types to 3D Slicer: \"Label\" (an arrow with a text label) and \"Shape\" (parametric and primitive geometry drawn from control points). It is intended for Slicer users who annotate and measure in slice and 3D views, and it builds as C++ loadable modules with no Python component.",
+ "summary": "I read the catalog entry, top-level and per-module CMake files, the Label and Shape logic, MRML storage and node code, and the license and README. I found no network access, no process execution, no unsafe deserialization, no package installs, and no environment changes. The CeCILL-B license permits distribution. The main defect is an uninitialized self-referencing colour computation in both logic classes, which is undefined behaviour that is probably harmless in practice. Overall this looks acceptable for tier 3 with a minor fix.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "I searched all files for system/QProcess/network/pickle/eval/file-deletion calls and found none outside license URLs and comments. The JSON storage nodes only read and write node properties. No data leaves the machine and no network servers or downloads are present."
+  },
+  "environment": {
+   "rating": "ok",
+   "rationale": "The extension is pure C++ with no Python, no pip installs, no startup hooks, and no sys.path or global logging changes. Qt and VTK are used only through Slicer's own modules (Markups, MRML, Widgets)."
+  },
+  "packaging": {
+   "rating": "minor",
+   "rationale": "Each module's CMakeLists.txt lists sources that match the files in the listing, and the Resources qrc and UI paths exist. EXTENSION_DEPENDS is \"NA\" and build_dependencies is empty, which is consistent because only the core Markups module is used. I did not build the extension, and I did not check the scm_revision 'main' against a commit."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE.txt is the full CeCILL-B v1.0 text and README.md states the same license. CeCILL-B is a free-software license that permits redistribution. The extension bundles no third-party weights or datasets; it links to external videos only in Shape/README.md."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "In Label/Logic/vtkSlicerLabelLogic.cxx:133 and Shape/Logic/vtkSlicerShapeLogic.cxx:126 the line 'double colour[3] = { 1.0 - colour[0], ...}' reads the array being initialized, which is undefined behaviour. The code also has no logic that the value is correct. Shape logic also forces SetShapeName(Sphere) on every added node (vtkSlicerShapeLogic.cxx:130), which may interact with stored scene files; I could not verify that from what I read."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "The README files for Label and Shape describe usage and show screenshots, and the extension has a clear purpose. There are no tests or sample data, and the description says 'Only fully human contributions will be considered' without explanation. The tier-3 marking is reasonable."
+  }
+ },
+ "findings": [
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Uninitialized self-referencing colour in logic classes (undefined behaviour)",
+   "file": "Label/Logic/vtkSlicerLabelLogic.cxx",
+   "line_start": 133,
+   "line_end": 133,
+   "evidence": "double colour[3] = { 1.0 - colour[0], 1.0 - colour[1], 1.0 - colour[2]};",
+   "explanation": "The array 'colour' is read in its own initializer before it is assigned, so the values are indeterminate. The same line exists in Shape/Logic/vtkSlicerShapeLogic.cxx:126. The result is an unpredictable unselected-colour on markups created with alternate colours. This is not a security issue. The intended value is probably 1.0 minus the selected colour components.",
+   "suggestion": "Compute the unselected colour from selectedColour, e.g. double colour[3] = { 1.0 - selectedColour[0], 1.0 - selectedColour[1], 1.0 - selectedColour[2]}; in both files.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "info",
+   "title": "Shape type is forced to Sphere whenever a node is added to the scene",
+   "file": "Shape/Logic/vtkSlicerShapeLogic.cxx",
+   "line_start": 130,
+   "line_end": 130,
+   "evidence": "shapeNode->SetShapeName(vtkMRMLMarkupsShapeNode::Sphere);",
+   "explanation": "OnMRMLSceneNodeAdded unconditionally sets the shape name. If the node is added before its saved properties (including 'shapeName') are read, reloading a scene could lose the stored shape type. I could not check the order of operations in the markups storage code from the files I read, so this is a question rather than a confirmed defect.",
+   "suggestion": "Confirm with a save/reload test that a Cone or Tube shape keeps its type after loading a scene, and only set the default for newly created nodes.",
+   "confidence": "low"
+  }
+ ],
+ "not_checked": [
+  "I did not build the extension or load the modules in Slicer, and I did not run any test.",
+  "I did not resolve scm_revision 'main' to a commit or compare it with the reviewed source.",
+  "I did not read the full bodies of the VTKWidgets representation files, the vtkMRMLMarkupsShapeNode.cxx, the Qt widget .cxx files, or the Shape JSON storage node beyond line 60.",
+  "I did not check the .ui files, the qrc icon resources, or the image assets, beyond confirming that their directories exist in the listing.",
+  "I did not verify the upstream markups API usage or the Slicer version compatibility."
+ ],
+ "questions_for_author": []
+}

@@ -1,0 +1,453 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "JumpToPoint observer on the display node is never removed, leaving a dangling clientData pointer",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "Shape/MRML/vtkMRMLMarkupsShapeNode.cxx",
+   "line": 95,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "JumpToPoint observer on the display node is never removed, leaving a dangling clientData pointer",
+     "file": "Shape/MRML/vtkMRMLMarkupsShapeNode.cxx",
+     "line_start": 95,
+     "line_end": 99,
+     "evidence": "      this->OnJumpToPointCallback = vtkSmartPointer<vtkCallbackCommand>::New();\n      this->OnJumpToPointCallback->SetClientData( reinterpret_cast<void *>(this) );\n      this->OnJumpToPointCallback->SetCallback( vtkMRMLMarkupsShapeNode::OnJumpToPoint );\n      \n      this->GetDisplayNode()->AddObserver(vtkMRMLMarkupsDisplayNode::JumpToPointEvent, this->OnJumpToPointCallback);",
+     "explanation": "The callback command stores the markups node as clientData and is registered on the display node. The destructor (lines 59-63) removes only OnPointPositionUndefinedCallback from the node itself: `this->RemoveObserver(this->OnPointPositionUndefinedCallback);`. The display node keeps its own reference to the command, so if the display node outlives the markups node (shared/retained display node, scene-close ordering, node replaced while the display node stays in the scene), a later JumpToPointEvent invokes OnJumpToPoint with a freed node pointer, i.e. a use-after-free crash in Slicer. The same asymmetry exists when the display node is swapped: the guard `!OnPointPositionUndefinedCallback && !OnJumpToPointCallback` prevents re-attaching the observer to the new display node.",
+     "suggestion": "Store the observed display node and remove the JumpToPoint observer in the destructor and whenever the display node changes (e.g. in a SetAndObserveDisplayNode override), mirroring the existing RemoveObserver call for OnPointPositionUndefinedCallback.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "Shape/MRML/vtkMRMLMarkupsShapeNode.cxx",
+      "line": 95
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Every shape node added to the scene is forced to Sphere, discarding its shape type",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "Shape/Logic/vtkSlicerShapeLogic.cxx",
+   "line": 130,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Every shape node added to the scene is forced to Sphere, discarding its shape type",
+     "file": "Shape/Logic/vtkSlicerShapeLogic.cxx",
+     "line_start": 130,
+     "line_end": 130,
+     "evidence": "  shapeNode->SetShapeName(vtkMRMLMarkupsShapeNode::Sphere);",
+     "explanation": "OnMRMLSceneNodeAdded runs for every vtkMRMLMarkupsShapeNode added to the scene, not only for freshly created ones. A node produced by copy/paste or duplication (CopyContent then add to scene) or by a script that sets a shape before adding the node is silently converted to a Sphere, and the user's chosen geometry is lost. Because ShapeName has no vtkSetMacro/XML serialization, the shape type is only persisted through the JSON storage node, so any path that restores a node without that storage node also falls back to Sphere.",
+     "suggestion": "Only apply the default when the node still has the uninitialised value (ShapeName == ShapeName_Last), or move the default into the node constructor instead of the scene-added callback.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "Shape/Logic/vtkSlicerShapeLogic.cxx",
+      "line": 130
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Shape type is forced to Sphere whenever a node is added to the scene",
+     "file": "Shape/Logic/vtkSlicerShapeLogic.cxx",
+     "line_start": 130,
+     "line_end": 130,
+     "evidence": "shapeNode->SetShapeName(vtkMRMLMarkupsShapeNode::Sphere);",
+     "explanation": "OnMRMLSceneNodeAdded unconditionally sets the shape name. If the node is added before its saved properties (including 'shapeName') are read, reloading a scene could lose the stored shape type. I could not check the order of operations in the markups storage code from the files I read, so this is a question rather than a confirmed defect.",
+     "suggestion": "Confirm with a save/reload test that a Cone or Tube shape keeps its type after loading a scene, and only set the default for newly created nodes.",
+     "confidence": "low",
+     "verification": {
+      "status": "verified",
+      "file": "Shape/Logic/vtkSlicerShapeLogic.cxx",
+      "line": 130
+     }
+    }
+   ]
+  },
+  {
+   "title": "GenerateUniqueColor dereferences the scene without a null check and can index past the colour table",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Label/Logic/vtkSlicerLabelLogic.cxx",
+   "line": 145,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "GenerateUniqueColor dereferences the scene without a null check and can index past the colour table",
+     "file": "Label/Logic/vtkSlicerLabelLogic.cxx",
+     "line_start": 145,
+     "line_end": 148,
+     "evidence": "  vtkMRMLScene* scene = this->GetMRMLScene();\n  {\n    colorTable = vtkMRMLColorTableNode::SafeDownCast(\n      scene->GetNodeByID(colorNodeID.c_str()));",
+     "explanation": "GetMRMLScene() can return nullptr (the same function checks it in RegisterNodes and OnMRMLSceneNodeAdded), but here it is dereferenced unconditionally, so a call during scene teardown would crash. In addition, `colorTable->GetColor(this->NextColorIndex, rgba)` is called before the wrap-around check, so when NextColorIndex equals GetNumberOfColors() the lookup fails and the previous rgba value is reused. The identical code is duplicated in Shape/Logic/vtkSlicerShapeLogic.cxx:135-156.",
+     "suggestion": "Guard against a null scene and clamp/wrap NextColorIndex before calling GetColor; consider sharing one implementation between the two logic classes.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Label/Logic/vtkSlicerLabelLogic.cxx",
+      "line": 145
+     }
+    }
+   ]
+  },
+  {
+   "title": "Label and Shape widget headers share the same include guard",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Label/VTKWidgets/vtkSlicerLabelWidget.h",
+   "line": 21,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Label and Shape widget headers share the same include guard",
+     "file": "Label/VTKWidgets/vtkSlicerLabelWidget.h",
+     "line_start": 21,
+     "line_end": 22,
+     "evidence": "#ifndef __vtkslicerslicingcontourwidget_h_\n#define __vtkslicerslicingcontourwidget_h_",
+     "explanation": "Shape/VTKWidgets/vtkSlicerShapeWidget.h:21-22 uses the identical guard `__vtkslicerslicingcontourwidget_h_`. Any translation unit that includes both headers (for example a future module or test that uses both widgets) silently loses the second class declaration and fails to compile with confusing errors. The same copy-paste also produced `void operator=(const vtkSlicerLabelWidget) = delete;` (line 49) with a by-value parameter instead of a reference.",
+     "suggestion": "Give each header a unique guard (e.g. __vtkSlicerLabelWidget_h_ / __vtkSlicerShapeWidget_h_) and fix the deleted assignment operator signature.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Label/VTKWidgets/vtkSlicerLabelWidget.h",
+      "line": 21
+     }
+    }
+   ]
+  },
+  {
+   "title": "No tests, sample data or clinical-use disclaimer; modules hidden under Testing.TestCases",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Label/qSlicerLabelModule.cxx",
+   "line": 107,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No tests, sample data or clinical-use disclaimer; modules hidden under Testing.TestCases",
+     "file": "Label/qSlicerLabelModule.cxx",
+     "line_start": 107,
+     "line_end": 110,
+     "evidence": "QStringList qSlicerLabelModule::categories() const\n{\n  return QStringList() << \"Testing.TestCases\";\n}",
+     "explanation": "Both modules report the 'Testing.TestCases' category (Shape/qSlicerShapeModule.cxx:107-110) and are hidden (isHidden() returns true), so users only find them through the Markups module's options widget. The repository contains no test directory and no sample scene, and the READMEs give no statement about suitability for clinical measurement, even though the Shape node computes lengths, areas and volumes that a user might read as measurements.",
+     "suggestion": "Add a short disclaimer about measurement accuracy/clinical use, provide a sample scene or test data, and consider a more descriptive category than Testing.TestCases.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Label/qSlicerLabelModule.cxx",
+      "line": 107
+     }
+    }
+   ]
+  },
+  {
+   "title": "SetShapeName stores the new value before validating it, so an unknown name leaves the node inconsistent",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Shape/MRML/vtkMRMLMarkupsShapeNode.cxx",
+   "line": 45,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "SetShapeName stores the new value before validating it, so an unknown name leaves the node inconsistent",
+     "file": "Shape/MRML/vtkMRMLMarkupsShapeNode.cxx",
+     "line_start": 246,
+     "line_end": 248,
+     "evidence": "  }\n  this->ShapeName = shapeName;\n  switch (shapeName)",
+     "explanation": "GetShapeNameFromString returns -1 for an unknown string (lines 151-168), and the JSON storage node passes that straight to SetShapeName (Shape/MRML/vtkMRMLMarkupsShapeJsonStorageNode.cxx:90). SetShapeName assigns ShapeName = -1 first and then hits `default : vtkErrorMacro(\"Unknown shape.\"); return;` (lines 325-327), so the node ends up with ShapeName == -1 while RequiredNumberOfControlPoints/MaximumNumberOfControlPoints and the measurements still describe the previous shape. GetShapeNameAsString(-1) then returns an empty string, which is written back on the next save.",
+     "suggestion": "Validate the incoming value before assigning (reject negative values), and have the storage node ignore an unknown shape name instead of applying it.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "Shape/MRML/vtkMRMLMarkupsShapeNode.cxx",
+      "line": 45
+     }
+    }
+   ]
+  },
+  {
+   "title": "Uninitialized self-referencing colour in logic classes (undefined behaviour)",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "Label/Logic/vtkSlicerLabelLogic.cxx",
+   "line": 133,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Uninitialized self-referencing colour in logic classes (undefined behaviour)",
+     "file": "Label/Logic/vtkSlicerLabelLogic.cxx",
+     "line_start": 133,
+     "line_end": 133,
+     "evidence": "double colour[3] = { 1.0 - colour[0], 1.0 - colour[1], 1.0 - colour[2]};",
+     "explanation": "The array 'colour' is read in its own initializer before it is assigned, so the values are indeterminate. The same line exists in Shape/Logic/vtkSlicerShapeLogic.cxx:126. The result is an unpredictable unselected-colour on markups created with alternate colours. This is not a security issue. The intended value is probably 1.0 minus the selected colour components.",
+     "suggestion": "Compute the unselected colour from selectedColour, e.g. double colour[3] = { 1.0 - selectedColour[0], 1.0 - selectedColour[1], 1.0 - selectedColour[2]}; in both files.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "Label/Logic/vtkSlicerLabelLogic.cxx",
+      "line": 133
+     }
+    }
+   ]
+  },
+  {
+   "title": "License file says CeCILL-B while source headers say BSD-3-Clause",
+   "category": "license",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "README.md",
+   "line": 16,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "License file says CeCILL-B while source headers say BSD-3-Clause",
+     "file": "README.md",
+     "line_start": 16,
+     "line_end": 16,
+     "evidence": "This work, as a whole, is licensed under the terms of the [CeCILL-B](http://cecill.info/licences/Licence_CeCILL-B_V1-en.txt) free software license agreement (BSD style).",
+     "explanation": "LICENSE.txt contains the CeCILL-B v1.0 text, but most source files carry the Slicer template header 'Distributed under the OSI-approved BSD 3-Clause License' (e.g. Label/VTKWidgets/vtkSlicerLabelRepresentation2D.h:3) and 'Portions (c) Copyright Brigham and Women's Hospital (BWH)' (Label/qSlicerLabelModule.h:5). Both licenses permit redistribution, so this is not a distribution blocker, but users cannot tell which terms apply to which file.",
+     "suggestion": "State the licensing per file or directory in the README (e.g. CeCILL-B for the author's code, BSD-3-Clause for files derived from the Slicer template).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 16
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unused UI files and VTKWidgets kits built with the Logic macro",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "Label/Widgets/CMakeLists.txt",
+   "line": 22,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Unused UI files and VTKWidgets kits built with the Logic macro",
+     "file": "Label/Widgets/CMakeLists.txt",
+     "line_start": 22,
+     "line_end": 24,
+     "evidence": "set(${KIT}_UI_SRCS\n  Resources/UI/qMRMLMarkupsLabelWidget.ui\n  )",
+     "explanation": "Label/Widgets/Resources/UI/qMRMLMarkupsLabelOptionsWidget.ui and Shape/Widgets/Resources/UI/qMRMLMarkupsShapeOptionsWidget.ui are committed but not referenced by any CMakeLists, so they are dead files. Separately, Label/VTKWidgets/CMakeLists.txt:29 and Shape/VTKWidgets/CMakeLists.txt:29 use SlicerMacroBuildModuleLogic to build the VTKWidgets kits instead of SlicerMacroBuildModuleVTKWidgets; this builds today but deviates from the Slicer template and may not set up the kit the way Slicer expects.",
+     "suggestion": "Remove the unused .ui files and switch the VTKWidgets kits to SlicerMacroBuildModuleVTKWidgets.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "Label/Widgets/CMakeLists.txt",
+      "line": 22
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "JumpToPoint observer on the display node is never removed, leaving a dangling clientData pointer",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "Shape/MRML/vtkMRMLMarkupsShapeNode.cxx",
+   "line": 95,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "JumpToPoint observer on the display node is never removed, leaving a dangling clientData pointer",
+     "file": "Shape/MRML/vtkMRMLMarkupsShapeNode.cxx",
+     "line_start": 95,
+     "line_end": 99,
+     "evidence": "      this->OnJumpToPointCallback = vtkSmartPointer<vtkCallbackCommand>::New();\n      this->OnJumpToPointCallback->SetClientData( reinterpret_cast<void *>(this) );\n      this->OnJumpToPointCallback->SetCallback( vtkMRMLMarkupsShapeNode::OnJumpToPoint );\n      \n      this->GetDisplayNode()->AddObserver(vtkMRMLMarkupsDisplayNode::JumpToPointEvent, this->OnJumpToPointCallback);",
+     "explanation": "The callback command stores the markups node as clientData and is registered on the display node. The destructor (lines 59-63) removes only OnPointPositionUndefinedCallback from the node itself: `this->RemoveObserver(this->OnPointPositionUndefinedCallback);`. The display node keeps its own reference to the command, so if the display node outlives the markups node (shared/retained display node, scene-close ordering, node replaced while the display node stays in the scene), a later JumpToPointEvent invokes OnJumpToPoint with a freed node pointer, i.e. a use-after-free crash in Slicer. The same asymmetry exists when the display node is swapped: the guard `!OnPointPositionUndefinedCallback && !OnJumpToPointCallback` prevents re-attaching the observer to the new display node.",
+     "suggestion": "Store the observed display node and remove the JumpToPoint observer in the destructor and whenever the display node changes (e.g. in a SetAndObserveDisplayNode override), mirroring the existing RemoveObserver call for OnPointPositionUndefinedCallback.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "Shape/MRML/vtkMRMLMarkupsShapeNode.cxx",
+      "line": 95
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D2",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "environment": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "packaging": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "minor issues"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 2,
+  "single": 8,
+  "unverified": 0,
+  "total": 9
+ }
+}

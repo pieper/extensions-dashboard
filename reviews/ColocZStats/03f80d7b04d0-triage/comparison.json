@@ -1,0 +1,1031 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Every non-TIFF volume loaded afterwards triggers a modal warning from a global scene observer",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 767,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Every non-TIFF volume loaded afterwards triggers a modal warning from a global scene observer",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 767,
+     "line_end": 774,
+     "evidence": "if not (filename.endswith(\".tif\") or filename.endswith(\".tiff\")):\n    if filename.endswith(\".nrrd\"):\n        return\n    text = \"TIFF format Image required.\"",
+     "explanation": "onNodeAdded is registered on vtkMRMLScene.NodeAddedEvent (line 119) and calls createVolumesForChannels for every volume node added to the scene. Once the module widget has been created, loading any NIfTI, DICOM, MHA, NRRD-without-extension or other volume in any module pops a blocking 'TIFF format Image required.' message box. This interferes with normal Slicer workflows unrelated to the extension.",
+     "suggestion": "Only react to volumes the user intentionally added through this module, and report format problems non-modally (status bar) or only when the module is visible.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 767
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Full analysis, including headless-browser export, runs synchronously on the GUI thread",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 349,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Full analysis, including headless-browser export, runs synchronously on the GUI thread",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 349,
+     "line_end": 349,
+     "evidence": "        self.logic.computeStats(self)",
+     "explanation": "onComputeButtonClicked calls computeStats directly; inside, cropping, thresholding, Venn drawing, holoviews/bokeh rendering via selenium (hv.save at 1437, 1697, 1724, 1752) and Excel writing all execute in the Qt main thread with no progress bar and no cancellation. Slicer freezes for the duration (the README itself says 'a few seconds to a few minutes' at README.md:31), so the application appears hung and users may force-quit and lose work. hv.save with fmt='png' also needs a ChromeDriver that the README tells users to install manually (README.md:15) and fails obscurely if missing.",
+     "suggestion": "Run the computation in a CLI-node/cliRequest or at least in a worker thread with progress and a busy cursor; render PNGs with a backend that does not require an external browser driver, and report a clear error if the driver is unavailable.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 349
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Originally loaded volume node is removed from the scene without asking",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 909,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Originally loaded volume node is removed from the scene without asking",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 909,
+     "line_end": 910,
+     "evidence": "if not node in channelVolumeList:\n    slicer.mrmlScene.RemoveNode(node)",
+     "explanation": "As soon as a multi-channel TIFF is loaded (or on any volume add via the scene observer), createVolumesForChannels removes the node the user just loaded and replaces it with per-channel volumes; the same happens on error paths (lines 837, 851, 869, 879). Any intensity edits, display settings, transforms or other work attached to that node are lost with no confirmation and no undo, and the removal happens even when the user is working in another module (see the NodeAdded observer).",
+     "suggestion": "Ask the user before replacing the loaded volume (or keep the original node and hide it), and report explicitly what was removed.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 909
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Results written to fixed paths in defaultScenePath, overwriting existing files without confirmation",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 1102,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Results written to fixed paths in defaultScenePath, overwriting existing files without confirmation",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1102,
+     "line_end": 1103,
+     "evidence": "jsonFileName = slicer.app.defaultScenePath + \"/\" + imageName + \" ROI Information.mrk.json\"\nslicer.util.saveNode(roiNode, jsonFileName)",
+     "explanation": "The ROI JSON, Venn JPEG, 2D-histogram PNG/HTML (1390, 1436, 1443, 1696, 1723, 1751) and the Excel workbook (1503, 1822) are written into slicer.app.defaultScenePath with names derived from the volume name. Running the computation again, or on a stack with the same name, silently overwrites previous results, including any unrelated file that happens to have the same name in that folder. If defaultScenePath is empty (unsaved scene), the path degenerates to a root-level path such as \"/<name> Statistics.xlsx\" and the write fails with an unhandled exception. A renamed volume containing '/' also redirects output to another directory.",
+     "suggestion": "Let the user choose an output directory (or use a temporary/created subfolder), never overwrite without asking, sanitize the name component, and handle write errors with a user-visible message.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 1102
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Output files silently overwritten and user-controlled names used in paths",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1102,
+     "line_end": 1103,
+     "evidence": "jsonFileName = slicer.app.defaultScenePath + \"/\" + imageName + \" ROI Information.mrk.json\"\n        slicer.util.saveNode(roiNode, jsonFileName)",
+     "explanation": "Output files are written to slicer.app.defaultScenePath using the image node name (editable by the user through Rename Volume) and channel labels. Existing Statistics.xlsx, Venn, JSON and HTML files are overwritten without warning, and a name containing '/' or '..' can place files in subfolders or outside the intended folder.",
+     "suggestion": "Sanitize names used in file paths (strip path separators), warn before overwriting, or write into a timestamped subfolder.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 1102
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Three-channel label for channel 3 is chosen with the wrong condition",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 1204,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Three-channel label for channel 3 is chosen with the wrong condition",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1268,
+     "line_end": 1271,
+     "evidence": "if imageName in selectedChannelLabel2:\n              ChannelLabel3_in_csv = selectedChannelLabel3\n          else:\n              ChannelLabel3_in_csv = imageName + \"_\" + selectedChannelLabel3",
+     "explanation": "The name of ChannelLabel3_in_csv tests imageName against selectedChannelLabel2 instead of selectedChannelLabel3. If channel 2's label contains the image name but channel 3's does not, the channel 3 column name is wrong. The result is an incorrect name in the spreadsheet, the scatter-plot axis labels, and the file names of the 2D histograms.",
+     "suggestion": "Change the condition to 'if imageName in selectedChannelLabel3:'.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 1204
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Module-import-time pip_install and global suppression of all warnings",
+   "category": "environment",
+   "severity": "major",
+   "kind": "consensus",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major",
+    "minor"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Module-import-time pip_install and global suppression of all warnings",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 15,
+     "line_end": 20,
+     "evidence": "try:\n    import warnings\nexcept ModuleNotFoundError:\n    slicer.util.pip_install(\"warnings\")\n    import warnings",
+     "explanation": "Importing ColocZStats.py (which happens when the module is loaded, and for the pip fallback whenever numpy is absent) calls slicer.util.pip_install into Slicer's shared Python environment with no user consent, and line 20 `warnings.filterwarnings('ignore')` is executed unconditionally at import, silencing warnings for the entire Slicer application and every other extension loaded in that session. This is a global side effect that affects users who never open this module and can hide real problems (deprecations, VTK/Qt issues) from other code.",
+     "suggestion": "Remove the import-time pip_install and remove warnings.filterwarnings('ignore') from module scope (use a local context or specific warning filters inside the function that needs it).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 9
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "minor",
+     "title": "Pip install calls at module import time for built-in/bundled packages",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 9,
+     "line_end": 21,
+     "evidence": "try:\n   import numpy as np\nexcept ModuleNotFoundError:\n   slicer.util.pip_install(\"numpy\")\n   import numpy as np\n\ntry:\n    import warnings\nexcept ModuleNotFoundError:\n    slicer.util.pip_install(\"warnings\")\n    import warnings\nwarnings.filterwarnings('ignore')",
+     "explanation": "",
+     "suggestion": "Rely on Slicer's bundled Python modules (such as numpy and warnings) without attempting pip_install at import time.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 9
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Global suppression of all Python warnings at module import",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 15,
+     "line_end": 20,
+     "evidence": "try:\n      import warnings\n  except ModuleNotFoundError:\n      slicer.util.pip_install(\"warnings\")\n      import warnings\n  warnings.filterwarnings('ignore')",
+     "explanation": "Importing the module calls warnings.filterwarnings('ignore') which silences all warnings process-wide in Slicer, including for other extensions and the user's own scripts, for users who never open ColocZStats. This is a global side effect the rubric asks to avoid.",
+     "suggestion": "Remove the global filter. If warnings must be suppressed, use warnings.catch_warnings() around the specific calls. Also drop the pip_install('warnings') fallback, since warnings is stdlib.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 9
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unpinned, unconfirmed pip installs of many third-party packages into Slicer's environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "consensus",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major",
+    "minor"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Unpinned, unconfirmed pip installs of many third-party packages into Slicer's environment",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1407,
+     "line_end": 1411,
+     "evidence": "try:\n    import selenium\nexcept ModuleNotFoundError:\n    slicer.util.pip_install(\"selenium\")\n    import selenium",
+     "explanation": "On first use the module silently installs tifffile (line 807), matplotlib (1171), matplotlib_venn (1372, 1627), pandas (1404, 1663), selenium (1410, 1669), holoviews (1416, 1675) and xlsxwriter (1500, 1819) into Slicer's interpreter. These are heavy, unpinned packages with their own dependency trees (bokeh, param, trio, urllib3, etc.) that can upgrade or conflict with packages Slicer bundles, breaking Slicer or other extensions for all users of that installation. Nothing is declared in build_dependencies, and the download happens without asking the user.",
+     "suggestion": "Declare the required Python packages in the extension's build/dependency metadata and/or ask the user for explicit confirmation before any pip install; pin to versions known to work with the target Slicer Python, and avoid packages that can pull replacement versions of numpy/pandas.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 9
+     }
+    },
+    {
+     "reviewer": "flash-lite",
+     "severity": "minor",
+     "title": "Attempting pip_install for standard library module python-math",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1176,
+     "line_end": 1181,
+     "evidence": "    try:\n        import math\n    except ModuleNotFoundError:\n        slicer.util.pip_install(\"python-math\")\n        import math",
+     "explanation": "",
+     "suggestion": "Use Python's built-in math module without pip installation.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 9
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Runtime pip installs into Slicer's shared environment without user confirmation",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1401,
+     "line_end": 1418,
+     "evidence": "try:\n          import pandas as pd\n      except ModuleNotFoundError:\n          slicer.util.pip_install(\"pandas\")\n          import pandas as pd",
+     "explanation": "Packages such as pandas, selenium, holoviews, xlsxwriter, matplotlib, tifffile, and matplotlib_venn are installed with slicer.util.pip_install when they are missing. This happens silently during computation, can pull large dependency trees (holoviews/bokeh/pandas) and can change versions of packages Slicer bundles, such as numpy, for every user of the Slicer install.",
+     "suggestion": "Ask the user for confirmation before installing, declare these as Python requirements in the README, and avoid downgrading or pinning Slicer-bundled packages. Consider adding them to a documented install step.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 9
+     }
+    }
+   ]
+  },
+  {
+   "title": "Bundled test is a no-op stub",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 1850,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Bundled test is a no-op stub",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1850,
+     "line_end": 1852,
+     "evidence": "    def test_ColocZStats(self):\n        self.delayDisplay(\"Starting the test\")\n        self.delayDisplay('Test passed!')",
+     "explanation": "The test class registered via slicer_add_python_unittest always passes without loading data or exercising the colocalization math, so regressions in the metric formulas, TIFF channel splitting or parameter-node handling are not detected by CI. Testing/Python/CMakeLists.txt (line 2) is commented out entirely.",
+     "suggestion": "Add a test that synthesizes a small multi-channel TIFF/temporary volume, runs computeStats on a small ROI and asserts the computed Pearson/intersection values.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 1850
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Test case is an empty stub and the test CMake is disabled",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1850,
+     "line_end": 1852,
+     "evidence": "def test_ColocZStats(self):\n        self.delayDisplay(\"Starting the test\")\n        self.delayDisplay('Test passed!')",
+     "explanation": "ColocZStatsTest.test_ColocZStats only shows two delayDisplay messages and asserts nothing. Testing/Python/CMakeLists.txt has the real test registration commented out. CI therefore verifies only that the module loads, not the colocalization math.",
+     "suggestion": "Add tests with small synthetic TIFF stacks that check the coefficients and Venn subsets against known values, and enable the test registration.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 1850
+     }
+    }
+   ]
+  },
+  {
+   "title": "Heavy computation on the GUI thread with no progress feedback",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 820,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Heavy computation on the GUI thread with no progress feedback",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 816,
+     "line_end": 820,
+     "evidence": "image = tif.asarray()\n        for index in range(0, len(axes)):\n            if axes[index] == 'Z':",
+     "explanation": "computeStatsForVolumes loads the full stack (tif.asarray), builds several full-size float and boolean arrays, renders Bokeh figures, and writes Excel files synchronously. The README itself says this can take minutes, so the UI can freeze with no progress indication.",
+     "suggestion": "Use a progress dialog (slicer.util.createProgressDialog) or run the heavy computation in a worker, and avoid holding several copies of the stack in memory.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 820
+     }
+    }
+   ]
+  },
+  {
+   "title": "Result images shown in unparented QLabels that are never cleaned up",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 1393,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Result images shown in unparented QLabels that are never cleaned up",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1393,
+     "line_end": 1397,
+     "evidence": "if not widget.imageWidget:\n    widget.imageWidget = qt.QLabel()\nwidget.imageWidget.setPixmap(pm)\nwidget.imageWidget.setScaledContents(True)\nwidget.imageWidget.show()",
+     "explanation": "The Venn diagram and 2D-histogram labels are created without a parent and shown as separate top-level windows, are not placed in the module layout (no such widget exists in ColocZStats.ui), and are not closed on cleanup. Repeated runs create additional widgets (imageWidget2/3/4) and stray windows, so results are easy to miss and leak when the module is closed.",
+     "suggestion": "Add persistent result labels to the .ui layout and update their pixmaps, closing/hiding them in cleanup().",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 1393
+     }
+    }
+   ]
+  },
+  {
+   "title": "Scene observer added directly, not tracked by removeObservers()",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 119,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Scene observer added directly, not tracked by removeObservers()",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 119,
+     "line_end": 119,
+     "evidence": "slicer.mrmlScene.AddObserver(slicer.vtkMRMLScene.NodeAddedEvent, self.onNodeAdded)",
+     "explanation": "cleanup() only calls self.removeObservers() (line 362), which removes observers registered via VTKObservationMixin.addObserver; this one is added through the raw vtkMRMLScene.AddObserver call and stays connected after the widget is destroyed (e.g. on module reload or app shutdown). The callback then runs on a partially destroyed widget, producing Python errors or crashing Slicer.",
+     "suggestion": "Register this observer with self.addObserver(...) so cleanup() removes it.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 119
+     }
+    }
+   ]
+  },
+  {
+   "title": "Source tracked on a branch, and large GIF assets committed to the repository",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "README.md",
+   "line": 121,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Source tracked on a branch, and large GIF assets committed to the repository",
+     "file": "README.md",
+     "line_start": 119,
+     "line_end": 121,
+     "evidence": "<img src=\"https://github.com/ChenXiang96/SlicerColoc-Z-Stats/blob/main/Images/Colocalization-Computation.gif\" width=\"600px\">",
+     "explanation": "scm_revision is 'main', so the built extension can change without a catalog update, and the reviewed revision is not pinned. Images/ includes roughly 20 MB of GIFs (for example Colocalization-Computation.gif at about 13 MB) that are documentation only and bloat the clone.",
+     "suggestion": "Pin scm_revision to a reviewed commit (not required for admission but recommended), and move large GIFs to a release asset or a documentation site.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 121
+     }
+    }
+   ]
+  },
+  {
+   "title": "Undeclared runtime Python dependencies and unused import",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 4,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Undeclared runtime Python dependencies and unused import",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 4,
+     "line_end": 5,
+     "evidence": "import vtk, qt, ctk, slicer\nimport SegmentStatistics",
+     "explanation": "EXTENSION_DEPENDS is 'NA' and build_dependencies is empty, but the code needs tifffile, pandas, holoviews, bokeh, selenium, matplotlib, matplotlib_venn and xlsxwriter at run time. The module also imports SegmentStatistics at top level without using it. Users cannot tell what to install, and the SegmentStatistics import adds a load-time dependency for no reason.",
+     "suggestion": "Remove the unused SegmentStatistics import, and document the runtime Python packages (and the ChromeDriver requirement) in the README install section, or install them through a confirmed helper.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 4
+     }
+    }
+   ]
+  },
+  {
+   "title": "pip_install fallbacks for stdlib modules and a nonexistent package",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 9,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "pip_install fallbacks for stdlib modules and a nonexistent package",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1176,
+     "line_end": 1180,
+     "evidence": "try:\n    import math\nexcept ModuleNotFoundError:\n    slicer.util.pip_install(\"python-math\")\n    import math",
+     "explanation": "`math`, `decimal` (line 1093-1095) and `warnings` (line 18) are standard-library modules that are always present, so these branches are dead code; if they ever ran, they would attempt to install a nonexistent PyPI package ('python-math', 'decimal', 'warnings') and raise a pip error inside the computation. It shows the install logic was not reviewed and invites confusion about what the extension actually requires.",
+     "suggestion": "Delete the pip-install fallbacks for standard library modules.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 9
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Wrong or stdlib package names used in pip_install fallbacks",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1176,
+     "line_end": 1180,
+     "evidence": "try:\n            import math\n        except ModuleNotFoundError:\n            slicer.util.pip_install(\"python-math\")",
+     "explanation": "The fallbacks call pip_install(\"decimal\"), pip_install(\"python-math\") and pip_install(\"warnings\"). decimal, math and warnings are stdlib modules and should never hit the ModuleNotFoundError path. If that path is ever triggered, these names would install unrelated third-party PyPI packages into the Slicer environment, which is a supply-chain risk.",
+     "suggestion": "Remove the install fallbacks for stdlib modules (decimal, math, warnings, and the numpy fallback is also unnecessary because Slicer bundles numpy).",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 9
+     }
+    }
+   ]
+  },
+  {
+   "title": "sys.argv modified at import time",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 22,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "sys.argv modified at import time",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 22,
+     "line_end": 25,
+     "evidence": "import sys\n\nif not hasattr(sys, 'argv'):\n    sys.argv = ['']",
+     "explanation": "The module sets sys.argv to [''] when the attribute is missing. This is a global side effect at import that can affect other code running in the same interpreter.",
+     "suggestion": "Remove this block. Slicer always sets sys.argv for embedded Python.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 22
+     }
+    }
+   ]
+  },
+  {
+   "title": "Large committed icon and unused resource file",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "ColocZStats/Resources/Icons/ColocZStats.png",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Large committed icon and unused resource file",
+     "file": "ColocZStats/Resources/Icons/ColocZStats.png",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "",
+     "explanation": "A 501 KB PNG icon is installed with the module and an identical-size ColocZStats.png is committed at the repository root (referenced only as EXTENSION_ICONURL from raw GitHub, so it does not need to be in the package); Resources/qMRMLWidgets.qrc (8.9 KB) is neither installed by CMake nor used by the Python code. Not a functional defect, but the module payload is larger than necessary.",
+     "suggestion": "Shrink the installed icon and remove the unused .qrc file.",
+     "confidence": "medium",
+     "verification": {
+      "status": "no quote",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Every non-TIFF volume loaded afterwards triggers a modal warning from a global scene observer",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 767,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Every non-TIFF volume loaded afterwards triggers a modal warning from a global scene observer",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 767,
+     "line_end": 774,
+     "evidence": "if not (filename.endswith(\".tif\") or filename.endswith(\".tiff\")):\n    if filename.endswith(\".nrrd\"):\n        return\n    text = \"TIFF format Image required.\"",
+     "explanation": "onNodeAdded is registered on vtkMRMLScene.NodeAddedEvent (line 119) and calls createVolumesForChannels for every volume node added to the scene. Once the module widget has been created, loading any NIfTI, DICOM, MHA, NRRD-without-extension or other volume in any module pops a blocking 'TIFF format Image required.' message box. This interferes with normal Slicer workflows unrelated to the extension.",
+     "suggestion": "Only react to volumes the user intentionally added through this module, and report format problems non-modally (status bar) or only when the module is visible.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 767
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Full analysis, including headless-browser export, runs synchronously on the GUI thread",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 349,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Full analysis, including headless-browser export, runs synchronously on the GUI thread",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 349,
+     "line_end": 349,
+     "evidence": "        self.logic.computeStats(self)",
+     "explanation": "onComputeButtonClicked calls computeStats directly; inside, cropping, thresholding, Venn drawing, holoviews/bokeh rendering via selenium (hv.save at 1437, 1697, 1724, 1752) and Excel writing all execute in the Qt main thread with no progress bar and no cancellation. Slicer freezes for the duration (the README itself says 'a few seconds to a few minutes' at README.md:31), so the application appears hung and users may force-quit and lose work. hv.save with fmt='png' also needs a ChromeDriver that the README tells users to install manually (README.md:15) and fails obscurely if missing.",
+     "suggestion": "Run the computation in a CLI-node/cliRequest or at least in a worker thread with progress and a busy cursor; render PNGs with a backend that does not require an external browser driver, and report a clear error if the driver is unavailable.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 349
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Originally loaded volume node is removed from the scene without asking",
+   "category": "safety",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 909,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Originally loaded volume node is removed from the scene without asking",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 909,
+     "line_end": 910,
+     "evidence": "if not node in channelVolumeList:\n    slicer.mrmlScene.RemoveNode(node)",
+     "explanation": "As soon as a multi-channel TIFF is loaded (or on any volume add via the scene observer), createVolumesForChannels removes the node the user just loaded and replaces it with per-channel volumes; the same happens on error paths (lines 837, 851, 869, 879). Any intensity edits, display settings, transforms or other work attached to that node are lost with no confirmation and no undo, and the removal happens even when the user is working in another module (see the NodeAdded observer).",
+     "suggestion": "Ask the user before replacing the loaded volume (or keep the original node and hide it), and report explicitly what was removed.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 909
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "Results written to fixed paths in defaultScenePath, overwriting existing files without confirmation",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 1102,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Results written to fixed paths in defaultScenePath, overwriting existing files without confirmation",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1102,
+     "line_end": 1103,
+     "evidence": "jsonFileName = slicer.app.defaultScenePath + \"/\" + imageName + \" ROI Information.mrk.json\"\nslicer.util.saveNode(roiNode, jsonFileName)",
+     "explanation": "The ROI JSON, Venn JPEG, 2D-histogram PNG/HTML (1390, 1436, 1443, 1696, 1723, 1751) and the Excel workbook (1503, 1822) are written into slicer.app.defaultScenePath with names derived from the volume name. Running the computation again, or on a stack with the same name, silently overwrites previous results, including any unrelated file that happens to have the same name in that folder. If defaultScenePath is empty (unsaved scene), the path degenerates to a root-level path such as \"/<name> Statistics.xlsx\" and the write fails with an unhandled exception. A renamed volume containing '/' also redirects output to another directory.",
+     "suggestion": "Let the user choose an output directory (or use a temporary/created subfolder), never overwrite without asking, sanitize the name component, and handle write errors with a user-visible message.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 1102
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Output files silently overwritten and user-controlled names used in paths",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1102,
+     "line_end": 1103,
+     "evidence": "jsonFileName = slicer.app.defaultScenePath + \"/\" + imageName + \" ROI Information.mrk.json\"\n        slicer.util.saveNode(roiNode, jsonFileName)",
+     "explanation": "Output files are written to slicer.app.defaultScenePath using the image node name (editable by the user through Rename Volume) and channel labels. Existing Statistics.xlsx, Venn, JSON and HTML files are overwritten without warning, and a name containing '/' or '..' can place files in subfolders or outside the intended folder.",
+     "suggestion": "Sanitize names used in file paths (strip path separators), warn before overwriting, or write into a timestamped subfolder.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 1102
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Three-channel label for channel 3 is chosen with the wrong condition",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "ColocZStats/ColocZStats.py",
+   "line": 1204,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Three-channel label for channel 3 is chosen with the wrong condition",
+     "file": "ColocZStats/ColocZStats.py",
+     "line_start": 1268,
+     "line_end": 1271,
+     "evidence": "if imageName in selectedChannelLabel2:\n              ChannelLabel3_in_csv = selectedChannelLabel3\n          else:\n              ChannelLabel3_in_csv = imageName + \"_\" + selectedChannelLabel3",
+     "explanation": "The name of ChannelLabel3_in_csv tests imageName against selectedChannelLabel2 instead of selectedChannelLabel3. If channel 2's label contains the image name but channel 3's does not, the channel 3 column name is wrong. The result is an incorrect name in the spreadsheet, the scatter-plot axis labels, and the file names of the 2D histograms.",
+     "suggestion": "Change the condition to 'if imageName in selectedChannelLabel3:'.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "ColocZStats/ColocZStats.py",
+      "line": 1204
+     }
+    }
+   ],
+   "id": "D5"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D6",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of environment",
+   "category": "environment",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D8",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "environment": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "packaging": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 2,
+  "disputed": 8,
+  "single": 11,
+  "unverified": 0,
+  "total": 16
+ }
+}

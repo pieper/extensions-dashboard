@@ -1,0 +1,1053 @@
+{
+ "reviewers": [
+  "deepseek",
+  "flash-lite",
+  "haiku"
+ ],
+ "items": [
+  {
+   "title": "Hard-coded MRML node IDs ('vtkMRMLSegmentationNode1', 'vtkMRMLModelNode4') break the mesh workflow in non-empty scenes",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 640,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Hard-coded MRML node IDs ('vtkMRMLSegmentationNode1', 'vtkMRMLModelNode4') break the mesh workflow in non-empty scenes",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 640,
+     "line_end": 649,
+     "evidence": "      SegNode_View = slicer.util.getNode('vtkMRMLSegmentationNode1')\n      SegNode_View.SetDisplayVisibility(0)\n\n      slicer.util.loadModel(name2)\n\n      #Add skin color\n      ModelNode_color= slicer.util.getNode('vtkMRMLModelNode4')",
+     "explanation": "The code assumes the segmentation it just created is named vtkMRMLSegmentationNode1 and that the model it just loaded is vtkMRMLModelNode4. In any scene that already contains segmentation or model nodes (a normal working session, or a reloaded scene) these IDs belong to other nodes: the wrong node is hidden, and getNode('vtkMRMLModelNode4') either returns an unrelated node (wrong colour applied) or raises 'node not found', aborting the workflow after the STL has already been written. Same pattern at lines 759-767.",
+     "suggestion": "Keep the node objects returned by AddNewNodeByClass/loadModel in local variables and use them directly instead of looking nodes up by generated ID.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 640
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Hard-coded scene node IDs break mesh creation and can alter unrelated nodes",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 640,
+     "line_end": 646,
+     "evidence": "SegNode_View = slicer.util.getNode('vtkMRMLSegmentationNode1')\nSegNode_View.SetDisplayVisibility(0)\n\nslicer.util.loadModel(name2)\n\n#Add skin color\nModelNode_color= slicer.util.getNode('vtkMRMLModelNode4')",
+     "explanation": "mesh() and mesh2() look up nodes by fixed IDs. If the user's scene already contains a segmentation or model with those IDs (for example after a previous run or with other data loaded), slicer.util.getNode returns the wrong node. The code then hides that node (SetDisplayVisibility(0)) and recolours it. If the ID is absent, the call raises an exception after the STL has already been written.",
+     "suggestion": "Keep references to the nodes that were created (the segmentationNode object and the node returned by loadModel), and use those instead of looking up fixed IDs. Apply the same fix in mesh2 (lines 759-764).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 640
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Mesh output is written next to the input volume file, silently overwriting any existing '<volume>.stl'",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 626,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Mesh output is written next to the input volume file, silently overwriting any existing '<volume>.stl'",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 624,
+     "line_end": 632,
+     "evidence": "      volumeNode2 = slicer.util.getNode(nom)\n      filename2 = volumeNode2.GetStorageNode().GetFileName()\n      nom=filename2+'.stl'\n      logging.info('Model is writing')\n      writer.SetFileName(nom)",
+     "explanation": "Clicking 'Create a quick mesh'/'Create a mesh' derives the output path from the input volume's storage filename and writes an STL into the user's own data directory without asking. If a file with that name already exists it is overwritten without confirmation; if the volume has no storage node (e.g. a volume created in the scene or loaded from DICOM) GetStorageNode() returns None and the call raises AttributeError, and if the filename is empty the STL is written as '.stl' in the process working directory. Same pattern at lines 742-750 in mesh2().",
+     "suggestion": "Write to a temporary directory or ask the user for an output path (e.g. qt.QFileDialog / slicer.util.getNewFileName), and guard against a missing storage node or empty filename.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 626
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Output STL is written beside the source volume with no check or confirmation",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 626,
+     "line_end": 630,
+     "evidence": "volumeNode2 = slicer.util.getNode(nom)\nfilename2 = volumeNode2.GetStorageNode().GetFileName()\nnom=filename2+'.stl'",
+     "explanation": "The output path is derived from the volume's storage file name plus '.stl'. The file is overwritten silently if it exists. If the volume was never saved, GetStorageNode() returns None and the call crashes after the segmentation work is done.",
+     "suggestion": "Write to a user-chosen or temporary location, or at least check that the storage node exists and warn before overwriting. Keep the mesh in the scene where possible.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 626
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Unbounded convergence loop in EEG() can freeze Slicer",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 1036,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Unbounded convergence loop in EEG() can freeze Slicer",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 1036,
+     "line_end": 1036,
+     "evidence": "      while closestPointIdCz_tmp_cor !=closestPointIdCz_tmp_sag:",
+     "explanation": "The Cz search iterates until the sagittal and coronal midpoints map to the same mesh vertex. There is no iteration cap, no progress update and no cancel check inside the loop, and each iteration runs several full Dijkstra passes on the whole scalp mesh. On a mesh where the two estimates never coincide (coarse or asymmetric mesh, misplaced landmarks) the loop runs forever on the GUI thread and the user must kill Slicer.",
+     "suggestion": "Add a maximum iteration count (and/or a distance tolerance) and report failure to the user; update the progress dialog and check progressBar.wasCanceled() inside the loop.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 1036
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Unbounded fixed-point loop in EEG() can hang the GUI",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 1034,
+     "line_end": 1036,
+     "evidence": "closestPointIdCz_tmp_sag=0 #to determine Cz\n\n    while closestPointIdCz_tmp_cor !=closestPointIdCz_tmp_sag:",
+     "explanation": "The Cz search loop repeats until the closest-vertex index from the sagittal pass equals the one from the coronal pass. Nothing caps the iterations, and the loop runs on the GUI thread. If the two estimates oscillate between vertices, Slicer freezes with no way out.",
+     "suggestion": "Add a maximum iteration count with a user-facing error, and run the computation with progress feedback so the GUI stays responsive.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 1034
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "onApplyCorrect replaces the slider widget attribute with an int, causing AttributeError on later UI updates",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 473,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "onApplyCorrect replaces the slider widget attribute with an int, causing AttributeError on later UI updates",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 473,
+     "line_end": 478,
+     "evidence": "    def onApplyCorrect(self):\n      logic = GeodesicSlicerLogic()\n      self.MTunadjusted = self.skip",
+     "explanation": "self.MTunadjusted is the ctkSliderWidget created in setup(); after 'Correct the motor threshold' is clicked it becomes a plain int. Any later call that touches the widget (e.g. onM1SiteOff at line 453 'self.MTunadjusted.enabled = False', or onM1SiteOn line 463) raises AttributeError: 'int' object has no attribute 'enabled', leaving the rTMS correction panel in a broken state. self.skip is also only assigned in onTubeUpdated, so the value depends on whether the slider ever emitted valueChanged.",
+     "suggestion": "Read the value with self.MTunadjusted.value and pass it to the logic; never rebind the widget attribute.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 473
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Catalog pins the moving branch 'master' instead of a commit",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": true,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "GeodesicSlicer.json",
+   "line": 1,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Catalog pins the moving branch 'master' instead of a commit",
+     "file": "GeodesicSlicer.json",
+     "line_start": 1,
+     "line_end": 1,
+     "evidence": "\"scm_revision\": \"master\",",
+     "explanation": "scm_revision is a branch name, so the revision built by the index can change without a catalog update. The reviewed source is commit 9641c81, which the index does not record.",
+     "suggestion": "Pin scm_revision to a full commit hash, such as 9641c81e8fef5183594f53f40bffad01b1a0a0b8, that has been reviewed.",
+     "confidence": "high",
+     "verification": {
+      "status": "file not found",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Dead or unused code paths in the widget",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 408,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Dead code: onSelect references a nonexistent outputSelector",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 408,
+     "line_end": 409,
+     "evidence": "    def onSelect(self):\n      self.applyButton.enabled = self.inputTargetModelSelector.currentNode() and self.outputSelector.currentNode()",
+     "explanation": "onSelect is never connected and refers to self.outputSelector, which is never created; if it were ever wired up it would raise AttributeError. Harmless today but misleading.",
+     "suggestion": "Remove the method or implement it against the real selectors.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 408
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Dead or unused code paths in the widget",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 408,
+     "line_end": 409,
+     "evidence": "def onSelect(self):\n      self.applyButton.enabled = self.inputTargetModelSelector.currentNode() and self.outputSelector.currentNode()",
+     "explanation": "onSelect refers to self.outputSelector, which is never created, so it would fail if called. Both 'Find the shortest path' and 'Make 10-20' reuse self.applyButton and self.inputTargetModelSelector. The reused names are harmless only because connections are made before reassignment. This is confusing and fragile.",
+     "suggestion": "Remove onSelect and give each widget a unique name.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 408
+     }
+    }
+   ]
+  },
+  {
+   "title": "Electrode selection depends on fiducial order via fixed slice indices",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 1771,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Electrode selection depends on fiducial order via fixed slice indices",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 1771,
+     "line_end": 1772,
+     "evidence": "EEG_electrodes_real=EEG_electrodes[4:-3] #remove nasion,inion,tragus left & right, stim_point & T3P3\nEEG_electrodes_names_real=EEG_electrodes_names[4:-3]",
+     "explanation": "ProjectedPoint assumes the first four fiducials are the landmarks and the last three are the stimulation point and T3P3. A user who adds or reorders fiducials gets a wrong nearest-electrode list with no warning.",
+     "suggestion": "Select electrodes by their label names rather than by slice position, and validate the fiducial count and labels before use.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 1771
+     }
+    }
+   ]
+  },
+  {
+   "title": "Fewer than two fiducials raises IndexError despite the 'Add at least two fiducials' check",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 814,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Fewer than two fiducials raises IndexError despite the 'Add at least two fiducials' check",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 814,
+     "line_end": 831,
+     "evidence": "      numFids = fiducialInput.currentNode().GetNumberOfFiducials()\n\n      list=[]\n      for i in range(numFids):\n          ras = [0,0,0]\n          fiducialInput.currentNode().GetNthFiducialPosition(i,ras)\n          #print(i,\": RAS =\",ras)\n          list.append(ras)",
+     "explanation": "The guard at line 791 only checks that a markups node is selected, not how many fiducials it holds; line 831 then evaluates list[1], so with 0 or 1 fiducials the user gets a Python IndexError traceback instead of the intended error dialog. Same pattern in draw() (lines 913-930).",
+     "suggestion": "Check numFids >= 2 and show the error dialog before indexing the list.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 814
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Input validation misses fewer than two fiducials and fails with an IndexError",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 791,
+     "line_end": 794,
+     "evidence": "if not fiducialInput.currentNode():\n        error_text='Add at least two fiducials'",
+     "explanation": "run_djikstra and draw check only that a fiducial node exists. They then index list[1] (lines 830-831, 929-930), so a node with a single point raises an unhandled IndexError with no user message.",
+     "suggestion": "Check GetNumberOfFiducials() >= 2 (and == 4 for EEG, which already exists) and show the error text the message promises.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 791
+     }
+    }
+   ]
+  },
+  {
+   "title": "GetStorageNode() may be None for scene-created or DICOM-loaded models",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 804,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "GetStorageNode() may be None for scene-created or DICOM-loaded models",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 803,
+     "line_end": 807,
+     "evidence": "      nom = inputModel.GetName()\n      volumeNode = slicer.util.getNode(nom)\n      filename = volumeNode.GetStorageNode().GetFileName()",
+     "explanation": "run_djikstra(), draw() and EEG() (lines 806, 905, 997) look the model up by name and dereference GetStorageNode() unconditionally. A model without a storage node (created in the scene, or loaded from a scene file) yields AttributeError, and a duplicate node name can select the wrong node. The retrieved filename is only used for logging in run_djikstra/EEG, so the crash is avoidable.",
+     "suggestion": "Use the model node passed in directly and guard the storage-node lookup (or drop it where it is only logged).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 804
+     }
+    }
+   ]
+  },
+  {
+   "title": "Long computations run on the GUI thread; mesh2() blocks it with time.sleep",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "minor"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 593,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Long computations run on the GUI thread; mesh2() blocks it with time.sleep",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 705,
+     "line_end": 716,
+     "evidence": "      progressBar.value = 10\n      time.sleep(5)",
+     "explanation": "mesh()/mesh2()/EEG()/ProjectedPoint()/CorrectedPoint() run thresholding, morphological closing and many Dijkstra passes synchronously in the button callback; mesh2() additionally sleeps 5 s twice and 3 s once (lines 707, 716, 740), during which the UI is frozen and the progress dialog cannot be cancelled. Only a few code paths call slicer.app.processEvents().",
+     "suggestion": "Move the heavy work to a CLI module or a worker thread (slicer.util.ProgressDialog with wasCanceled checks) and remove the artificial sleeps.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 593
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Blocking time.sleep calls on the GUI thread in mesh2",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 707,
+     "line_end": 707,
+     "evidence": "      progressBar.value = 10\n      time.sleep(5)",
+     "explanation": "mesh2 calls time.sleep for 5, 5, and 3 seconds in the GUI thread, so the application freezes during those pauses. The sleeps are not needed for the computation.",
+     "suggestion": "Remove the sleeps. Use processEvents or a progress dialog if needed.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 593
+     }
+    }
+   ]
+  },
+  {
+   "title": "No parameter node; logic state is stored on throw-away logic instances",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 486,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "No parameter node; logic state is stored on throw-away logic instances",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 486,
+     "line_end": 489,
+     "evidence": "    def __init__(self):\n      self.StimulationPoint = 0\n      self.M1Site = 0\n      self.MTunadjusted = 100",
+     "explanation": "Every callback constructs a new GeodesicSlicerLogic() (e.g. lines 426-443), so setStimulationPoint()/setM1Site() write to objects that are immediately discarded; the values are never read anywhere, so the radio-button state has no effect on the computation. Nothing is stored in a parameter node, so module state is not saved with the scene and cannot be scripted, contrary to Slicer conventions. The base-class __init__ is also not called.",
+     "suggestion": "Use a vtkMRMLScriptedModuleNode parameter node (or a single widget-owned logic instance) and read the state from there.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 486
+     }
+    }
+   ]
+  },
+  {
+   "title": "No working test suite",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "GeodesicSlicer/Testing/Python/CMakeLists.txt",
+   "line": 2,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "No working test suite",
+     "file": "GeodesicSlicer/Testing/Python/CMakeLists.txt",
+     "line_start": 2,
+     "line_end": 2,
+     "evidence": "#slicer_add_python_unittest(SCRIPT ${MODULE_NAME}ModuleTest.py)",
+     "explanation": "The module's unit-test registration is commented out, and no test class is defined in the module file. Changes to geodesic or threshold calculations cannot be checked automatically.",
+     "suggestion": "Add a small test using the bundled template, or a synthetic mesh, to check path length and fiducial placement.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/Testing/Python/CMakeLists.txt",
+      "line": 2
+     }
+    }
+   ]
+  },
+  {
+   "title": "README points to files/folders that do not exist at this revision",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "README.md",
+   "line": 13,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "README points to files/folders that do not exist at this revision",
+     "file": "README.md",
+     "line_start": 11,
+     "line_end": 16,
+     "evidence": "- See License.txt for information on using and contributing.\n\n### Template\nIn Example_template folder",
+     "explanation": "The repository contains LICENSE/LICENCE (not License.txt) and no Example_template directory at commit 9641c81, so the advertised sample data and license pointer are dead links; users have no sample data to try the module with.",
+     "suggestion": "Fix the file names in README and either commit the example template or link to where it can be downloaded.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 13
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Outdated documentation link and debug prints",
+     "file": "README.md",
+     "line_start": 8,
+     "line_end": 8,
+     "evidence": "- For documentation, tutorials, and more information about the extension, please see: https://www.slicer.org/wiki/Documentation/4.10/Modules/GeodesicSlicer",
+     "explanation": "The README and help text point to a 4.10 wiki page. The module prints debug output (print(nom), print ('length= ' ...)) during processing, which clutters the Python console.",
+     "suggestion": "Point to current documentation and replace print calls with logging.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "README.md",
+      "line": 8
+     }
+    }
+   ]
+  },
+  {
+   "title": "Skin segmentation uses hard-coded CT Hounsfield thresholds",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 589,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Skin segmentation uses hard-coded CT Hounsfield thresholds",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 587,
+     "line_end": 591,
+     "evidence": "      effect.setParameter(\"MinimumThreshold\",\"100\") #adjusting according to your data\n      effect.setParameter(\"MaximumThreshold\",\"5000\") #adjusting according to your data",
+     "explanation": "The threshold 100..5000 HU only makes sense for CT. With an MRI volume (the module's own example template is a .nii) the segment is empty or wrong, and the subsequent surface extraction/Dijkstra steps silently produce meaningless paths rather than an error. Same values at lines 702-703.",
+     "suggestion": "Expose the threshold range in the UI (or auto-detect CT vs MR) and warn when the resulting segment is empty.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 589
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unit test is registered but the module contains no test class",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "GeodesicSlicer/CMakeLists.txt",
+   "line": 22,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "Unit test is registered but the module contains no test class",
+     "file": "GeodesicSlicer/CMakeLists.txt",
+     "line_start": 22,
+     "line_end": 29,
+     "evidence": "if(BUILD_TESTING)\n\n  # Register the unittest subclass in the main script as a ctest.\n  # Note that the test will also be available at runtime.\n  slicer_add_python_unittest(SCRIPT ${MODULE_NAME}.py)",
+     "explanation": "slicer_add_python_unittest is pointed at GeodesicSlicer.py, but the file defines no unittest.TestCase subclass (only 'import unittest' at line 57), so the registered ctest exercises nothing; GeodesicSlicer/Testing/Python/CMakeLists.txt is entirely commented out. Users therefore get no automated verification of the geodesic/10-20 computations.",
+     "suggestion": "Add a real test class (e.g. GeodesicSlicerTest) using the bundled template data, or remove the test registration.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/CMakeLists.txt",
+      "line": 22
+     }
+    }
+   ]
+  },
+  {
+   "title": "draw() reloads the model file for every fiducial pair and rewires the model's polydata connection",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 955,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "minor",
+     "title": "draw() reloads the model file for every fiducial pair and rewires the model's polydata connection",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 955,
+     "line_end": 962,
+     "evidence": "          model2 = slicer.util.loadModel(filename)\n          model2.GetDisplayNode().SetColor(1,0,0)\n          dijkstra2 = vtk.vtkDijkstraGraphGeodesicPath()\n          dijkstra2.SetInputConnection(model2.GetPolyDataConnection())\n          model2.SetPolyDataConnection(dijkstra2.GetOutputPort())",
+     "explanation": "Each loop iteration loads another copy of the STL into the scene and points the model node's polydata connection at a Dijkstra filter output, which is not a supported way to display a path; the scene accumulates duplicate models and the drawn path is not stored as a proper model/markup node. The computed path points are discarded.",
+     "suggestion": "Compute the path once from the already-loaded model and add the resulting polyline as a vtkMRMLModelNode (or markups curve).",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 955
+     }
+    }
+   ]
+  },
+  {
+   "title": "Duplicate license files and unfilled template text in source headers",
+   "category": "license",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "haiku"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 11,
+   "findings": [
+    {
+     "reviewer": "haiku",
+     "severity": "info",
+     "title": "Duplicate license files and unfilled template text in source headers",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 11,
+     "line_end": 11,
+     "evidence": "# Ce logiciel est un programme informatique servant à [rappeler les caractéristiques techniques de votre logiciel].",
+     "explanation": "LICENCE and LICENSE are both present, with different sizes (22364 and 21778 bytes). The module header still has placeholders such as '[rappeler les caractéristiques techniques de votre logiciel]'. These do not block distribution but should be cleaned up.",
+     "suggestion": "Keep one license file and replace the placeholder descriptions in the headers.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 11
+     }
+    }
+   ]
+  },
+  {
+   "title": "Text-scan hint about 25 MB / 70 MB template files is not reproducible at this revision",
+   "category": "utility",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": null,
+   "line": 0,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "info",
+     "title": "Text-scan hint about 25 MB / 70 MB template files is not reproducible at this revision",
+     "file": "",
+     "line_start": 0,
+     "line_end": 0,
+     "evidence": "",
+     "explanation": "A recursive listing of the repository at commit 9641c81 shows only CMakeLists.txt, README.md, LICENCE, LICENSE, .gitignore, two PNGs and the module sources - there is no Example_template/Template.nii or Template.stl. The large-file hint therefore does not apply to this revision (the README reference to the folder is still stale, see the utility finding).",
+     "suggestion": "No action needed for repository size.",
+     "confidence": "high",
+     "verification": {
+      "status": "no quote",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Hard-coded MRML node IDs ('vtkMRMLSegmentationNode1', 'vtkMRMLModelNode4') break the mesh workflow in non-empty scenes",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "major"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 640,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Hard-coded MRML node IDs ('vtkMRMLSegmentationNode1', 'vtkMRMLModelNode4') break the mesh workflow in non-empty scenes",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 640,
+     "line_end": 649,
+     "evidence": "      SegNode_View = slicer.util.getNode('vtkMRMLSegmentationNode1')\n      SegNode_View.SetDisplayVisibility(0)\n\n      slicer.util.loadModel(name2)\n\n      #Add skin color\n      ModelNode_color= slicer.util.getNode('vtkMRMLModelNode4')",
+     "explanation": "The code assumes the segmentation it just created is named vtkMRMLSegmentationNode1 and that the model it just loaded is vtkMRMLModelNode4. In any scene that already contains segmentation or model nodes (a normal working session, or a reloaded scene) these IDs belong to other nodes: the wrong node is hidden, and getNode('vtkMRMLModelNode4') either returns an unrelated node (wrong colour applied) or raises 'node not found', aborting the workflow after the STL has already been written. Same pattern at lines 759-767.",
+     "suggestion": "Keep the node objects returned by AddNewNodeByClass/loadModel in local variables and use them directly instead of looking nodes up by generated ID.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 640
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "major",
+     "title": "Hard-coded scene node IDs break mesh creation and can alter unrelated nodes",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 640,
+     "line_end": 646,
+     "evidence": "SegNode_View = slicer.util.getNode('vtkMRMLSegmentationNode1')\nSegNode_View.SetDisplayVisibility(0)\n\nslicer.util.loadModel(name2)\n\n#Add skin color\nModelNode_color= slicer.util.getNode('vtkMRMLModelNode4')",
+     "explanation": "mesh() and mesh2() look up nodes by fixed IDs. If the user's scene already contains a segmentation or model with those IDs (for example after a previous run or with other data loaded), slicer.util.getNode returns the wrong node. The code then hides that node (SetDisplayVisibility(0)) and recolours it. If the ID is absent, the call raises an exception after the STL has already been written.",
+     "suggestion": "Keep references to the nodes that were created (the segmentationNode object and the node returned by loadModel), and use those instead of looking up fixed IDs. Apply the same fix in mesh2 (lines 759-764).",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 640
+     }
+    }
+   ],
+   "id": "D1"
+  },
+  {
+   "title": "Mesh output is written next to the input volume file, silently overwriting any existing '<volume>.stl'",
+   "category": "safety",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 626,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Mesh output is written next to the input volume file, silently overwriting any existing '<volume>.stl'",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 624,
+     "line_end": 632,
+     "evidence": "      volumeNode2 = slicer.util.getNode(nom)\n      filename2 = volumeNode2.GetStorageNode().GetFileName()\n      nom=filename2+'.stl'\n      logging.info('Model is writing')\n      writer.SetFileName(nom)",
+     "explanation": "Clicking 'Create a quick mesh'/'Create a mesh' derives the output path from the input volume's storage filename and writes an STL into the user's own data directory without asking. If a file with that name already exists it is overwritten without confirmation; if the volume has no storage node (e.g. a volume created in the scene or loaded from DICOM) GetStorageNode() returns None and the call raises AttributeError, and if the filename is empty the STL is written as '.stl' in the process working directory. Same pattern at lines 742-750 in mesh2().",
+     "suggestion": "Write to a temporary directory or ask the user for an output path (e.g. qt.QFileDialog / slicer.util.getNewFileName), and guard against a missing storage node or empty filename.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 626
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Output STL is written beside the source volume with no check or confirmation",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 626,
+     "line_end": 630,
+     "evidence": "volumeNode2 = slicer.util.getNode(nom)\nfilename2 = volumeNode2.GetStorageNode().GetFileName()\nnom=filename2+'.stl'",
+     "explanation": "The output path is derived from the volume's storage file name plus '.stl'. The file is overwritten silently if it exists. If the volume was never saved, GetStorageNode() returns None and the call crashes after the segmentation work is done.",
+     "suggestion": "Write to a user-chosen or temporary location, or at least check that the storage node exists and warn before overwriting. Keep the mesh in the scene where possible.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 626
+     }
+    }
+   ],
+   "id": "D2"
+  },
+  {
+   "title": "Unbounded convergence loop in EEG() can freeze Slicer",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "haiku"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 1036,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "Unbounded convergence loop in EEG() can freeze Slicer",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 1036,
+     "line_end": 1036,
+     "evidence": "      while closestPointIdCz_tmp_cor !=closestPointIdCz_tmp_sag:",
+     "explanation": "The Cz search iterates until the sagittal and coronal midpoints map to the same mesh vertex. There is no iteration cap, no progress update and no cancel check inside the loop, and each iteration runs several full Dijkstra passes on the whole scalp mesh. On a mesh where the two estimates never coincide (coarse or asymmetric mesh, misplaced landmarks) the loop runs forever on the GUI thread and the user must kill Slicer.",
+     "suggestion": "Add a maximum iteration count (and/or a distance tolerance) and report failure to the user; update the progress dialog and check progressBar.wasCanceled() inside the loop.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 1036
+     }
+    },
+    {
+     "reviewer": "haiku",
+     "severity": "minor",
+     "title": "Unbounded fixed-point loop in EEG() can hang the GUI",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 1034,
+     "line_end": 1036,
+     "evidence": "closestPointIdCz_tmp_sag=0 #to determine Cz\n\n    while closestPointIdCz_tmp_cor !=closestPointIdCz_tmp_sag:",
+     "explanation": "The Cz search loop repeats until the closest-vertex index from the sagittal pass equals the one from the coronal pass. Nothing caps the iterations, and the loop runs on the GUI thread. If the two estimates oscillate between vertices, Slicer freezes with no way out.",
+     "suggestion": "Add a maximum iteration count with a user-facing error, and run the computation with progress feedback so the GUI stays responsive.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 1034
+     }
+    }
+   ],
+   "id": "D3"
+  },
+  {
+   "title": "onApplyCorrect replaces the slider widget attribute with an int, causing AttributeError on later UI updates",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "deepseek"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "GeodesicSlicer/GeodesicSlicer.py",
+   "line": 473,
+   "findings": [
+    {
+     "reviewer": "deepseek",
+     "severity": "major",
+     "title": "onApplyCorrect replaces the slider widget attribute with an int, causing AttributeError on later UI updates",
+     "file": "GeodesicSlicer/GeodesicSlicer.py",
+     "line_start": 473,
+     "line_end": 478,
+     "evidence": "    def onApplyCorrect(self):\n      logic = GeodesicSlicerLogic()\n      self.MTunadjusted = self.skip",
+     "explanation": "self.MTunadjusted is the ctkSliderWidget created in setup(); after 'Correct the motor threshold' is clicked it becomes a plain int. Any later call that touches the widget (e.g. onM1SiteOff at line 453 'self.MTunadjusted.enabled = False', or onM1SiteOn line 463) raises AttributeError: 'int' object has no attribute 'enabled', leaving the rTMS correction panel in a broken state. self.skip is also only assigned in onTubeUpdated, so the value depends on whether the slider ever emitted valueChanged.",
+     "suggestion": "Read the value with self.MTunadjusted.value and pass it to the logic; never rebind the widget attribute.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "GeodesicSlicer/GeodesicSlicer.py",
+      "line": 473
+     }
+    }
+   ],
+   "id": "D4"
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "deepseek",
+    "flash-lite",
+    "haiku"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D5",
+   "rating_dispute": {
+    "deepseek": "concern",
+    "flash-lite": "ok",
+    "haiku": "concern"
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5"
+ ],
+ "matrix": {
+  "safety": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "environment": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "packaging": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  },
+  "license": {
+   "deepseek": "ok",
+   "flash-lite": "ok",
+   "haiku": "ok"
+  },
+  "soundness": {
+   "deepseek": "concern",
+   "flash-lite": "ok",
+   "haiku": "concern"
+  },
+  "utility": {
+   "deepseek": "minor",
+   "flash-lite": "ok",
+   "haiku": "minor"
+  }
+ },
+ "overall": {
+  "deepseek": "needs fixes",
+  "flash-lite": "no concerns",
+  "haiku": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 5,
+  "single": 11,
+  "unverified": 1,
+  "total": 18
+ }
+}

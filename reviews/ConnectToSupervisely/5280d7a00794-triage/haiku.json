@@ -1,0 +1,102 @@
+{
+ "purpose": "A 3D Slicer scripted-module extension (two modules, Labeling Jobs Annotating and Reviewing) that lets users download volumes and masks from, and upload annotations to, a Supervisely server. It is for Supervisely users who run labeling jobs and want to annotate or review volumetric data in Slicer.",
+ "summary": "The code is a plausible, MIT-licensed Slicer scripted module with CMake files that list every imported Python file and an EXTENSION_DEPENDS value that matches the catalog entry. The main concern is that opening the module installs the pinned supervisely SDK and its missing transitive dependencies into Slicer's shared Python environment after only an informational dialog, followed by a forced restart. Credentials can be stored in plaintext in a home-directory .env file when the user ticks \"remember login\". The catalog entry tracks the floating \"master\" branch. I did not run anything, and I did not inspect segmentation logic beyond the first 120 lines.",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "minor",
+   "rationale": "No telemetry or hidden data flows were seen; data goes only to the server the user enters. Plaintext token storage is opt-in via rememberLogin and disclosed in README.md:139. Code was read in utils.py, baseLogic.py and ui.py; the .github workflow was only grep-matched."
+  },
+  "environment": {
+   "rating": "concern",
+   "rationale": "utils.py:162-167 pip-installs supervisely==6.74.48 with --no-deps and then installs missing transitive requirements into Slicer's Python, triggered from import_supervisely (utils.py:179-218) when the module is opened. The only consent is an informational SuperviselyDialog 'info' box, and Slicer restarts afterwards. Transitive installs could also move existing packages; the code records and restores them, which mitigates this."
+  },
+  "packaging": {
+   "rating": "ok",
+   "rationale": "CMakeLists.txt and ConnectToSupervisely/CMakeLists.txt list all 5 moduleLib files and the .py modules, and the listed Resources exist per the file list. EXTENSION_DEPENDS \"NA\" matches build_dependencies []. Tier 1 is set. scm_revision is the branch 'master', which is not a pinned commit."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE is MIT (Copyright 2024 Supervisely Ecosystem) and permits redistribution. No bundled third-party code was seen in the reviewed files."
+  },
+  "soundness": {
+   "rating": "minor",
+   "rationale": "The code follows the ScriptedLoadableModule layout and uses tryWithErrorDisplay for errors. Observers are not removed in cleanup, and the logic is large and tightly coupled. onSelectTeam/onSelectJob clear local data when the user declines to save. The network and upload paths were not exercised."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "There is a README and FOR_DEVELOPERS.md, plus screenshots and a helpText pointing to docs. No tests or sample data were found in the file list. Maintenance activity could not be checked."
+  }
+ },
+ "findings": [
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Opening the module silently installs the supervisely SDK and missing dependencies into Slicer's shared Python, then restarts Slicer",
+   "file": "ConnectToSupervisely/moduleLib/utils.py",
+   "line_start": 162,
+   "line_end": 167,
+   "evidence": "if get_installed_version(\"supervisely\") != SUPERVISELY_VERSION:\n            slicer.util.pip_install(f\"--no-deps supervisely=={SUPERVISELY_VERSION}\")\n            importlib.invalidate_caches()\n        missing = get_missing_requirements()\n        if missing:\n            slicer.util.pip_install(\" \".join(shlex.quote(r) for r in missing))",
+   "explanation": "On first open, import_supervisely shows an informational dialog and calls install_supervisely, which runs pip install --no-deps for an exact SDK pin plus any missing transitive requirements, then forces slicer.util.restart(). The user is not asked to confirm, and this affects the whole Slicer process, not just this module. Any transitive dependency that is pulled in can change other extensions' environment. The change is recorded and a restore button is offered, which partly mitigates the risk. The dependency set of supervisely 6.74.48 was not inspected, so whether it pulls packages that bundle Qt or VTK is unknown.",
+   "suggestion": "Ask for explicit confirmation before downloading and installing (the current dialog is informational only). Document the packages that will be added to Slicer's environment. Check that the transitive set does not include Qt/VTK bundles or packages Slicer pins, such as numpy or requests, and state this in the README.",
+   "confidence": "medium"
+  },
+  {
+   "category": "safety",
+   "severity": "minor",
+   "title": "Server token and login name are stored in plaintext in a home-directory .env file when 'remember login' is ticked",
+   "file": "ConnectToSupervisely/moduleLib/baseLogic.py",
+   "line_start": 157,
+   "line_end": 172,
+   "evidence": "self.api = Api.from_credentials(\n            server_address=self.ui.serverAddress.text,\n            login=self.ui.login.text,\n            password=self.ui.password.text,\n            override=self.ui.rememberLogin.isChecked(),\n            env_file=ENV_FILE_PATH,\n        )",
+   "explanation": "With rememberLogin checked, Api.from_credentials is called with override=True and env_file pointing to ~/supervisely_slicer.env. The file then holds the account token in plaintext, and any local user or process with read access to the home directory can use it. The behaviour is opt-in and disclosed in the README, so this is a minor hardening issue rather than a concealed-data problem.",
+   "suggestion": "Store the token with OS keychain or restricted file permissions (chmod 600) where possible. Keep the opt-in wording explicit in the UI, noting that the token is saved in plaintext.",
+   "confidence": "medium"
+  },
+  {
+   "category": "packaging",
+   "severity": "info",
+   "title": "Catalog entry tracks the floating 'master' branch rather than a pinned commit",
+   "file": "",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "\"scm_revision\": \"master\",",
+   "explanation": "scm_revision is 'master', so the index build will fetch whatever commit is at the branch tip at build time. The reviewed commit 5280d7a is not the revision the index will build. This is a reproducibility concern, not a defect, and it is acceptable under the index policy for branch references.",
+   "suggestion": "Consider pinning scm_revision to the reviewed commit 5280d7a007948ac0486b57edaf55aefdb6479c6a so the reviewed code is what gets built, and bump it on each update.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Module-level logging level is changed globally in enter() without restore on exception",
+   "file": "ConnectToSupervisely/labelingJobsAnnotating.py",
+   "line_start": 134,
+   "line_end": 143,
+   "evidence": "logger = logging.getLogger()\n            original_level = logger.getEffectiveLevel()\n            logger.setLevel(logging.CRITICAL)\n            activeModule = dotenv.get_key(ENV_FILE_PATH, \"ACTIVE_SLY_MODULE\")\n            logger.setLevel(original_level)",
+   "explanation": "enter() sets the root logger to CRITICAL around a dotenv call and restores it afterwards. If dotenv.get_key raises, the root logger stays at CRITICAL for the whole Slicer session, silencing logs for other extensions. The exposure is small, but it is a global side effect.",
+   "suggestion": "Use try/finally around the dotenv call, or drop the global level change since dotenv.get_key does not need it.",
+   "confidence": "medium"
+  },
+  {
+   "category": "utility",
+   "severity": "info",
+   "title": "No automated tests and no sample data in the repository",
+   "file": "",
+   "line_start": 0,
+   "line_end": 0,
+   "evidence": "",
+   "explanation": "The file list contains no test directory or sample data. Behaviour that touches a live server (login, download, upload, tag and figure sync) cannot be checked by a reviewer or regression-tested. This is a maturity point and is non-blocking under the index policy.",
+   "suggestion": "Add unit tests for the pure helpers in utils.py (requirement parsing, backup/restore) and document a test Supervisely instance or mock for the logic layer.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Full segmentation.py (only lines 1-120 read) and the rest of ui.py-driven logic beyond what was shown.",
+  "README.md and FOR_DEVELOPERS.md were not read, so the documented consent and privacy text was only confirmed through a grep match at README.md:139.",
+  "The transitive dependency tree of supervisely==6.74.48 (whether it pulls in opencv-python, PyQt, or pins numpy/requests) was not verified.",
+  "The source commit 5280d7a was not fetched; all inspection relied on the snapshot in the catalog file listing.",
+  "The .github/workflows/build_installation_files.yml was only grep-matched, not read in full.",
+  "No CI/build results, Slicer version compatibility, or runtime behaviour were verified; nothing was executed."
+ ],
+ "questions_for_author": []
+}
