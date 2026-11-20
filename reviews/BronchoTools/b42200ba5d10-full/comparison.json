@@ -1,0 +1,351 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Depth input selector and parameter are limited to scalar volumes",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py",
+   "line": 180,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Depth input selector and parameter are limited to scalar volumes",
+     "file": "BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py",
+     "line_start": 180,
+     "line_end": 190,
+     "evidence": "    self.inputVolumeSelector = slicer.qMRMLNodeComboBox()\n    self.inputVolumeSelector.nodeTypes = [\"vtkMRMLScalarVolumeNode\"]\n    self.inputVolumeSelector.hideChildNodeTypes = [\"vtkMRMLLabelMapVolumeNode\"]\n    self.inputVolumeSelector.selectNodeUponCreation = True\n    self.inputVolumeSelector.addEnabled = False",
+     "explanation": "The advertised color input and default Video Input output use vtkMRMLVectorVolumeNode, which is not a scalar-volume subtype. Consequently users cannot select the default RGB video output in this selector, despite the conversion logic accepting RGB data; the typed inputVolume parameter likewise names only vtkMRMLScalarVolumeNode. Users can work around this by selecting a scalar output in Video Input, but lose the color workflow.",
+     "suggestion": "Allow scalar and vector volumes in both the selector and parameter-node type, and add an end-to-end UI test with Video Input's default RGB output.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py",
+      "line": 180
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "not a problem (2 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "no",
+     "severity": "info",
+     "rating": null,
+     "reason": "In Slicer's MRML, vtkMRMLVectorVolumeNode derives from vtkMRMLScalarVolumeNode, as do the label map and DWI nodes. A selector with nodeTypes=['vtkMRMLScalarVolumeNode'] (BronchoscopicDepthMapGeneration.py:181) therefore lists vector (RGB) volumes. The code itself relies on this: line 182 uses hideChildNodeTypes to exclude label maps, which only makes sense if subclasses are included. The module's own tests assign vector volumes to the typed parameterNode.inputVolume (lines 1527, 1593). The RGB handling at lines 603 and 876 is consistent with that. VideoInput's default output is a vtkMRMLVectorVolumeNode (VideoInput.py:1287), so it can be selected. I could not run Slicer to confirm; this rests on my knowledge of the class hierarchy and on the code's own usage."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py:180-190 sets `self.inputVolumeSelector.nodeTypes = [\"vtkMRMLScalarVolumeNode\"]` while promising `\"output of the Video Input module. Color images are converted to grayscale.\"`; line 60 also declares `inputVolume: vtkMRMLScalarVolumeNode | None`. VideoInput/VideoInput.py:1283-1289 creates `AddNewNodeByClass(\"vtkMRMLVectorVolumeNode\", ...)` when no output is selected, and lines 1336-1340 show vector is RGB and scalar grayscale. Depth logic accepts 1, 3 or 4 components and converts RGB (BronchoscopicDepthMapGeneration.py:876-890); point-cloud coloring uses the original input (1131-1143). Thus the normal RGB video-to-depth and colored-point-cloud workflow is unavailable via the selector; choosing a grayscale scalar output is a workaround but loses color. This affects a central advertised workflow and should be fixed soon; no runtime test was possible."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "no",
+     "severity": null,
+     "rating": null,
+     "reason": "In 3D Slicer's MRML class hierarchy, vtkMRMLVectorVolumeNode inherits from vtkMRMLDiffusionTensorVolumeNode, which inherits from vtkMRMLScalarVolumeNode. In BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py:181-182, inputVolumeSelector sets nodeTypes = [\"vtkMRMLScalarVolumeNode\"] with showChildNodeTypes left at its default (True) and hideChildNodeTypes = [\"vtkMRMLLabelMapVolumeNode\"]. Because vtkMRMLVectorVolumeNode is a child class of vtkMRMLScalarVolumeNode (unlike outputVolumeSelector at line 198 which explicitly sets showChildNodeTypes = False), both inputVolumeSelector and the parameterNodeWrapper field inputVolume: vtkMRMLScalarVolumeNode | None accept vtkMRMLVectorVolumeNode, as demonstrated by the module's own test at line 1527 (`parameterNode.inputVolume = self.createVolume(colorImage, \"vtkMRMLVectorVolumeNode\", \"ColorImage\")`)."
+    }
+   }
+  },
+  {
+   "title": "Continuous inference executes synchronously in the GUI timer",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py",
+   "line": 1029,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Continuous inference executes synchronously in the GUI timer",
+     "file": "BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py",
+     "line_start": 1029,
+     "line_end": 1034,
+     "evidence": "    self._lastInputKey = inputKey\n    self._lastRunTime = now\n    try:\n      startTime = time.perf_counter()\n      depthMap = self.estimator.predict(self.getInputImage(inputVolume))\n      self.lastInferenceTimeS = time.perf_counter() - startTime",
+     "explanation": "The QTimer callback directly performs model inference, so slow CPU inference or GPU stalls block the Slicer GUI on every processed frame, including the controls needed to stop continuous processing.",
+     "suggestion": "Run inference in a worker with safe transfer of image data and update MRML nodes on the main thread.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py",
+      "line": 1029
+     }
+    }
+   ]
+  },
+  {
+   "title": "Video Input tests install Python packages without confirmation",
+   "category": "environment",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "VideoInput/VideoInput.py",
+   "line": 1413,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "VideoInputTest installs pip packages without confirmation during test execution",
+     "file": "VideoInput/VideoInput.py",
+     "line_start": 1416,
+     "line_end": 1417,
+     "evidence": "    if not self.logic.areDependenciesInstalled():\n      self.assertTrue(self.logic.installDependencies(askConfirmation=False), \"Failed to install Python packages\")",
+     "explanation": "When `VideoInputTest` runs (via \"Reload and Test\" in developer mode or via CTest on build machines), `setUp()` calls `installDependencies(askConfirmation=False)`, which runs `slicer.util.pip_install(['opencv-python-headless', 'cv2_enumerate_cameras'])` without user confirmation. While normal module usage prompts the user before installing, running the test suite modifies Slicer's Python environment without prompting and requires network access on test/build machines.",
+     "suggestion": "Consider skipping the tests (as `BronchoscopicDepthMapGenerationTest` and `EndoluminalPhantomBuilderTest` do when optional dependencies or network access are unavailable) or prompting when run interactively if dependencies are not installed.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified, other lines",
+      "file": "VideoInput/VideoInput.py",
+      "line": 511
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Video Input tests install Python packages without confirmation",
+     "file": "VideoInput/VideoInput.py",
+     "line_start": 1413,
+     "line_end": 1417,
+     "evidence": "  def setUp(self):\n    slicer.mrmlScene.Clear()\n    self.logic = VideoInputLogic()\n    if not self.logic.areDependenciesInstalled():\n      self.assertTrue(self.logic.installDependencies(askConfirmation=False), \"Failed to install Python packages\")",
+     "explanation": "Running Reload and Test or the registered test on a Slicer installation missing these packages silently invokes pip in Slicer's shared environment. This changes the environment beyond the test and could affect other modules.",
+     "suggestion": "Ask before modifying a user's environment, or skip the tests with clear installation instructions when dependencies are missing; prepare test dependencies separately in CI.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "VideoInput/VideoInput.py",
+      "line": 1413
+     }
+    }
+   ]
+  },
+  {
+   "title": "Optional/runtime extension dependencies (PyTorch, SlicerVMTK) not listed in EXTENSION_DEPENDS / build_dependencies",
+   "category": "packaging",
+   "severity": "info",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "info"
+   ],
+   "file": "CMakeLists.txt",
+   "line": 13,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Optional/runtime extension dependencies (PyTorch, SlicerVMTK) not listed in EXTENSION_DEPENDS / build_dependencies",
+     "file": "CMakeLists.txt",
+     "line_start": 13,
+     "line_end": 13,
+     "evidence": "set(EXTENSION_DEPENDS \"NA\") # Specified as a list or \"NA\" if no dependencies",
+     "explanation": "`BronchoscopicDepthMapGeneration` requires PyTorch and checks for `PyTorchUtils` (`BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py` lines 808-818), and `EndoluminalPhantomBuilder` optionally uses `ExtractCenterline` from `SlicerVMTK`. However, `EXTENSION_DEPENDS` in `CMakeLists.txt` is `\"NA\"` and `build_dependencies` in the catalog entry is `[]`. If `PyTorch` (and optionally `SlicerVMTK`) is not listed in `EXTENSION_DEPENDS` and `build_dependencies`, the Slicer Extensions Manager will not automatically install the `PyTorch` extension when a user installs `BronchoTools`, requiring users to read the error dialog and manually install it afterward.",
+     "suggestion": "Consider adding `PyTorch` (and optionally `SlicerVMTK`) to `EXTENSION_DEPENDS` in `CMakeLists.txt` and `build_dependencies` in `BronchoTools.json` so the Extensions Manager installs it automatically when a user installs `BronchoTools`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "CMakeLists.txt",
+      "line": 13
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Depth input selector and parameter are limited to scalar volumes",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py",
+   "line": 180,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Depth input selector and parameter are limited to scalar volumes",
+     "file": "BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py",
+     "line_start": 180,
+     "line_end": 190,
+     "evidence": "    self.inputVolumeSelector = slicer.qMRMLNodeComboBox()\n    self.inputVolumeSelector.nodeTypes = [\"vtkMRMLScalarVolumeNode\"]\n    self.inputVolumeSelector.hideChildNodeTypes = [\"vtkMRMLLabelMapVolumeNode\"]\n    self.inputVolumeSelector.selectNodeUponCreation = True\n    self.inputVolumeSelector.addEnabled = False",
+     "explanation": "The advertised color input and default Video Input output use vtkMRMLVectorVolumeNode, which is not a scalar-volume subtype. Consequently users cannot select the default RGB video output in this selector, despite the conversion logic accepting RGB data; the typed inputVolume parameter likewise names only vtkMRMLScalarVolumeNode. Users can work around this by selecting a scalar output in Video Input, but lose the color workflow.",
+     "suggestion": "Allow scalar and vector volumes in both the selector and parameter-node type, and add an end-to-end UI test with Video Input's default RGB output.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py",
+      "line": 180
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "not a problem (2 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "no",
+     "severity": "info",
+     "rating": null,
+     "reason": "In Slicer's MRML, vtkMRMLVectorVolumeNode derives from vtkMRMLScalarVolumeNode, as do the label map and DWI nodes. A selector with nodeTypes=['vtkMRMLScalarVolumeNode'] (BronchoscopicDepthMapGeneration.py:181) therefore lists vector (RGB) volumes. The code itself relies on this: line 182 uses hideChildNodeTypes to exclude label maps, which only makes sense if subclasses are included. The module's own tests assign vector volumes to the typed parameterNode.inputVolume (lines 1527, 1593). The RGB handling at lines 603 and 876 is consistent with that. VideoInput's default output is a vtkMRMLVectorVolumeNode (VideoInput.py:1287), so it can be selected. I could not run Slicer to confirm; this rests on my knowledge of the class hierarchy and on the code's own usage."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py:180-190 sets `self.inputVolumeSelector.nodeTypes = [\"vtkMRMLScalarVolumeNode\"]` while promising `\"output of the Video Input module. Color images are converted to grayscale.\"`; line 60 also declares `inputVolume: vtkMRMLScalarVolumeNode | None`. VideoInput/VideoInput.py:1283-1289 creates `AddNewNodeByClass(\"vtkMRMLVectorVolumeNode\", ...)` when no output is selected, and lines 1336-1340 show vector is RGB and scalar grayscale. Depth logic accepts 1, 3 or 4 components and converts RGB (BronchoscopicDepthMapGeneration.py:876-890); point-cloud coloring uses the original input (1131-1143). Thus the normal RGB video-to-depth and colored-point-cloud workflow is unavailable via the selector; choosing a grayscale scalar output is a workaround but loses color. This affects a central advertised workflow and should be fixed soon; no runtime test was possible."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "no",
+     "severity": null,
+     "rating": null,
+     "reason": "In 3D Slicer's MRML class hierarchy, vtkMRMLVectorVolumeNode inherits from vtkMRMLDiffusionTensorVolumeNode, which inherits from vtkMRMLScalarVolumeNode. In BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py:181-182, inputVolumeSelector sets nodeTypes = [\"vtkMRMLScalarVolumeNode\"] with showChildNodeTypes left at its default (True) and hideChildNodeTypes = [\"vtkMRMLLabelMapVolumeNode\"]. Because vtkMRMLVectorVolumeNode is a child class of vtkMRMLScalarVolumeNode (unlike outputVolumeSelector at line 198 which explicitly sets showChildNodeTypes = False), both inputVolumeSelector and the parameterNodeWrapper field inputVolume: vtkMRMLScalarVolumeNode | None accept vtkMRMLVectorVolumeNode, as demonstrated by the module's own test at line 1527 (`parameterNode.inputVolume = self.createVolume(colorImage, \"vtkMRMLVectorVolumeNode\", \"ColorImage\")`)."
+    }
+   }
+  },
+  {
+   "title": "Rating of soundness",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D2",
+   "rating_dispute": {
+    "claude": "unknown",
+    "gemini": "ok",
+    "gpt": "concern"
+   },
+   "outcome": "still disputed (concern, ok)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "no",
+     "severity": "info",
+     "rating": null,
+     "reason": "I found no confirmed soundness defect in the part I read. The disputed D1 finding is not real, because vector volumes are scalar-volume subclasses. The module is a ScriptedLoadableModule with a parameterNodeWrapper and a throttled frame rate, and it has in-module tests (lines ~1290-1600). I did not audit the whole 1666-line file, so ok is based on the parts I read."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": null,
+     "rating": "concern",
+     "reason": "Inspected the three module entry points, depth parameter binding, processing and cleanup, Video Input frame output, and phantom UI error handling. The D1 incompatibility affects the default video/depth integration and RGB point-cloud coloring: depth selector is scalar-only (BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py:180-190), while VideoInput/VideoInput.py:1283-1289 creates a vector output by default. In addition, depth prediction runs synchronously in the timer callback: `depthMap = self.estimator.predict(self.getInputImage(inputVolume))` (BronchoscopicDepthMapGeneration.py:1029-1034), potentially making the interface unresponsive on slow inference. There are mitigating conventions: parameter-node GUI binding and observer cleanup (same file:427-470), explicit error reporting for phantom operations (EndoluminalPhantomBuilder/EndoluminalPhantomBuilder.py:583-588), and a worker thread for video sources (VideoInput/VideoInput.py:761-770). A concern rather than ok or unknown is justified by the demonstrated integration defect; tests and actual GUI responsiveness were not run."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Across BronchoscopicDepthMapGeneration/BronchoscopicDepthMapGeneration.py, VideoInput/VideoInput.py, and EndoluminalPhantomBuilder/EndoluminalPhantomBuilder.py, the modules follow Slicer ScriptedLoadableModule conventions, use parameterNodeWrapper, defer heavy imports, clean up observers/timers properly, and include comprehensive unit tests. The concern raised in D1 is a false positive because vtkMRMLVectorVolumeNode is a subclass of vtkMRMLScalarVolumeNode in Slicer."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "environment": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  },
+  "packaging": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "unknown",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "no concerns",
+  "gpt": "incomplete"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 2,
+  "single": 3,
+  "unverified": 0,
+  "total": 4,
+  "open_disputes": 1
+ }
+}
