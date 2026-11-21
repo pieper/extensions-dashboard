@@ -1,0 +1,64 @@
+{
+ "purpose": "Tarvos (MyocardialPerfusionImaging) is a 3D Slicer extension for nuclear medicine clinicians and researchers to process and review myocardial perfusion SPECT and PET studies. It provides a guided six-step workflow covering study role assignment, cardiac axis reorientation (SA, HLA, VLA), automatic left ventricular wall segmentation, static stress/rest perfusion review with polar maps and TID, gated quality control, and cine gated review with wall thickening, motion, regional EF, and LV volume curves.",
+ "summary": "Tarvos (`MyocardialPerfusionImaging`) is a well-written, self-contained 3D Slicer extension for myocardial perfusion SPECT and PET analysis under the MIT license. It has no security concerns, no external pip dependencies, and good documentation with a clear non-clinical disclaimer. One packaging issue should be fixed: `MyocardialPerfusionImaging/CMakeLists.txt` and `MyocardialPerfusionImaging.py` reference `Resources/Images/banner.jpg` (lowercase), whereas the file in the repository is `Resources/Images/Banner.jpg` (uppercase), which will cause CMake build failures on case-sensitive Linux filesystems. Additionally, deferring toolbar creation from Slicer startup (`startupCompleted()`) to module entry is recommended.\n\n🟢 Recommend merge (admission requirements met; fixing the `Banner.jpg` case mismatch is strongly recommended so Linux factory builds succeed).",
+ "overall": "minor issues",
+ "ratings": {
+  "safety": {
+   "rating": "ok",
+   "rationale": "Searched and inspected all Python and CMake files for network calls, subprocess execution, dynamic code evaluation, deserialization, and file operations. All computations and DICOM/scene exports operate locally on user-selected folders or temporary files using standard `pydicom` and Slicer APIs; no unsafe behavior or prompt injection was found."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "Reviewed all module entry points and `MyocardialPerfusionImagingLib`. The extension does not install any external Python packages or modify core packages, relying only on bundled `numpy`, `vtk`, `qt`, `ctk`, and `pydicom`. However, it connects a `startupCompleted()` handler at import time that creates hidden `QToolBar` instances and attaches `mrmlScene` observers globally at Slicer startup even when the module is never opened."
+  },
+  "packaging": {
+   "rating": "concern",
+   "rationale": "Inspected top-level `CMakeLists.txt`, `MyocardialPerfusionImaging/CMakeLists.txt`, and the catalog JSON entry. `EXTENSION_DEPENDS` (`DICOMSpectRecon PET4D`) matches `build_dependencies`, and all 6 step modules and library submodules are listed in `CMakeLists.txt`. However, `MyocardialPerfusionImaging/CMakeLists.txt` references `Resources/Images/banner.jpg` while the file on disk is `Resources/Images/Banner.jpg`, which will fail on case-sensitive Linux builds."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "Inspected `LICENSE` and `README.md`. The repository is licensed under a standard MIT License (Copyright (c) 2026 Burak Demir) with no conflicting third-party code or restricted weights bundled."
+  },
+  "soundness": {
+   "rating": "ok",
+   "rationale": "Inspected the hub module, step modules (`MPIGated.py`, `MyocardialPerfusionImaging.py`), and `MyocardialPerfusionImagingLib` modules (`session.py`, `views.py`, `toolbar.py`, `parameters.py`, `dicomexport.py`, `colortables.py`, `widgets.py`). The code is well-structured, uses `VTKObservationMixin` and cleans up observers, handles exceptions gracefully with user-facing error dialogs, and includes unit tests for core algorithms and hub behavior."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "Inspected `README.md` and module help texts. The extension provides a comprehensive, well-documented myocardial perfusion SPECT/PET workflow with clear instructions, screenshots, unit tests, and an explicit research-use clinical disclaimer."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "major",
+   "title": "Case mismatch for Resources/Images/banner.jpg vs Banner.jpg breaks builds on case-sensitive filesystems",
+   "file": "MyocardialPerfusionImaging/CMakeLists.txt",
+   "line_start": 25,
+   "line_end": 29,
+   "evidence": "set(MODULE_PYTHON_RESOURCES\n  Resources/Icons/${MODULE_NAME}.png\n  Resources/Images/banner.jpg\n  Resources/Images/logo.png\n  )",
+   "explanation": "`MyocardialPerfusionImaging/CMakeLists.txt` lists `Resources/Images/banner.jpg` (lowercase `b`) in `MODULE_PYTHON_RESOURCES`, and `MyocardialPerfusionImaging/MyocardialPerfusionImaging.py` line 50 looks up `Resources/Images/banner.jpg`. However, the file committed in the repository is `MyocardialPerfusionImaging/Resources/Images/Banner.jpg` (uppercase `B`). On case-sensitive filesystems (such as Linux, where Slicer extensions are built and packaged on the Linux factory), CMake's `slicerMacroBuildScriptedModule` will fail to find `Resources/Images/banner.jpg` during configuration/installation, breaking the Linux build.",
+   "suggestion": "Rename `MyocardialPerfusionImaging/Resources/Images/Banner.jpg` to `MyocardialPerfusionImaging/Resources/Images/banner.jpg` (or update both `MyocardialPerfusionImaging/CMakeLists.txt` and `MyocardialPerfusionImaging/MyocardialPerfusionImaging.py` to match the exact filename case).",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Toolbar and MRML scene observers are installed globally at Slicer startup",
+   "file": "MyocardialPerfusionImaging/MyocardialPerfusionImaging.py",
+   "line_start": 78,
+   "line_end": 79,
+   "evidence": "        if not slicer.app.commandOptions().noMainWindow:\n            slicer.app.connect(\"startupCompleted()\", _installToolbar)",
+   "explanation": "Every module in this extension (`MyocardialPerfusionImaging.py` and the step modules) connects `_installToolbar` to `startupCompleted()`, which instantiates `WorkflowToolbar` (`MyocardialPerfusionImagingLib/toolbar.py` lines 278-324) at Slicer startup for all users, even if the user never opens the Myocardial Perfusion Imaging module. While the toolbar hides itself when another module is active, `WorkflowToolbar.__init__` also attaches persistent `EndCloseEvent` and `EndImportEvent` observers to `slicer.mrmlScene` that call `resetToStart()`. `resetToStart()` creates/modifies a singleton `vtkMRMLScriptedModuleNode` (`MPISession`) in the scene on every scene import or close across the entire Slicer session. Creating toolbar widgets and scene observers should be deferred until the user actually enters the module.",
+   "suggestion": "Install the workflow toolbar and register scene observers lazily when `MyocardialPerfusionImagingWidget.enter()` (or `setup()`) is first called rather than on Slicer's `startupCompleted()` signal.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Binary image contents of Branding/Tarvos_logo.png and MyocardialPerfusionImaging/Resources/Images/logo.png (2 MB each)",
+  "Runtime execution in 3D Slicer with sample SPECT/PET datasets"
+ ],
+ "questions_for_author": [
+  "Could you rename `MyocardialPerfusionImaging/Resources/Images/Banner.jpg` to `banner.jpg` so that CMake configuration succeeds on case-sensitive Linux filesystems?"
+ ]
+}

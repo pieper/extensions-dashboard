@@ -1,0 +1,112 @@
+{
+ "purpose": "DeformView generates displacement-magnitude and local-volume-change maps from registration transforms in 3D Slicer. It is intended for researchers and other users interpreting non-linear deformation and registration results.",
+ "summary": "The extension has useful documentation and analytic tests, but opening it can remove unrelated scene nodes, and recomputing maps can overwrite earlier results. Both are concrete data-loss risks. Temporary transform files can also remain after errors. 🔴 Do not merge yet: fix the scene-data loss and complete revision verification.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "I inspected scene-node removal, map loading and restoration, transform manipulation, temporary-file handling, and searched the source for network and execution APIs. Two paths can delete or overwrite user scene data; temporary transform files can survive failures."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "The installed module imports Slicer-provided libraries and I found no package installation in the searched source. On opening the module it replaces the process-wide VTK output window and resets default color nodes; cleanup also removes other observers."
+  },
+  "packaging": {
+   "rating": "unknown",
+   "rationale": "The source CMake lists the main module, imported test module and UI resource, and its dependency declaration matches the provided entry. I could not independently resolve the main branch to the supplied commit, build the extension, or verify the reported repository size."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "LICENSE.txt grants MIT distribution rights for the software and documentation. I did not find a runtime model or external payload in the inspected paths."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "I inspected computation, incremental scaling, map loading, and cleanup. In addition to the data-loss findings, incremental scaling modifies the input transform and is unavailable for transform types without SetDisplacementScale."
+  },
+  "utility": {
+   "rating": "minor",
+   "rationale": "README.md describes usage and the intermediate Jacobian approximation, and DeformViewTesting.py contains synthetic analytic tests; these were not run. The advertised incremental feature is not available for every accepted transform type."
+  }
+ },
+ "findings": [
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Opening the module removes any scene node named JacobianMap",
+   "file": "DeformView/DeformView.py",
+   "line_start": 235,
+   "line_end": 240,
+   "evidence": "        self.enableVTKErrorTracking()\n\n        self.cleanupDuplicateColorNodes(\"JacobianMap\")\n        self.removeAllNamedNode(\"JacobianMap\")\n\n        self.resetBuiltInColorNodes()",
+   "explanation": "During widget setup, removeAllNamedNode is called on a generic name. Its implementation at lines 688–707 removes every matching node without checking its class or ownership, so an unrelated unsaved image, segmentation, or other scene node named JacobianMap is deleted simply by opening DeformView.",
+   "suggestion": "Manage only color nodes created by this extension, using a unique ownership attribute or stored node reference; never remove arbitrary same-named scene nodes.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Recomputing maps can overwrite a previous result volume",
+   "file": "DeformView/DeformView.py",
+   "line_start": 2191,
+   "line_end": 2197,
+   "evidence": "        # Find the volume by suffix\n        scene = slicer.mrmlScene\n        for i in range(scene.GetNumberOfNodesByClass(\"vtkMRMLScalarVolumeNode\")):\n            node = scene.GetNthNodeByClass(i, \"vtkMRMLScalarVolumeNode\")\n            if node.GetName() and suffix in node.GetName():\n                selectedVolume = node\n                break",
+   "explanation": "After a new computation, onLoadDisplacementVolume selects the first matching scene volume rather than the newly created one. Lines 2233–2253 then copy the newly computed array into that selected volume: if an older result has the same voxel count, its data is silently overwritten; if counts differ, the assignment can fail. This also applies to Jacobian maps when loaded.",
+   "suggestion": "Keep explicit references to the newly computed output nodes and only restore arrays to their corresponding nodes after checking geometry; never select writable outputs by name substring.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "major",
+   "title": "Temporary transform files remain on disk when saving or reading fails",
+   "file": "DeformView/DeformView.py",
+   "line_start": 3215,
+   "line_end": 3222,
+   "evidence": "        # Write computed transform to temporary .h5 file\n        with tempfile.NamedTemporaryFile(suffix=\".h5\", delete=False) as tmp:\n            tmpPath = tmp.name\n\n        slicer.util.saveNode(transformNode, tmpPath)\n\n        # Read into SimpleITK\n        itkTx = sitk.ReadTransform(tmpPath)",
+   "explanation": "Removal at line 3225 is reached only after a successful read. A save or read error leaves the potentially patient-related registration transform in the system temporary directory indefinitely; the Jacobian and incremental paths have the same pattern.",
+   "suggestion": "Use a finally block or a temporary directory context to remove every temporary transform on success and failure, and check saveNode's return value.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "major",
+   "title": "Increment slider changes the user's shared input transform",
+   "file": "DeformView/DeformView.py",
+   "line_start": 1262,
+   "line_end": 1264,
+   "evidence": "        # Apply the scale to the transform (updates spatial positions)\n        bsplineTransform.SetDisplacementScale(scale)\n        transformNode.Modified()",
+   "explanation": "Changing the slider alters the selected transform itself rather than a display-only copy. Other scene nodes using this transform are also changed, and saving the scene while it is at an intermediate setting may preserve an unintended registration; selecting 0% actually applies 0.0001 rather than zero.",
+   "suggestion": "Apply scaling to an extension-owned transform or resampled display copy, preserving the user's original transform and its prior scale.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Cleanup removes other modules' crosshair observers",
+   "file": "DeformView/DeformView.py",
+   "line_start": 1934,
+   "line_end": 1937,
+   "evidence": "        crosshairNode = slicer.mrmlScene.GetFirstNodeByClass('vtkMRMLCrosshairNode')\n        if crosshairNode:\n            crosshairNode.RemoveAllObservers()\n            # print(\"Removed all crosshair observers\")",
+   "explanation": "The crosshair is shared by Slicer and other modules. Removing all its observers on cleanup can disable unrelated crosshair-dependent behavior, including during module reload.",
+   "suggestion": "Remove only observer tags registered by DeformView.",
+   "confidence": "high"
+  },
+  {
+   "category": "utility",
+   "severity": "minor",
+   "title": "Increment slider supports fewer transforms than the documented workflow suggests",
+   "file": "DeformView/DeformView.py",
+   "line_start": 1238,
+   "line_end": 1246,
+   "evidence": "        # Check if it has SetDisplacementScale method\n        if not hasattr(bsplineTransform, 'SetDisplacementScale'):\n            transformType = bsplineTransform.GetClassName()\n            \n            slicer.util.warningDisplay(\n                f\"Incremental Scaling Not Supported\\n\\n\"\n                f\"The current transform type ({transformType}) does not support incremental scaling.\\n\\n\"\n                f\"Incremental scaling is only available for B-spline transforms.\\n\\n\"\n                f\"The slider has been disabled.\"",
+   "explanation": "The module accepts general transform nodes, but the GUI disables incremental scaling when the underlying transform lacks this method. The README describes the slider without this restriction, and the analytic incremental test exercises a separate logic method rather than this UI path.",
+   "suggestion": "Document the restriction or implement the slider for the other accepted transform types; add a GUI-path test.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "Could not run Slicer, build the extension, or execute the analytic or UI tests.",
+  "Could not independently access the remote repository, resolve main to the supplied commit 7ca647fe4d6550c5fa07939d3e10f7da8431dd17, inspect a prior revision, or check CI results.",
+  "Could not verify the reported 233 MB repository size or inspect unavailable binary images and repository history.",
+  "The large main module was searched and relevant sections read, but not every line was independently audited; external dependencies and payloads were not fetched. The PyQt5 import is in an uninstalled generated UI file, while the installed module loads the .ui resource directly."
+ ],
+ "questions_for_author": []
+}

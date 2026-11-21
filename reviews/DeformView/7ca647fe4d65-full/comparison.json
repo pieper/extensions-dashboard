@@ -1,0 +1,1149 @@
+{
+ "reviewers": [
+  "claude",
+  "gemini",
+  "gpt"
+ ],
+ "items": [
+  {
+   "title": "Opening the module removes any scene node named JacobianMap",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 235,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Opening the module removes any scene node named JacobianMap",
+     "file": "DeformView/DeformView.py",
+     "line_start": 235,
+     "line_end": 240,
+     "evidence": "        self.enableVTKErrorTracking()\n\n        self.cleanupDuplicateColorNodes(\"JacobianMap\")\n        self.removeAllNamedNode(\"JacobianMap\")\n\n        self.resetBuiltInColorNodes()",
+     "explanation": "During widget setup, removeAllNamedNode is called on a generic name. Its implementation at lines 688–707 removes every matching node without checking its class or ownership, so an unrelated unsaved image, segmentation, or other scene node named JacobianMap is deleted simply by opening DeformView.",
+     "suggestion": "Manage only color nodes created by this extension, using a unique ownership attribute or stored node reference; never remove arbitrary same-named scene nodes.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 235
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "DeformView.py:237-238 calls removeAllNamedNode('JacobianMap'); lines 683-707 collect all nodes by name (any class) and RemoveNode them. Real, but the name is the extension's own color-map name, so a collision requires a user node deliberately named JacobianMap. Not a concrete blocking harm; a minor soundness issue."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:121-123 says setup is called on first opening; lines 237-238 call `self.cleanupDuplicateColorNodes(\"JacobianMap\")` and `self.removeAllNamedNode(\"JacobianMap\")`. Lines 688 and 700-707 use `allNodes = slicer.mrmlScene.GetNodesByName(nodeName)`, append every result, then `slicer.mrmlScene.RemoveNode(node)` without a class or ownership check. An unrelated unsaved node with that exact name can be lost merely by opening the module."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py:238, `self.removeAllNamedNode(\"JacobianMap\")` is called during widget setup. In lines 683-707, `removeAllNamedNode` retrieves `slicer.mrmlScene.GetNodesByName(nodeName)` and removes every matching node from the scene regardless of node class (`vtkMRMLColorTableNode` vs other nodes). However, because it only affects nodes literally named \"JacobianMap\" (the exact name used by this module's custom color node at line 715), the practical risk of accidental user data loss is low; it is a minor soundness/cleanup bug rather than a blocking safety vulnerability."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Recomputing maps can overwrite a previous result volume",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 2191,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Recomputing maps can overwrite a previous result volume",
+     "file": "DeformView/DeformView.py",
+     "line_start": 2191,
+     "line_end": 2197,
+     "evidence": "        # Find the volume by suffix\n        scene = slicer.mrmlScene\n        for i in range(scene.GetNumberOfNodesByClass(\"vtkMRMLScalarVolumeNode\")):\n            node = scene.GetNthNodeByClass(i, \"vtkMRMLScalarVolumeNode\")\n            if node.GetName() and suffix in node.GetName():\n                selectedVolume = node\n                break",
+     "explanation": "After a new computation, onLoadDisplacementVolume selects the first matching scene volume rather than the newly created one. Lines 2233–2253 then copy the newly computed array into that selected volume: if an older result has the same voxel count, its data is silently overwritten; if counts differ, the assignment can fail. This also applies to Jacobian maps when loaded.",
+     "suggestion": "Keep explicit references to the newly computed output nodes and only restore arrays to their corresponding nodes after checking geometry; never select writable outputs by name substring.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 2191
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 2191-2197 break on the first scalar volume whose name contains the suffix, which is the oldest if results exist. Lines 2233-2255 write the stored full array into it with numpy_scalars[:] = ..., so a same-size older result is overwritten or a size mismatch raises. Real ordinary bug affecting only derived output volumes (names are built at 3246/3353), not a safety issue."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:2073-2094 creates new maps and saves copies of their arrays; lines 2143-2145 call `self.onLoadDisplacementVolume(flag=0)`. Lines 2193-2197 select the first scalar node whose name contains the suffix, and lines 2233-2239 assign `numpy_scalars[:] = self._fullDisplacementArray`. Thus an older or unrelated suffix-matching volume can be silently overwritten, including one with different geometry but equal scalar count; incompatible array sizes can instead fail. Lines 2245-2251 do the analogous Jacobian assignment when loaded. This is unintended destruction of existing scene data, not merely an incorrect display."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py:2084-2145, computing maps creates new volumes via `AddNewNodeByClass`, stores their voxel arrays in `self._fullDisplacementArray` and `self._fullJacobianArray` (lines 2090-2095), and then calls `self.onLoadDisplacementVolume(flag=0)` (line 2145). In `onLoadDisplacementVolume` (lines 2192-2197), it loops over `vtkMRMLScalarVolumeNode` in the scene and picks the first node matching `_displacementMagnitude` or `_jacobianMagnitude` by substring, then copies `self._fullDisplacementArray` or `self._fullJacobianArray` into `selectedVolume` (lines 2233-2255). If an earlier computed result volume exists in the scene, it matches first and gets overwritten (or raises a broadcast ValueError if dimensions differ). This is a real logic bug affecting the module's own generated output volumes, making it a minor/major soundness issue rather than a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Increment slider changes the user's shared input transform",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 1262,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Increment slider changes the user's shared input transform",
+     "file": "DeformView/DeformView.py",
+     "line_start": 1262,
+     "line_end": 1264,
+     "evidence": "        # Apply the scale to the transform (updates spatial positions)\n        bsplineTransform.SetDisplacementScale(scale)\n        transformNode.Modified()",
+     "explanation": "Changing the slider alters the selected transform itself rather than a display-only copy. Other scene nodes using this transform are also changed, and saving the scene while it is at an intermediate setting may preserve an unintended registration; selecting 0% actually applies 0.0001 rather than zero.",
+     "suggestion": "Apply scaling to an extension-owned transform or resampled display copy, preserving the user's original transform and its prior scale.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 1262
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 1262-1264 call SetDisplacementScale on the parameter node's transform in place, and 0 maps to 0.0001 (1219-1220). Load at 2223-2230 resets to 1.0. This is the tool's intended interactive behavior, though it mutates the user's transform node. Soundness minor."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:370 connects `self.ui.incrementalSlider.valueChanged.connect(self.onIncrementalChanged)`; lines 1217-1224 read the selected parameter-node transform and substitute `scale = 0.0001` for zero. Lines 1262-1264 call `bsplineTransform.SetDisplacementScale(scale)` and `transformNode.Modified()` on that shared node. Other nodes using the supported transform change too, and an intermediate state can be saved. Severity is major for unintended effects on shared registration state, not a blanket clinical-harm claim."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py:1218-1264, `onIncrementalSliderChanged` sets `scale = 0.0001` when `scale == 0`, gets `transformNode = self._parameterNode.transformNode` and `bsplineTransform = transformNode.GetTransformFromParent()`, and directly calls `bsplineTransform.SetDisplacementScale(scale)` and `transformNode.Modified()`. This mutates the selected transform node in place in the scene."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Replaces global VTK output window singleton when module UI is opened",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 454,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Replaces global VTK output window singleton when module UI is opened",
+     "file": "DeformView/DeformView.py",
+     "line_start": 454,
+     "line_end": 456,
+     "evidence": "        # Add observer to VTK output window\n        errorObserver = vtk.vtkFileOutputWindow()\n        vtk.vtkOutputWindow.SetInstance(errorObserver)",
+     "explanation": "When `DeformViewWidget.setup()` runs, `enableVTKErrorTracking()` replaces Slicer's global `vtkOutputWindow` singleton with a default `vtkFileOutputWindow()`. This redirects all subsequent VTK warnings and errors across the entire Slicer session away from Slicer's error log into a local file in the current working directory.",
+     "suggestion": "Remove `enableVTKErrorTracking()` or do not replace the global `vtk.vtkOutputWindow` instance.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 454
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Lines 455-456 create a vtkFileOutputWindow and call vtkOutputWindow.SetInstance, called from setup() at line 235. This replaces the global output window, so VTK messages go to a log file (default vtkMessageLog.log) instead of Slicer's error log for the whole session. The errorCallback returned is never used. It is a global side effect, but not harmful to data."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:235 calls `self.enableVTKErrorTracking()` during setup; lines 454-456 create `errorObserver = vtk.vtkFileOutputWindow()` and call `vtk.vtkOutputWindow.SetInstance(errorObserver)`. This replaces a process-global VTK output instance and risks interfering with other modules' diagnostics; the callback is not attached here. The repository code alone does not establish the default filename, that every message reaches a local file, or exactly how Slicer's error log behaves in the targeted VTK build."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py:235, `setup()` calls `self.enableVTKErrorTracking()`. At lines 454-456, `enableVTKErrorTracking()` creates `errorObserver = vtk.vtkFileOutputWindow()` and calls `vtk.vtkOutputWindow.SetInstance(errorObserver)`, replacing Slicer's global VTK output window singleton for the entire process."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Temporary transform files remain on disk when saving or reading fails",
+   "category": "safety",
+   "severity": "major",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "info"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 3215,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "info",
+     "title": "Temporary transform file leaks if saving or reading fails",
+     "file": "DeformView/DeformView.py",
+     "line_start": 3219,
+     "line_end": 3225,
+     "evidence": "slicer.util.saveNode(transformNode, tmpPath)\n\n        # Read into SimpleITK\n        itkTx = sitk.ReadTransform(tmpPath)\n\n        # Clean up\n        os.remove(tmpPath)",
+     "explanation": "The temp .h5 file is removed only on the success path. If saveNode or ReadTransform raises, the file stays in the temp folder.",
+     "suggestion": "Wrap the calls in try/finally, or use a TemporaryDirectory.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 3219
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Temporary transform files remain on disk when saving or reading fails",
+     "file": "DeformView/DeformView.py",
+     "line_start": 3215,
+     "line_end": 3222,
+     "evidence": "        # Write computed transform to temporary .h5 file\n        with tempfile.NamedTemporaryFile(suffix=\".h5\", delete=False) as tmp:\n            tmpPath = tmp.name\n\n        slicer.util.saveNode(transformNode, tmpPath)\n\n        # Read into SimpleITK\n        itkTx = sitk.ReadTransform(tmpPath)",
+     "explanation": "Removal at line 3225 is reached only after a successful read. A save or read error leaves the potentially patient-related registration transform in the system temporary directory indefinitely; the Jacobian and incremental paths have the same pattern.",
+     "suggestion": "Use a finally block or a temporary directory context to remove every temporary transform on success and failure, and check saveNode's return value.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 3215
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, info (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "info",
+     "rating": null,
+     "reason": "Lines 3216-3225, 3311-3320 and 3471-3478 create a NamedTemporaryFile(delete=False) and remove it only after a successful read (no try/finally). Leftover files occur only on error, and the file lives in the OS temp dir, so the impact is small."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:3215-3225 creates a `NamedTemporaryFile(suffix=\".h5\", delete=False)`, calls `slicer.util.saveNode(transformNode, tmpPath)` and `sitk.ReadTransform(tmpPath)`, and only then calls `os.remove(tmpPath)`, without a finally block. The same pattern appears at lines 3311-3320 and 3471-3478. A failed save/read can leave an empty, partial or complete patient-related transform in the system temp directory until externally cleaned; actual identifiers, permissions and indefinite persistence are not established. Use finally cleanup."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "info",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py:3216-3225 (and similarly in `computeJacobianVolume` and incremental sequence creation), `tempfile.NamedTemporaryFile(suffix=\".h5\", delete=False)` is used and `os.remove(tmpPath)` is called without a `try...finally` block. If `saveNode` or `sitk.ReadTransform` raises an exception, the `.h5` file remains in the user's local system temp directory. Leaving a temp file in the local OS temp folder on exception is a minor cleanup issue, not a major safety risk."
+    }
+   },
+   "settled_severity": "info"
+  },
+  {
+   "title": "cleanup() removes all observers from the shared vtkMRMLCrosshairNode",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 1934,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "cleanup() removes all observers from the shared vtkMRMLCrosshairNode",
+     "file": "DeformView/DeformView.py",
+     "line_start": 1934,
+     "line_end": 1936,
+     "evidence": "        crosshairNode = slicer.mrmlScene.GetFirstNodeByClass('vtkMRMLCrosshairNode')\n        if crosshairNode:\n            crosshairNode.RemoveAllObservers()",
+     "explanation": "In `DeformViewWidget.cleanup()`, calling `crosshairNode.RemoveAllObservers()` removes all observers on the shared crosshair node, not just the observer added by `DeformView` (which is already removed via `self.crosshairObserverTag` immediately above). This can break other Slicer modules or built-in components (such as DataProbe) that observe crosshair movements.",
+     "suggestion": "Remove the `crosshairNode.RemoveAllObservers()` call and rely solely on `self.crosshairNode.RemoveObserver(self.crosshairObserverTag)`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 1934
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Cleanup removes other modules' crosshair observers",
+     "file": "DeformView/DeformView.py",
+     "line_start": 1934,
+     "line_end": 1937,
+     "evidence": "        crosshairNode = slicer.mrmlScene.GetFirstNodeByClass('vtkMRMLCrosshairNode')\n        if crosshairNode:\n            crosshairNode.RemoveAllObservers()\n            # print(\"Removed all crosshair observers\")",
+     "explanation": "The crosshair is shared by Slicer and other modules. Removing all its observers on cleanup can disable unrelated crosshair-dependent behavior, including during module reload.",
+     "suggestion": "Remove only observer tags registered by DeformView.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 1934
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 1934-1936 call RemoveAllObservers() on the first vtkMRMLCrosshairNode in cleanup, after the module's own observer was removed at 1929-1932. This can drop other observers on a shared node. Real, but it only happens on cleanup or reload and is a soundness issue."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:1916-1918 identifies widget cleanup; lines 1929-1932 remove the module's own tagged observer. Lines 1934-1936 then get the shared node and call `crosshairNode.RemoveAllObservers()`, including observers owned by other components. This can disrupt their crosshair-dependent behavior on widget destruction or reload; a particular component failure is not demonstrated. Remove only owned observer tags."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py:1929-1936, `cleanup()` already removes `self.crosshairObserverTag` from `self.crosshairNode`, and then fetches the shared `vtkMRMLCrosshairNode` and calls `crosshairNode.RemoveAllObservers()`, stripping observers registered by Slicer core (e.g. DataProbe) or other modules."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Increment slider supports fewer transforms than the documented workflow suggests",
+   "category": "utility",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 1238,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Increment slider supports fewer transforms than the documented workflow suggests",
+     "file": "DeformView/DeformView.py",
+     "line_start": 1238,
+     "line_end": 1246,
+     "evidence": "        # Check if it has SetDisplacementScale method\n        if not hasattr(bsplineTransform, 'SetDisplacementScale'):\n            transformType = bsplineTransform.GetClassName()\n            \n            slicer.util.warningDisplay(\n                f\"Incremental Scaling Not Supported\\n\\n\"\n                f\"The current transform type ({transformType}) does not support incremental scaling.\\n\\n\"\n                f\"Incremental scaling is only available for B-spline transforms.\\n\\n\"\n                f\"The slider has been disabled.\"",
+     "explanation": "The module accepts general transform nodes, but the GUI disables incremental scaling when the underlying transform lacks this method. The README describes the slider without this restriction, and the analytic incremental test exercises a separate logic method rather than this UI path.",
+     "suggestion": "Document the restriction or implement the slider for the other accepted transform types; add a GUI-path test.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 1238
+     }
+    }
+   ]
+  },
+  {
+   "title": "Orphaned display node created in scene on every volume load",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 2274,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Orphaned display node created in scene on every volume load",
+     "file": "DeformView/DeformView.py",
+     "line_start": 2274,
+     "line_end": 2280,
+     "evidence": "        persistentDisplayNode = selectedVolume.GetDisplayNode()\n\n        internalDisplayNode = slicer.mrmlScene.AddNewNodeByClass(persistentDisplayNode.GetClassName())\n\n        #internalDisplayNode.Copy(persistentDisplayNode)\n        internalDisplayNode = persistentDisplayNode\n        selectedVolume.AddAndObserveDisplayNodeID(internalDisplayNode.GetID())",
+     "explanation": "Each call to `onLoadDisplacementVolume` creates a new display node in the MRML scene via `AddNewNodeByClass`, then immediately overwrites the `internalDisplayNode` variable with `persistentDisplayNode`, leaving an orphaned, unused display node in the scene every time a volume is loaded.",
+     "suggestion": "Remove the unused `slicer.mrmlScene.AddNewNodeByClass(persistentDisplayNode.GetClassName())` call.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 2274
+     }
+    }
+   ]
+  },
+  {
+   "title": "Repository size exceeds 100 MB guideline",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": null,
+   "line": null,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "Repository size exceeds 100 MB guideline",
+     "file": "",
+     "line_start": null,
+     "line_end": null,
+     "evidence": "",
+     "explanation": "The automated scan reports 233 MB. The visible binary files total about 10 MB, so the bulk is probably git history or large images. This slows cloning for the index build.",
+     "suggestion": "Check for large files in the history. Move the figures to releases or shrink them.",
+     "confidence": "low",
+     "verification": {
+      "status": "no quote",
+      "file": null,
+      "line": null
+     }
+    }
+   ]
+  },
+  {
+   "title": "Reset Window/Level button handler expects a volume node instead of a clicked(bool) signal argument",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 301,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Reset Window/Level button handler expects a volume node instead of a clicked(bool) signal argument",
+     "file": "DeformView/DeformView.py",
+     "line_start": 301,
+     "line_end": 301,
+     "evidence": "        self.ui.resetWindowLevelButton.connect('clicked(bool)', self.onResetWindowLevel)",
+     "explanation": "`resetWindowLevelButton`'s `clicked(bool)` signal passes a boolean (`False`) as the first argument to `onResetWindowLevel(self, volumeNode)`. When `self.defaultWindow` and `self.defaultLevel` are set, `onResetWindowLevel` calls `volumeNode.GetDisplayNode()` on `False`, raising `AttributeError: 'bool' object has no attribute 'GetDisplayNode'`. Note also that `self.defaultWindow` and `self.defaultLevel` are never assigned (only `self.defaultWindow_DisplacementMag` / `self.defaultWindow_Jacobian` are assigned), so clicking the button currently re-runs `initializeWindowLevelControls` instead of resetting as intended.",
+     "suggestion": "Change `onResetWindowLevel` to accept `checked=False` and retrieve `volumeNode = self.ui.loadedTransformVolume.currentNode()`, and check `self.defaultWindow_DisplacementMag` rather than `self.defaultWindow`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 301
+     }
+    }
+   ]
+  },
+  {
+   "title": "Typo in windowLevelFlagUpdate assigns defaultLevel_Jacobian to window",
+   "category": "soundness",
+   "severity": "minor",
+   "kind": "single",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "minor"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 2763,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "minor",
+     "title": "Typo in windowLevelFlagUpdate assigns defaultLevel_Jacobian to window",
+     "file": "DeformView/DeformView.py",
+     "line_start": 2763,
+     "line_end": 2765,
+     "evidence": "        elif flag == 1: #Jacobian\n            window = self.defaultLevel_Jacobian\n            level = self.defaultLevel_Jacobian",
+     "explanation": "In `windowLevelFlagUpdate`, when `flag == 1` (Jacobian), `window` is assigned `self.defaultLevel_Jacobian` instead of `self.defaultWindow_Jacobian`.",
+     "suggestion": "Use `window = self.defaultWindow_Jacobian`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 2763
+     }
+    }
+   ]
+  },
+  {
+   "title": "Unused generated PyQt5 UI file and dev script shipped in module folder",
+   "category": "packaging",
+   "severity": "minor",
+   "kind": "partial",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini"
+   ],
+   "severities": [
+    "minor",
+    "info"
+   ],
+   "file": "DeformView/Resources/UI/DeformView_ui.py",
+   "line": 11,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "minor",
+     "title": "Unused generated PyQt5 UI file and dev script shipped in module folder",
+     "file": "DeformView/Resources/UI/DeformView_ui.py",
+     "line_start": 11,
+     "line_end": 11,
+     "evidence": "from PyQt5 import QtCore, QtGui, QtWidgets",
+     "explanation": "Resources/UI/DeformView_ui.py imports PyQt5. It is not installed by CMake and is not imported by the module, so it is harmless in the built extension. It is stale pyuic output (with an absolute path to the author's machine) and would fail if anyone imported it in Slicer.",
+     "suggestion": "Delete the file from the repository.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/Resources/UI/DeformView_ui.py",
+      "line": 11
+     }
+    },
+    {
+     "reviewer": "gemini",
+     "severity": "info",
+     "title": "Unused pyuic5-generated file and repository size cleanup",
+     "file": "DeformView/Resources/UI/DeformView_ui.py",
+     "line_start": 11,
+     "line_end": 11,
+     "evidence": "from PyQt5 import QtCore, QtGui, QtWidgets",
+     "explanation": "`DeformView/Resources/UI/DeformView_ui.py` is an unused `pyuic5`-generated file importing `PyQt5` and `DeformView/DeformView_shift_check.py` is a standalone console helper script. Neither is installed by CMake or imported by the module, and the repository git history may also contain large historical blobs (automated check noted 233 MB repo size, though the working tree is ~7.5 MB). Cleaning up unused generated files and any large historical git objects is recommended.",
+     "suggestion": "Remove the unused `DeformView/Resources/UI/DeformView_ui.py` file and prune any large unreferenced objects from git history if applicable.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/Resources/UI/DeformView_ui.py",
+      "line": 11
+     }
+    }
+   ]
+  }
+ ],
+ "dispute_items": [
+  {
+   "title": "Opening the module removes any scene node named JacobianMap",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 235,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Opening the module removes any scene node named JacobianMap",
+     "file": "DeformView/DeformView.py",
+     "line_start": 235,
+     "line_end": 240,
+     "evidence": "        self.enableVTKErrorTracking()\n\n        self.cleanupDuplicateColorNodes(\"JacobianMap\")\n        self.removeAllNamedNode(\"JacobianMap\")\n\n        self.resetBuiltInColorNodes()",
+     "explanation": "During widget setup, removeAllNamedNode is called on a generic name. Its implementation at lines 688–707 removes every matching node without checking its class or ownership, so an unrelated unsaved image, segmentation, or other scene node named JacobianMap is deleted simply by opening DeformView.",
+     "suggestion": "Manage only color nodes created by this extension, using a unique ownership attribute or stored node reference; never remove arbitrary same-named scene nodes.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 235
+     }
+    }
+   ],
+   "id": "D1",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "DeformView.py:237-238 calls removeAllNamedNode('JacobianMap'); lines 683-707 collect all nodes by name (any class) and RemoveNode them. Real, but the name is the extension's own color-map name, so a collision requires a user node deliberately named JacobianMap. Not a concrete blocking harm; a minor soundness issue."
+    },
+    "gpt": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:121-123 says setup is called on first opening; lines 237-238 call `self.cleanupDuplicateColorNodes(\"JacobianMap\")` and `self.removeAllNamedNode(\"JacobianMap\")`. Lines 688 and 700-707 use `allNodes = slicer.mrmlScene.GetNodesByName(nodeName)`, append every result, then `slicer.mrmlScene.RemoveNode(node)` without a class or ownership check. An unrelated unsaved node with that exact name can be lost merely by opening the module."
+    },
+    "gemini": {
+     "item": "D1",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py:238, `self.removeAllNamedNode(\"JacobianMap\")` is called during widget setup. In lines 683-707, `removeAllNamedNode` retrieves `slicer.mrmlScene.GetNodesByName(nodeName)` and removes every matching node from the scene regardless of node class (`vtkMRMLColorTableNode` vs other nodes). However, because it only affects nodes literally named \"JacobianMap\" (the exact name used by this module's custom color node at line 715), the practical risk of accidental user data loss is low; it is a minor soundness/cleanup bug rather than a blocking safety vulnerability."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Recomputing maps can overwrite a previous result volume",
+   "category": "safety",
+   "severity": "blocking",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "blocking"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 2191,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "blocking",
+     "title": "Recomputing maps can overwrite a previous result volume",
+     "file": "DeformView/DeformView.py",
+     "line_start": 2191,
+     "line_end": 2197,
+     "evidence": "        # Find the volume by suffix\n        scene = slicer.mrmlScene\n        for i in range(scene.GetNumberOfNodesByClass(\"vtkMRMLScalarVolumeNode\")):\n            node = scene.GetNthNodeByClass(i, \"vtkMRMLScalarVolumeNode\")\n            if node.GetName() and suffix in node.GetName():\n                selectedVolume = node\n                break",
+     "explanation": "After a new computation, onLoadDisplacementVolume selects the first matching scene volume rather than the newly created one. Lines 2233–2253 then copy the newly computed array into that selected volume: if an older result has the same voxel count, its data is silently overwritten; if counts differ, the assignment can fail. This also applies to Jacobian maps when loaded.",
+     "suggestion": "Keep explicit references to the newly computed output nodes and only restore arrays to their corresponding nodes after checking geometry; never select writable outputs by name substring.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 2191
+     }
+    }
+   ],
+   "id": "D2",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 2191-2197 break on the first scalar volume whose name contains the suffix, which is the oldest if results exist. Lines 2233-2255 write the stored full array into it with numpy_scalars[:] = ..., so a same-size older result is overwritten or a size mismatch raises. Real ordinary bug affecting only derived output volumes (names are built at 3246/3353), not a safety issue."
+    },
+    "gpt": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "blocking",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:2073-2094 creates new maps and saves copies of their arrays; lines 2143-2145 call `self.onLoadDisplacementVolume(flag=0)`. Lines 2193-2197 select the first scalar node whose name contains the suffix, and lines 2233-2239 assign `numpy_scalars[:] = self._fullDisplacementArray`. Thus an older or unrelated suffix-matching volume can be silently overwritten, including one with different geometry but equal scalar count; incompatible array sizes can instead fail. Lines 2245-2251 do the analogous Jacobian assignment when loaded. This is unintended destruction of existing scene data, not merely an incorrect display."
+    },
+    "gemini": {
+     "item": "D2",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py:2084-2145, computing maps creates new volumes via `AddNewNodeByClass`, stores their voxel arrays in `self._fullDisplacementArray` and `self._fullJacobianArray` (lines 2090-2095), and then calls `self.onLoadDisplacementVolume(flag=0)` (line 2145). In `onLoadDisplacementVolume` (lines 2192-2197), it loops over `vtkMRMLScalarVolumeNode` in the scene and picks the first node matching `_displacementMagnitude` or `_jacobianMagnitude` by substring, then copies `self._fullDisplacementArray` or `self._fullJacobianArray` into `selectedVolume` (lines 2233-2255). If an earlier computed result volume exists in the scene, it matches first and gets overwritten (or raises a broadcast ValueError if dimensions differ). This is a real logic bug affecting the module's own generated output volumes, making it a minor/major soundness issue rather than a blocking safety issue."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Increment slider changes the user's shared input transform",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gpt"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 1262,
+   "findings": [
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Increment slider changes the user's shared input transform",
+     "file": "DeformView/DeformView.py",
+     "line_start": 1262,
+     "line_end": 1264,
+     "evidence": "        # Apply the scale to the transform (updates spatial positions)\n        bsplineTransform.SetDisplacementScale(scale)\n        transformNode.Modified()",
+     "explanation": "Changing the slider alters the selected transform itself rather than a display-only copy. Other scene nodes using this transform are also changed, and saving the scene while it is at an intermediate setting may preserve an unintended registration; selecting 0% actually applies 0.0001 rather than zero.",
+     "suggestion": "Apply scaling to an extension-owned transform or resampled display copy, preserving the user's original transform and its prior scale.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 1262
+     }
+    }
+   ],
+   "id": "D3",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 1262-1264 call SetDisplacementScale on the parameter node's transform in place, and 0 maps to 0.0001 (1219-1220). Load at 2223-2230 resets to 1.0. This is the tool's intended interactive behavior, though it mutates the user's transform node. Soundness minor."
+    },
+    "gpt": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:370 connects `self.ui.incrementalSlider.valueChanged.connect(self.onIncrementalChanged)`; lines 1217-1224 read the selected parameter-node transform and substitute `scale = 0.0001` for zero. Lines 1262-1264 call `bsplineTransform.SetDisplacementScale(scale)` and `transformNode.Modified()` on that shared node. Other nodes using the supported transform change too, and an intermediate state can be saved. Severity is major for unintended effects on shared registration state, not a blanket clinical-harm claim."
+    },
+    "gemini": {
+     "item": "D3",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py:1218-1264, `onIncrementalSliderChanged` sets `scale = 0.0001` when `scale == 0`, gets `transformNode = self._parameterNode.transformNode` and `bsplineTransform = transformNode.GetTransformFromParent()`, and directly calls `bsplineTransform.SetDisplacementScale(scale)` and `transformNode.Modified()`. This mutates the selected transform node in place in the scene."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Replaces global VTK output window singleton when module UI is opened",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "single",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini"
+   ],
+   "severities": [
+    "major"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 454,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "Replaces global VTK output window singleton when module UI is opened",
+     "file": "DeformView/DeformView.py",
+     "line_start": 454,
+     "line_end": 456,
+     "evidence": "        # Add observer to VTK output window\n        errorObserver = vtk.vtkFileOutputWindow()\n        vtk.vtkOutputWindow.SetInstance(errorObserver)",
+     "explanation": "When `DeformViewWidget.setup()` runs, `enableVTKErrorTracking()` replaces Slicer's global `vtkOutputWindow` singleton with a default `vtkFileOutputWindow()`. This redirects all subsequent VTK warnings and errors across the entire Slicer session away from Slicer's error log into a local file in the current working directory.",
+     "suggestion": "Remove `enableVTKErrorTracking()` or do not replace the global `vtk.vtkOutputWindow` instance.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 454
+     }
+    }
+   ],
+   "id": "D4",
+   "outcome": "real, major (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "Lines 455-456 create a vtkFileOutputWindow and call vtkOutputWindow.SetInstance, called from setup() at line 235. This replaces the global output window, so VTK messages go to a log file (default vtkMessageLog.log) instead of Slicer's error log for the whole session. The errorCallback returned is never used. It is a global side effect, but not harmful to data."
+    },
+    "gpt": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:235 calls `self.enableVTKErrorTracking()` during setup; lines 454-456 create `errorObserver = vtk.vtkFileOutputWindow()` and call `vtk.vtkOutputWindow.SetInstance(errorObserver)`. This replaces a process-global VTK output instance and risks interfering with other modules' diagnostics; the callback is not attached here. The repository code alone does not establish the default filename, that every message reaches a local file, or exactly how Slicer's error log behaves in the targeted VTK build."
+    },
+    "gemini": {
+     "item": "D4",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py:235, `setup()` calls `self.enableVTKErrorTracking()`. At lines 454-456, `enableVTKErrorTracking()` creates `errorObserver = vtk.vtkFileOutputWindow()` and calls `vtk.vtkOutputWindow.SetInstance(errorObserver)`, replacing Slicer's global VTK output window singleton for the entire process."
+    }
+   },
+   "settled_severity": "major"
+  },
+  {
+   "title": "Temporary transform files remain on disk when saving or reading fails",
+   "category": "safety",
+   "severity": "major",
+   "kind": "severity dispute",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "info"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 3215,
+   "findings": [
+    {
+     "reviewer": "claude",
+     "severity": "info",
+     "title": "Temporary transform file leaks if saving or reading fails",
+     "file": "DeformView/DeformView.py",
+     "line_start": 3219,
+     "line_end": 3225,
+     "evidence": "slicer.util.saveNode(transformNode, tmpPath)\n\n        # Read into SimpleITK\n        itkTx = sitk.ReadTransform(tmpPath)\n\n        # Clean up\n        os.remove(tmpPath)",
+     "explanation": "The temp .h5 file is removed only on the success path. If saveNode or ReadTransform raises, the file stays in the temp folder.",
+     "suggestion": "Wrap the calls in try/finally, or use a TemporaryDirectory.",
+     "confidence": "medium",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 3219
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "major",
+     "title": "Temporary transform files remain on disk when saving or reading fails",
+     "file": "DeformView/DeformView.py",
+     "line_start": 3215,
+     "line_end": 3222,
+     "evidence": "        # Write computed transform to temporary .h5 file\n        with tempfile.NamedTemporaryFile(suffix=\".h5\", delete=False) as tmp:\n            tmpPath = tmp.name\n\n        slicer.util.saveNode(transformNode, tmpPath)\n\n        # Read into SimpleITK\n        itkTx = sitk.ReadTransform(tmpPath)",
+     "explanation": "Removal at line 3225 is reached only after a successful read. A save or read error leaves the potentially patient-related registration transform in the system temporary directory indefinitely; the Jacobian and incremental paths have the same pattern.",
+     "suggestion": "Use a finally block or a temporary directory context to remove every temporary transform on success and failure, and check saveNode's return value.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 3215
+     }
+    }
+   ],
+   "id": "D5",
+   "outcome": "real, info (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "info",
+     "rating": null,
+     "reason": "Lines 3216-3225, 3311-3320 and 3471-3478 create a NamedTemporaryFile(delete=False) and remove it only after a successful read (no try/finally). Leftover files occur only on error, and the file lives in the OS temp dir, so the impact is small."
+    },
+    "gpt": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:3215-3225 creates a `NamedTemporaryFile(suffix=\".h5\", delete=False)`, calls `slicer.util.saveNode(transformNode, tmpPath)` and `sitk.ReadTransform(tmpPath)`, and only then calls `os.remove(tmpPath)`, without a finally block. The same pattern appears at lines 3311-3320 and 3471-3478. A failed save/read can leave an empty, partial or complete patient-related transform in the system temp directory until externally cleaned; actual identifiers, permissions and indefinite persistence are not established. Use finally cleanup."
+    },
+    "gemini": {
+     "item": "D5",
+     "real": "yes",
+     "severity": "info",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py:3216-3225 (and similarly in `computeJacobianVolume` and incremental sequence creation), `tempfile.NamedTemporaryFile(suffix=\".h5\", delete=False)` is used and `os.remove(tmpPath)` is called without a `try...finally` block. If `saveNode` or `sitk.ReadTransform` raises an exception, the `.h5` file remains in the user's local system temp directory. Leaving a temp file in the local OS temp folder on exception is a minor cleanup issue, not a major safety risk."
+    }
+   },
+   "settled_severity": "info"
+  },
+  {
+   "title": "cleanup() removes all observers from the shared vtkMRMLCrosshairNode",
+   "category": "soundness",
+   "severity": "major",
+   "kind": "partial",
+   "disputed": true,
+   "unverified": false,
+   "raised_by": [
+    "gemini",
+    "gpt"
+   ],
+   "severities": [
+    "major",
+    "minor"
+   ],
+   "file": "DeformView/DeformView.py",
+   "line": 1934,
+   "findings": [
+    {
+     "reviewer": "gemini",
+     "severity": "major",
+     "title": "cleanup() removes all observers from the shared vtkMRMLCrosshairNode",
+     "file": "DeformView/DeformView.py",
+     "line_start": 1934,
+     "line_end": 1936,
+     "evidence": "        crosshairNode = slicer.mrmlScene.GetFirstNodeByClass('vtkMRMLCrosshairNode')\n        if crosshairNode:\n            crosshairNode.RemoveAllObservers()",
+     "explanation": "In `DeformViewWidget.cleanup()`, calling `crosshairNode.RemoveAllObservers()` removes all observers on the shared crosshair node, not just the observer added by `DeformView` (which is already removed via `self.crosshairObserverTag` immediately above). This can break other Slicer modules or built-in components (such as DataProbe) that observe crosshair movements.",
+     "suggestion": "Remove the `crosshairNode.RemoveAllObservers()` call and rely solely on `self.crosshairNode.RemoveObserver(self.crosshairObserverTag)`.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 1934
+     }
+    },
+    {
+     "reviewer": "gpt",
+     "severity": "minor",
+     "title": "Cleanup removes other modules' crosshair observers",
+     "file": "DeformView/DeformView.py",
+     "line_start": 1934,
+     "line_end": 1937,
+     "evidence": "        crosshairNode = slicer.mrmlScene.GetFirstNodeByClass('vtkMRMLCrosshairNode')\n        if crosshairNode:\n            crosshairNode.RemoveAllObservers()\n            # print(\"Removed all crosshair observers\")",
+     "explanation": "The crosshair is shared by Slicer and other modules. Removing all its observers on cleanup can disable unrelated crosshair-dependent behavior, including during module reload.",
+     "suggestion": "Remove only observer tags registered by DeformView.",
+     "confidence": "high",
+     "verification": {
+      "status": "verified",
+      "file": "DeformView/DeformView.py",
+      "line": 1934
+     }
+    }
+   ],
+   "id": "D6",
+   "outcome": "real, minor (3 of 3)",
+   "positions": {
+    "claude": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "Lines 1934-1936 call RemoveAllObservers() on the first vtkMRMLCrosshairNode in cleanup, after the module's own observer was removed at 1929-1932. This can drop other observers on a shared node. Real, but it only happens on cleanup or reload and is a soundness issue."
+    },
+    "gpt": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "minor",
+     "rating": null,
+     "reason": "DeformView/DeformView.py:1916-1918 identifies widget cleanup; lines 1929-1932 remove the module's own tagged observer. Lines 1934-1936 then get the shared node and call `crosshairNode.RemoveAllObservers()`, including observers owned by other components. This can disrupt their crosshair-dependent behavior on widget destruction or reload; a particular component failure is not demonstrated. Remove only owned observer tags."
+    },
+    "gemini": {
+     "item": "D6",
+     "real": "yes",
+     "severity": "major",
+     "rating": null,
+     "reason": "In DeformView/DeformView.py:1929-1936, `cleanup()` already removes `self.crosshairObserverTag` from `self.crosshairNode`, and then fetches the shared `vtkMRMLCrosshairNode` and calls `crosshairNode.RemoveAllObservers()`, stripping observers registered by Slicer core (e.g. DataProbe) or other modules."
+    }
+   },
+   "settled_severity": "minor"
+  },
+  {
+   "title": "Rating of safety",
+   "category": "safety",
+   "severity": "major",
+   "kind": "rating dispute",
+   "disputed": false,
+   "unverified": false,
+   "raised_by": [
+    "claude",
+    "gemini",
+    "gpt"
+   ],
+   "severities": [],
+   "file": null,
+   "line": null,
+   "findings": [],
+   "id": "D7",
+   "rating_dispute": {
+    "claude": "ok",
+    "gemini": "ok",
+    "gpt": "blocking"
+   },
+   "outcome": "still disputed (blocking, ok)",
+   "positions": {
+    "claude": {
+     "item": "D7",
+     "real": "no",
+     "severity": "info",
+     "rating": null,
+     "reason": "I found no network access, downloads, exec/eval or data exfiltration in the examined code. The issues are ordinary bugs: node removal by name, temp-file cleanup, and global VTK output window and crosshair observer handling. None gives a concrete path to serious harm, so safety is ok or at most minor. The blocking rating is overstated. I did not audit every file."
+    },
+    "gpt": {
+     "item": "D7",
+     "real": "yes",
+     "severity": null,
+     "rating": "blocking",
+     "reason": "Safety is blocking based on verified unintended scene data loss and corruption, not on a demonstrated data exfiltration. DeformView/DeformView.py:237-238 calls `self.removeAllNamedNode(\"JacobianMap\")`; lines 688-707 remove every exact-name match regardless of ownership. Lines 2193-2197 and 2233-2239 also select an existing suffix-matching scalar volume and overwrite its array. I inspected these paths and searched for network, execution and file-deletion APIs; I could not run Slicer or independently verify the exact source revision or external payloads."
+    },
+    "gemini": {
+     "item": "D7",
+     "real": "yes",
+     "severity": null,
+     "rating": "ok",
+     "reason": "Inspected DeformView/DeformView.py around all reported items. There is no malicious behavior, network communication, unsafe deserialization, or arbitrary user file destruction. The issues raised under safety by gpt (D1 removing nodes named 'JacobianMap', D2 overwriting previously computed `_displacementMagnitude` volumes in the scene, D5 leaving a `.h5` file in temp on error) are ordinary module correctness/cleanup bugs without a concrete path to serious harm."
+    }
+   }
+  }
+ ],
+ "disputes": [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7"
+ ],
+ "matrix": {
+  "safety": {
+   "claude": "ok",
+   "gemini": "ok",
+   "gpt": "blocking"
+  },
+  "environment": {
+   "claude": "ok",
+   "gemini": "ok",
+   "gpt": "minor"
+  },
+  "packaging": {
+   "claude": "minor",
+   "gemini": "ok",
+   "gpt": "unknown"
+  },
+  "license": {
+   "claude": "ok",
+   "gemini": "ok",
+   "gpt": "ok"
+  },
+  "soundness": {
+   "claude": "minor",
+   "gemini": "minor",
+   "gpt": "concern"
+  },
+  "utility": {
+   "claude": "ok",
+   "gemini": "ok",
+   "gpt": "minor"
+  }
+ },
+ "overall": {
+  "claude": "minor issues",
+  "gemini": "minor issues",
+  "gpt": "needs fixes"
+ },
+ "counts": {
+  "consensus": 0,
+  "disputed": 7,
+  "single": 9,
+  "unverified": 0,
+  "total": 12,
+  "open_disputes": 1
+ }
+}

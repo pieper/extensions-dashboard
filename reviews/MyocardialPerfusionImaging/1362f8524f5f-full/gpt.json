@@ -1,0 +1,112 @@
+{
+ "purpose": "Tarvos provides a 3D Slicer workflow for reviewing myocardial perfusion SPECT and PET studies, including cardiac reorientation, wall detection, polar maps, and gated functional measurements. It is intended for researchers working with reconstructed cardiac imaging data.",
+ "summary": "The source contains a build-breaking resource filename mismatch on case-sensitive systems and two export paths that can unintentionally disclose or overwrite data. The documented workflow, research-use notice, MIT license, and synthetic tests are useful, but the build and tests could not be run. The catalog's moving branch, external dependencies, and exact source revision could not be independently verified. 🔴 Do not merge yet: fix the resource path and export safety issues, and verify the selected revision and dependencies.",
+ "overall": "needs fixes",
+ "ratings": {
+  "safety": {
+   "rating": "blocking",
+   "rationale": "I inspected the DICOM and screenshot export paths, patient grouping, and repository-wide searches for network, process execution, deserialization, and file deletion. Scene export can include unrelated patient data under a single patient's DICOM identity, and secondary screenshot files can overwrite existing files without confirmation."
+  },
+  "environment": {
+   "rating": "minor",
+   "rationale": "I inspected module imports, startup toolbar installation, settings migration, and searched for package installation and environment changes. The module prepends its directory to the shared Python path at import; I found no pip installation in the available source."
+  },
+  "packaging": {
+   "rating": "blocking",
+   "rationale": "I compared both CMake files with the available file listing and the supplied catalog dependencies. CMake requests a lowercase banner filename, but the available file is named Banner.jpg; the source revision and dependency repositories could not be independently resolved."
+  },
+  "license": {
+   "rating": "ok",
+   "rationale": "The root LICENSE grants MIT distribution permission. I did not independently audit external extensions or binary image provenance."
+  },
+  "soundness": {
+   "rating": "concern",
+   "rationale": "I inspected gated processing, export handling, settings, and representative tests. Gated frame segmentation runs synchronously from the UI without progress, and the regional EF tooltip contradicts the default setting."
+  },
+  "utility": {
+   "rating": "ok",
+   "rationale": "The README provides a workflow guide and a research-use warning, and the module scripts contain synthetic tests. I did not verify clinical validation, maintenance history, or a complete real-data workflow."
+  }
+ },
+ "findings": [
+  {
+   "category": "packaging",
+   "severity": "blocking",
+   "title": "CMake references a resource with the wrong filename case",
+   "file": "MyocardialPerfusionImaging/CMakeLists.txt",
+   "line_start": 25,
+   "line_end": 28,
+   "evidence": "set(MODULE_PYTHON_RESOURCES\n  Resources/Icons/${MODULE_NAME}.png\n  Resources/Images/banner.jpg\n  Resources/Images/logo.png",
+   "explanation": "The available repository listing contains Resources/Images/Banner.jpg, not banner.jpg. On case-sensitive filesystems the build macro cannot find the listed banner resource, preventing the extension from building or packaging; the hub also looks for the lowercase name.",
+   "suggestion": "Rename the file to banner.jpg or consistently change both the CMake entry and runtime path to the actual filename; verify a Linux build.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "DICOM scene export can file unrelated patient data under one patient",
+   "file": "MyocardialPerfusionImaging/MyocardialPerfusionImagingLib/dicomexport.py",
+   "line_start": 389,
+   "line_end": 394,
+   "evidence": "def exportScene(folder):\n    \"\"\"The whole scene as a Slicer Data Bundle DICOM file in folder. Returns ([path], reference node or None, added\n    to the database).\"\"\"\n    import DICOMLib\n    slicer = _slicer()\n    tags, fileName, reference = exportTags()",
+   "explanation": "The exporter packs the entire Slicer scene but selects one reference patient's DICOM identity. The mixed-patient scan in case.py explicitly excludes studies assigned role None, whereas those nodes remain in the scene. If an unrelated patient's study is present or excluded, exporting the scene and sending it from the DICOM browser can disclose that patient's images and identifiers inside a bundle filed under the selected patient, without a specific warning about the excluded data.",
+   "suggestion": "Export a patient-scoped scene or inspect all scene contents, including excluded and unidentifiable nodes, and block or obtain explicit informed confirmation before writing a mixed-patient DICOM bundle.",
+   "confidence": "high"
+  },
+  {
+   "category": "safety",
+   "severity": "blocking",
+   "title": "Second-monitor screenshot can overwrite an existing file without confirmation",
+   "file": "MyocardialPerfusionImaging/MyocardialPerfusionImagingLib/dicomexport.py",
+   "line_start": 545,
+   "line_end": 550,
+   "evidence": "        root = path[:-4]\n        paths = []\n        for number, (_, image) in enumerate(grabs, start=1):\n            target = path if number == 1 else f\"{root}_{number}.png\"\n            if not image.save(target, \"PNG\"):\n                raise ExportError(f\"Could not write {target}.\")",
+   "explanation": "The save dialog only selects and checks the first path. When a second monitor window is captured, the automatically constructed _2.png path can already exist, and saving it overwrites that unrelated prior screenshot without an overwrite confirmation.",
+   "suggestion": "Check every generated output path before writing and ask before replacing any existing file, or use collision-free filenames.",
+   "confidence": "high"
+  },
+  {
+   "category": "environment",
+   "severity": "minor",
+   "title": "Module directory is inserted into the shared Python import path",
+   "file": "MyocardialPerfusionImaging/MyocardialPerfusionImaging.py",
+   "line_start": 34,
+   "line_end": 36,
+   "evidence": "_MODULE_DIR = os.path.dirname(os.path.abspath(globals().get(\"__file__\", \"\") or \".\"))\nif globals().get(\"__file__\") and _MODULE_DIR not in sys.path:\n    sys.path.insert(0, _MODULE_DIR)",
+   "explanation": "Loading the extension changes import precedence for the whole Slicer process, including other extensions, and can cause name collisions if another module uses the same top-level names.",
+   "suggestion": "Use Slicer's normal module paths and uniquely named packages without prepending to sys.path, where possible.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Gated segmentation runs synchronously without per-frame progress",
+   "file": "MyocardialPerfusionImaging/MPIGatedQC.py",
+   "line_start": 243,
+   "line_end": 249,
+   "evidence": "        for label, node in gates:\n            array = slicer.util.arrayFromVolume(node).astype(np.float32)\n            matrix = worldToIjk(node, self.study)\n            spacing = node.GetSpacing()\n            try:\n                # on the gate masked like the static volume the wall was detected on (liver and gut out)\n                result = wallLib.fitGate(sampler(array, matrix, mask, center), staticResult, params)",
+   "explanation": "The UI's show() calls gatedStudy().build() synchronously, fitting and reslicing each frame before returning to the event loop. For large gated sequences the interface can appear frozen, with no per-frame progress or cancellation.",
+   "suggestion": "Move computation off the GUI thread where safe, or provide responsive per-frame progress and cancellation.",
+   "confidence": "high"
+  },
+  {
+   "category": "soundness",
+   "severity": "minor",
+   "title": "Regional EF tooltip misstates the default reference",
+   "file": "MyocardialPerfusionImaging/MPIGated.py",
+   "line_start": 630,
+   "line_end": 634,
+   "evidence": "            \"rings into wedges from the long axis out to the endocardium, between the valve plane and the LV \"\n            \"center (so a basal wedge also shrinks as the valve plane descends), and on the apex into cones from \"\n            \"the LV center. Floating (default): every frame's own LV center and epicardial apex, since with a \"\n            \"fixed center a heart that moves as a whole makes the wedges on one side grow and on the other shrink \"\n            \"(a 4 mm shift changes them by tens of %). Fixed: the static fit's LV center and axis. Myocardium mass \"",
+   "explanation": "DEFAULT_EF_REFERENCE is actually 'fixed', and the combo selects that constant. A user relying on the tooltip may believe whole-heart motion is removed when the selected fixed reference instead incorporates that motion into regional EF.",
+   "suggestion": "Align the displayed default, the constant, and the documented interpretation.",
+   "confidence": "high"
+  }
+ ],
+ "not_checked": [
+  "No commands, builds, Slicer runtime tests, or automated CI results were available.",
+  "The supplied commit 1362f8524f5fb6be045df440c5c2dce4db77467e and catalog branch main could not be independently resolved or compared; the exact revision of the provided file snapshot is unverified.",
+  "The DICOMSpectRecon and PET4D source, transitive dependencies, and distribution terms were not accessible for inspection.",
+  "Binary images, real patient datasets, clinical validation, prior review baseline, and submission checklist were not inspected."
+ ],
+ "questions_for_author": []
+}
